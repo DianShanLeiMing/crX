@@ -1,0 +1,120 @@
+# crX
+
+基于 [py-clash-bot](https://github.com/pyclashbot/py-clash-bot) 精简的《皇室战争》桌面自动化工具。
+主要支持 Windows 上的 MuMu 模拟器，同时保留通用 ADB 设备连接。
+
+## 环境与启动
+
+使用 **Python 3.12 + uv**。依赖安装在本项目 `.venv` 内，不向全局 Python 安装包。
+
+```powershell
+Set-Location E:\MyWork\crX
+uv sync --python 3.12 --locked
+uv run python -m crX
+```
+
+`uv` 可管理独立的 Python 3.12 解释器；无需替换系统中已有的其他 Python 版本。
+
+GitHub 自动检查配置保存在 [docs/ci/checks.yml.example](docs/ci/checks.yml.example)。
+首次上传使用的 GitHub 凭证缺少 `workflow` 权限，因此暂以模板保留，未启用 Actions。
+有相应权限后，将其放入 `.github/workflows/checks.yml` 并提交，即可在推送和 PR 时执行离线检查。
+
+需要构建 Windows 安装包时，构建依赖也安装到本项目环境：
+
+```powershell
+uv run --group build scripts/setup_msi.py bdist_msi --target-version 0.1.0
+```
+
+## 使用 MuMu
+
+1. 安装 MuMu，并在 MuMu 中创建一个实例。
+2. 在该实例安装《皇室战争》，完成登录和教程。
+3. 启动 crX，进入 **设备** 页，选择 **MuMu**。
+4. 路径默认自动发现；查找失败时，可在 **高级设置** 中指定 MuMu 安装目录 / `MuMuManager.exe`。
+5. 点击 **刷新设备**，选择已有实例的编号；**连接／检查** 用于验证启动、连接与截图。
+6. 在 **任务** 页启用任务，然后点击 **启动**。
+
+客户端固定为国服 `com.tencent.tmgp.supercell.clashroyale`，启动、停止和恢复均使用该包名。
+国服中文界面已验证启动进入主界面及战后确认按钮，其他识别素材与完整对战流程尚未全部验证。
+客户端选择规则与实机记录见 [docs/client-detection.md](docs/client-detection.md)。
+
+MuMu 适配通过本地 `MuMuManager.exe` 查询和启动选定实例，并读取其实际 ADB 端口。
+游戏控制统一使用 ADB：截图、点击、滑动和应用启动。一次只操作一个实例。
+不创建、克隆或删除实例，不关闭其他实例，也不全局重启 ADB 服务。
+
+首次开始任务会检查游戏是否安装，然后配置选定设备为 **419×633、160 DPI**。
+游戏进入前台后检查实际截图尺寸。现有识别基于固定坐标和 BGR 像素，没有任意分辨率缩放。
+**恢复默认分辨率** 可清除该设备的分辨率和 DPI 覆盖。
+
+**通用 ADB** 模式要求用户自行启动设备并开启调试；多个设备在线或需主动连接时填写设备序列号或地址。
+ADB 路径可指向 Android SDK 的 `adb.exe`，或留空使用 PATH 中的 ADB。
+
+## 执行局数
+
+在 **任务 → 运行控制 → 执行局数** 中填写本次启动要完成的对战数量。
+`0` 表示不限，支持 0–10000；例如填写 `5`，各模式合计完成 5 局后自动停止。
+仅在结算处理成功并返回主界面后计数，匹配失败、恢复重试、商店领取不计入。
+**统计 → 已完成局数** 显示本次进度，关闭胜负统计不影响局数控制。
+异常恢复保留当前进度；每次重新点击 **启动** 从零计数，配置的目标局数会保存。
+仅启用商店领取时，该局数设置不限制商店检查。
+
+## 保留功能
+
+- Trophy Road、Classic 1v1、Classic 2v2，多模式按启用顺序轮换。
+- 原有规则出牌、随机出牌及英雄/冠军技能触发。
+- 指定卡组随机化、已有卡组轮换；两种方式互斥。
+- 每日商店免费领取，可单独启用；成功检查后每小时再检查一次。
+- 胜负、胜率、出牌数、卡组与运行统计，本地日志。
+- 可选对战录制、归档、自定义录制目录、存储大小查看和手动清理。
+- GUI 主题和配置持久化。
+
+已移除卡牌养成、公主塔升级、部落操作、部落战、多账号、Discord，
+以及 MEmu、BlueStacks、Google Play Games 的专用适配。
+
+## 录制与数据目录
+
+仅录制 Trophy Road 和 Classic 1v1，不录制 2v2。
+每局保存无损视频或 PNG 帧、`plays.jsonl` 和 `manifest.json`，保留原有 `pcb-pack/v1` 数据格式。
+目标采样率为 3 fps，实际速率取决于 ADB 截图速度。
+约 5 GiB 的散装数据会归入 ZIP；归档用于整理，并非显著压缩或限制总存储空间。
+磁盘可用空间不足 10% 时跳过新录制。
+
+Windows 默认目录为 `%APPDATA%\crX`：
+
+```text
+crX/
+├── user_settings.json
+├── logs/
+└── recordings/
+    ├── <每局数据包>/
+    └── zips/
+```
+
+配置和日志与原项目隔离，不读取旧版 pickle 设置。
+Stop 使用操作系统终止工作进程，正在录制的一局可能留下未完成的数据包。
+正常完成的对局会写入动作与结果；中途停止的包应视为不完整数据。
+
+## 检查与测试
+
+```powershell
+uv run ruff check .
+uv run ruff format --check .
+uv run ty check
+uv run pytest -q
+```
+
+默认只执行离线测试。需要已安装游戏的真实设备才能运行以下实机测试，测试会执行导航和对战：
+
+```powershell
+uv run pytest -x -s --integration --emulator mumu
+# 或连接已启动的通用 ADB 设备
+uv run pytest -x -s --integration --emulator adb --adb-serial 127.0.0.1:实际端口
+```
+
+本机验证结果与尚未验证的部分见 [docs/validation.md](docs/validation.md)。
+架构说明见 [docs/architecture.md](docs/architecture.md)。
+
+## 来源与许可
+
+保留原项目的源码和素材许可，详见 [LICENSE](LICENSE) 与 [NOTICE.md](NOTICE.md)。
+本项目为独立派生工程，不代表上游作者或网易官方。

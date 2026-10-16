@@ -1,0 +1,40 @@
+# Project-local environments, caches and generated packages
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.spec
+platform-tools/
+node_modules/
+
+# Local IDE and agent settings
+.idea/
+.vscode/
+.claude/
+.DS_Store
+Thumbs.db
+
+# Private configuration, credentials and runtime data
+.env
+.env.*
+!.env.example
+cert/
+*.pem
+*.key
+user_settings.json
+*.log
+logs/
+recordings/
+var/
+scripts/capture_output/
+docs/reference/
+
+# Keep the application's version resource
+__version__
+!crX/__version__
