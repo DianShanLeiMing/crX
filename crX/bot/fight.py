@@ -15,7 +15,6 @@ from crX.bot.card_detection import (
     trigger_hero_champion_ability,
 )
 from crX.bot.coords import (
-    CLOSE_BATTLE_LOG_BUTTON,
     EMOTE_BUTTON_COORD,
     EMOTE_ICON_COORDS,
     HAND_CARDS_COORDS,
@@ -23,12 +22,11 @@ from crX.bot.coords import (
     QUICKMATCH_POPUP_BUTTON_COORD,
     START_FIGHT_BUTTON_COORD,
 )
+from crX.bot.find import find_battle_outcome
 from crX.bot.nav import (
     check_for_in_battle_with_delay,
-    get_to_activity_log,
     get_to_main_after_fight,
     wait_for_battle_start,
-    wait_for_clash_main_menu,
 )
 from crX.bot.recorder import (
     finish_fight_recording,
@@ -41,7 +39,6 @@ from crX.bot.state_detect import (
     check_if_battle_has_ended,
     check_if_in_battle,
     check_if_on_clash_main_menu,
-    check_pixels_for_win_in_battle_log,
     count_elixir,
 )
 from crX.interface.enums import BATTLE_MODE_LABELS
@@ -50,6 +47,7 @@ from crX.utils.versioning import __version__
 
 ELIXIR_WAIT_TIMEOUT = 40  # too high but someone got errors with that so idk
 ABILITY_TRIGGER_DELAY_S = 3
+BATTLE_OUTCOME_WAIT_S = 3
 
 
 def _maybe_start_fight_recording(
@@ -286,78 +284,49 @@ def end_fight_state(
     recording_flag,
     disable_win_tracker_toggle=True,
 ):
-    """Method to handle the time after a fight and before the next state"""
-    # count the crown score on this end-battle screen
+    """Capture a best-effort outcome before leaving the result screen."""
+    needs_outcome = is_recording() or not disable_win_tracker_toggle
+    outcome = None
 
-    # get to clash main after this fight
-    logger.log("正在返回主界面 after fight")
-    if get_to_main_after_fight(emulator, logger) is False:
-        logger.log("Failed to return to main menu after fight")
+    def capture_outcome():
+        nonlocal outcome
+        outcome = read_battle_outcome(emulator, logger)
+
+    if get_to_main_after_fight(emulator, logger, on_result_screen=capture_outcome if needs_outcome else None) is False:
+        logger.log("对战结束后返回主界面失败")
         finish_fight_recording(None)
         return False
 
-    logger.log("对战结束后已返回主界面")
-    time.sleep(3)
-
-    # Determine the outcome. Force the win check when a recording is active so the
-    # pack gets a real win/loss; otherwise honor the user's win-tracker toggle.
-    if is_recording() or not disable_win_tracker_toggle:
-        win_check_return = check_if_previous_game_was_win(emulator, logger)
-
-        if win_check_return == "restart":
-            logger.log("Failed while checking if previous game was a win")
-            finish_fight_recording(None)
-            return False
-
-        outcome = "win" if win_check_return else "loss"
-
-        # Only touch the user's win/loss stats when their tracker is enabled.
+    if needs_outcome:
+        result = {"win": "胜利", "loss": "失败"}.get(outcome, "未知（不计入胜率）")
+        logger.change_status(f"本局对战结果：{result}")
         if not disable_win_tracker_toggle:
-            if win_check_return:
+            if outcome == "win":
                 logger.add_win()
-            else:
+            elif outcome == "loss":
                 logger.add_loss()
-
-        finish_fight_recording(outcome)
     else:
-        logger.log("Not checking win/loss because check is disabled")
-        finish_fight_recording(None)
-
+        logger.log("未启用胜负统计或录制，跳过胜负识别")
+    finish_fight_recording(outcome)
     return True
 
 
-def check_if_previous_game_was_win(
-    emulator,
-    logger: Logger,
-) -> bool | Literal["restart"]:
-    """Method to handle the checking if the previous game was a win or loss"""
-    logger.change_status(status="正在检查上一场对战结果")
-
-    # Use wait_for_clash_main_menu to ensure we are on the main menu.
-    if not wait_for_clash_main_menu(emulator, logger, deadspace_click=True):
-        logger.change_status(status="当前不在主界面，无法检查上一场对战结果")
-        return "restart"
-
-    # get to clash main options menu
-    if get_to_activity_log(emulator, logger, printmode=False) == "restart":
-        logger.change_status(status="无法打开对战日志")
-
-        return "restart"
-
-    logger.change_status(status="正在从对战日志中确认胜负……")
-    is_a_win = check_pixels_for_win_in_battle_log(emulator)
-    result = "胜利" if is_a_win else "失败"
-    logger.change_status(status=f"上一场对战结果：{result}")
-
-    # close battle log
-    logger.change_status(status="正在返回主界面")
-    emulator.click(CLOSE_BATTLE_LOG_BUTTON[0], CLOSE_BATTLE_LOG_BUTTON[1])
-    if wait_for_clash_main_menu(emulator, logger) is False:
-        logger.change_status(status="关闭对战日志后，返回主界面超时")
-        return "restart"
-    time.sleep(2)
-
-    return is_a_win
+def read_battle_outcome(emulator, logger: Logger) -> Literal["win", "loss"] | None:
+    """Require two matching frames; auxiliary recognition must not block gameplay."""
+    logger.change_status("正在识别结算页胜负")
+    deadline = time.monotonic() + BATTLE_OUTCOME_WAIT_S
+    previous = None
+    while time.monotonic() < deadline:
+        try:
+            outcome = find_battle_outcome(emulator)
+        except Exception:
+            logger.log("结算页胜负识别异常，本局结果记为未知")
+            return None
+        if outcome is not None and outcome == previous:
+            return outcome
+        previous = outcome
+        time.sleep(0.3)
+    return None
 
 
 # main fight loops

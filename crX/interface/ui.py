@@ -121,9 +121,11 @@ class CrXUI(ttk.Window):
                 self.config_widgets.append((combo, "readonly"))
         control = ttk.Labelframe(self.jobs_tab, text="运行控制", padding=12)
         control.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=(16, 0))
-        ttk.Label(control, text="执行局数").pack(side="left")
+        limit_row = ttk.Frame(control)
+        limit_row.pack(fill="x")
+        ttk.Label(limit_row, text="执行局数").pack(side="left")
         self.max_fights_spinbox = ttk.Spinbox(
-            control,
+            limit_row,
             textvariable=self.variables[UIField.MAX_FIGHTS],
             from_=0,
             to=MAX_FIGHT_LIMIT,
@@ -132,7 +134,13 @@ class CrXUI(ttk.Window):
         )
         self.max_fights_spinbox.pack(side="left", padx=12)
         self.config_widgets.append((self.max_fights_spinbox, "normal"))
-        ttk.Label(control, text="0 表示不限；各模式合计，商店不计入", wraplength=430).pack(side="left")
+        ttk.Label(limit_row, text="0 表示不限；各模式合计，商店不计入", wraplength=430).pack(side="left")
+        self.stop_after_rewards_checkbox = self._checkbox(
+            control,
+            UIField.STOP_AFTER_REWARDS,
+            "奖励领完后停止",
+            "在主界面连续确认对战上方的空皇冠栏后停止；执行局数上限仍有效。仅商店任务不受影响。",
+        )
         ttk.Label(
             self.jobs_tab,
             text="可启用一种或多种对战模式，程序将依次轮换。\n商店每日免费领取可单独运行，每小时检查一次。",

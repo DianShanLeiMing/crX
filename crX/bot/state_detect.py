@@ -10,6 +10,13 @@ This module is a leaf: the only crX.bot module it imports from is
 
 import numpy
 
+from crX.bot.coords import (
+    BATTLE_RESULT_BUTTON_REGION,
+    BATTLE_REWARD_ANIMATION_REGION,
+    BATTLE_REWARD_CROWN_REGION,
+    BATTLE_REWARDS_REGION,
+    GAME_SCREEN_SIZE,
+)
 from crX.detection.image_rec import all_pixels_are_equal, check_line_for_color, find_image, pixel_is_equal
 
 
@@ -75,7 +82,7 @@ def check_for_post_battle_button(emulator) -> bool:
     image = emulator.screenshot()
     if image is None:
         return False
-    return find_image(image, "post_battle_button", tolerance=0.9) is not None
+    return find_image(image, "post_battle_button", tolerance=0.9, subcrop=BATTLE_RESULT_BUTTON_REGION) is not None
 
 
 def check_for_trophy_reward_menu(emulator) -> bool:
@@ -186,7 +193,12 @@ def check_if_on_clash_main_menu(emulator) -> bool:
     """Checks if the user is on the clash main menu.
     Returns True if on main menu, False if not.
     """
-    image = emulator.screenshot()
+    return _is_clash_main_menu_image(emulator.screenshot())
+
+
+def _is_clash_main_menu_image(image) -> bool:
+    if image is None or image.shape[:2] != GAME_SCREEN_SIZE[::-1]:
+        return False
     pixels = [
         image[14][209],
         image[14][325],
@@ -227,6 +239,20 @@ def check_if_on_clash_main_menu(emulator) -> bool:
         if all_pixels_are_equal(pixels, colors, 25):
             return True
     return False
+
+
+def check_if_battle_rewards_finished(emulator) -> bool:
+    """Recognize the empty brown crown bar only on a verified main-menu frame."""
+    image = emulator.screenshot()
+    if not _is_clash_main_menu_image(image):
+        return False
+    # Ignore the bobbing crown while matching the empty bar, then require its glyph separately.
+    background = image.copy()
+    x1, y1, x2, y2 = BATTLE_REWARD_ANIMATION_REGION
+    background[y1:y2, x1:x2] = 0
+    if find_image(background, "battle_rewards_finished", tolerance=0.96, subcrop=BATTLE_REWARDS_REGION) is None:
+        return False
+    return find_image(image, "battle_reward_crown", tolerance=0.9, subcrop=BATTLE_REWARD_CROWN_REGION) is not None
 
 
 def check_if_on_trophy_road_deck_page(emulator) -> bool:

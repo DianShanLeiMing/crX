@@ -6,6 +6,14 @@ detect_upgradable_cards reuses pixel_indicates_upgradable from state_detect (a l
 predicate module that does not import from find).
 """
 
+from typing import Literal
+
+from crX.bot.coords import (
+    BATTLE_RESULT_BUTTON_REGION,
+    GAME_SCREEN_SIZE,
+    OPPONENT_WINNER_LABEL_REGION,
+    PLAYER_WINNER_LABEL_REGION,
+)
 from crX.detection.image_rec import find_image, pixel_is_equal
 
 
@@ -47,7 +55,21 @@ def find_post_battle_button(emulator):
             break
     if pixel_match:
         return (200, 550)
-    return find_image(iar, "post_battle_button", tolerance=0.9)
+    return find_image(iar, "post_battle_button", tolerance=0.9, subcrop=BATTLE_RESULT_BUTTON_REGION)
+
+
+def find_battle_outcome(emulator) -> Literal["win", "loss"] | None:
+    """Locate 获胜者 above the opponent's or player's crowns on one result frame."""
+    image = emulator.screenshot()
+    if image is None or image.shape[:2] != GAME_SCREEN_SIZE[::-1]:
+        return None
+    if find_image(image, "post_battle_button", tolerance=0.9, subcrop=BATTLE_RESULT_BUTTON_REGION) is None:
+        return None
+    opponent_won = find_image(image, "battle_winner", tolerance=0.85, subcrop=OPPONENT_WINNER_LABEL_REGION) is not None
+    player_won = find_image(image, "battle_winner", tolerance=0.85, subcrop=PLAYER_WINNER_LABEL_REGION) is not None
+    if opponent_won == player_won:
+        return None
+    return "win" if player_won else "loss"
 
 
 def locate_free_shop_offer_icon(emulator) -> tuple[int, int] | None:

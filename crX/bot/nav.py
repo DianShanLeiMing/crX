@@ -1,5 +1,6 @@
 import random
 import time
+from collections.abc import Callable
 from typing import Literal
 
 from crX.bot.coords import (
@@ -378,7 +379,7 @@ def switch_deck_page(emulator, logger: Logger) -> bool:
     return False
 
 
-def get_to_main_after_fight(emulator, logger):
+def get_to_main_after_fight(emulator, logger, on_result_screen: Callable[[], None] | None = None):
     timeout = 120
     start_time = time.time()
     clicked_ok_or_exit = False
@@ -402,6 +403,8 @@ def get_to_main_after_fight(emulator, logger):
         if not clicked_ok_or_exit:
             button_coord = find_post_battle_button(emulator)
             if button_coord is not None:
+                if on_result_screen is not None:
+                    on_result_screen()
                 logger.change_status("正在点击战后确认按钮")
                 emulator.click(button_coord[0], button_coord[1])
                 clicked_ok_or_exit = True

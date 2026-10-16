@@ -22,6 +22,10 @@ def test_tabs_settings_themes_and_running_state():
         assert ui.get_all_values()[UIField.MAX_FIGHTS] == "0"
         ui.set_all_values({UIField.MAX_FIGHTS: 5})
         assert ui.max_fights_spinbox.get() == "5"
+        assert ui.get_all_values()[UIField.STOP_AFTER_REWARDS] is False
+        ui.set_all_values({UIField.STOP_AFTER_REWARDS: True})
+        assert ui.get_all_values()[UIField.STOP_AFTER_REWARDS] is True
+        assert ui.stop_after_rewards_checkbox.cget("text") == "奖励领完后停止"
         assert ui.mumu_frame.winfo_manager() == "pack"
         assert ui.adb_frame.winfo_manager() == ""
         assert ui.device_advanced_frame.winfo_manager() == ""

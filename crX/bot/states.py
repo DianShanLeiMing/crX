@@ -8,7 +8,7 @@ from crX.bot.fight import do_fight_state, end_fight_state, start_fight
 from crX.bot.nav import select_mode
 from crX.bot.recording_archiver import maybe_archive_recordings
 from crX.bot.shop_daily_state import shop_daily_state
-from crX.bot.state_detect import check_if_battle_mode_is_selected
+from crX.bot.state_detect import check_if_battle_mode_is_selected, check_if_battle_rewards_finished
 from crX.interface.enums import UIField
 
 ORDER = ("shop_daily", "select_battle_mode", "randomize_deck", "cycle_deck", "start_fight", "fight", "end_fight")
@@ -61,6 +61,10 @@ def state_tree(emulator, logger, state: str, jobs: dict, context: RuntimeContext
             context.selected_mode = None
             logger.change_status("等待下一次商店每日免费领取检查")
             return "idle"
+        if jobs.get(UIField.STOP_AFTER_REWARDS) and check_if_battle_rewards_finished(emulator):
+            time.sleep(0.4)
+            if check_if_battle_rewards_finished(emulator):
+                return "rewards_finished"
         context.selected_mode = enabled[context.mode_index % len(enabled)]
         context.mode_index += 1
         if not check_if_battle_mode_is_selected(emulator, context.selected_mode):

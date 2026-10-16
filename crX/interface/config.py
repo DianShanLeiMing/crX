@@ -126,6 +126,7 @@ DEFAULTS.update(
         UIField.RECORD_FIGHTS_TOGGLE.value: False,
         UIField.RECORDING_FOLDER_PATH.value: "",
         UIField.MAX_FIGHTS.value: 0,
+        UIField.STOP_AFTER_REWARDS.value: False,
     }
 )
 USER_CONFIG_KEYS = tuple(DEFAULTS)

@@ -53,6 +53,9 @@ class WorkerProcess(Process):
             except Exception:
                 logging.exception("State failed: %s", state)
                 new_state = "restart"
+            if new_state == "rewards_finished":
+                logger.change_status(f"检测到对战奖励已领完，任务已停止（已完成 {context.completed_fights} 局）")
+                return True
             # Check before recovery: a recording archive failure must not start an extra match.
             if max_fights and context.completed_fights >= max_fights:
                 logger.change_status(f"已完成 {context.completed_fights}/{max_fights} 局，达到执行局数，任务已停止")
@@ -76,17 +79,17 @@ class WorkerProcess(Process):
     def run(self):
         attach_worker_file_logging(self.session_log_path)
         logger = ProcessLogger(self.stats_queue)
-        limit_reached = False
+        stop_condition_reached = False
         try:
             emulator = self._setup_emulator(self.jobs, logger)
             if emulator is not None:
-                limit_reached = self._run_bot_loop(emulator, self.jobs, logger)
+                stop_condition_reached = self._run_bot_loop(emulator, self.jobs, logger)
         except Exception as error:
             logging.exception("Worker failed")
             logger.error(f"任务已停止：{error}")
         finally:
             finish_fight_recording(None)
-            if not logger.errored and not limit_reached:
+            if not logger.errored and not stop_condition_reached:
                 logger.change_status("任务已停止")
 
 
