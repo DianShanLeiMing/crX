@@ -5,6 +5,7 @@ import random
 import time
 from typing import Literal
 
+from crX.bot.card_data import get_card_display_name
 from crX.bot.card_detection import (
     check_which_cards_are_available,
     create_default_bridge_iar,
@@ -420,7 +421,7 @@ def play_a_card(emulator, logger, recording_flag: bool, battle_strategy: "Battle
     )[:3]
 
     logger.change_status(
-        f"已计算卡牌 {card_id} 的出牌位置 {play_coord}（耗时 {play_coord_calculation_time_taken} 秒）",
+        f"已计算卡牌 {get_card_display_name(card_id)} 的出牌位置 {play_coord}（耗时 {play_coord_calculation_time_taken} 秒）",
     )
 
     # click the card index

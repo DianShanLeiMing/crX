@@ -4,7 +4,7 @@ from collections import Counter
 
 import numpy
 
-from crX.bot.card_data import CARD_GROUPS, PLAY_COORDS, card_color_data
+from crX.bot.card_data import CARD_GROUPS, PLAY_COORDS, card_color_data, get_card_display_name
 from crX.bot.coords import CHAMPION_ABILITY_DISMISS_COORD
 
 toplefts = [
@@ -247,7 +247,7 @@ def get_play_coords_for_card(emulator, logger, card_index, elapsed_time: float =
     id_cards_start_time = time.time()
     identity = identify_hand_cards(emulator, card_index)
     time_taken = str(time.time() - id_cards_start_time)[:3]
-    logger.change_status(f"识别到卡牌：{identity}（耗时 {time_taken} 秒）")
+    logger.change_status(f"识别到卡牌：{get_card_display_name(identity)}（耗时 {time_taken} 秒）")
 
     # get the grouping of this card (hog, turret, spell, etc)
     group = get_card_group(identity)
