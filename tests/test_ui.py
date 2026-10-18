@@ -9,6 +9,7 @@ import pytest
 from crX.emulators import EmulatorType
 from crX.interface.enums import UIField
 from tests.test_card_review import make_sample
+from tests.test_failure_samples import make_failure
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32" and not os.environ.get("DISPLAY"), reason="No desktop display")
 
@@ -21,6 +22,7 @@ def desktop_ui(tmp_path_factory):
     root = tmp_path_factory.mktemp("ui-card-samples")
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr("crX.interface.card_review.get_card_samples_dir", lambda: root)
+        patch.setattr("crX.interface.failure_review.get_failure_samples_dir", lambda: root / "failures")
         ui = CrXUI()
         ui.withdraw()
         yield ui, root
@@ -36,6 +38,7 @@ def test_tabs_settings_themes_and_running_state(desktop_ui):
             "设备",
             "统计",
             "卡牌样本",
+            "异常样本",
             "设置",
         ]
         assert ui.get_all_values()[UIField.MAX_FIGHTS] == "0"
@@ -139,5 +142,42 @@ def test_review_tab_confirm_export_ignore_and_reopen(desktop_ui):
         _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy)
         assert ui.notebook.tab(tab, "text") == "卡牌样本 (1)"
         assert not errors
+    finally:
+        ui.set_button_state("idle")
+
+
+def test_failure_review_notes_status_and_running_state(desktop_ui):
+    ui, root = desktop_ui
+    make_failure(root / "failures")
+    tab = ui.failure_samples_tab
+    tab.refresh()
+    _wait_ui(ui, lambda: tab.selected is not None and tab._preview is not None)
+    assert ui.notebook.tab(tab, "text") == "异常样本 (1)"
+    assert "unknown" in tab.info_var.get()
+    assert "validation-session.txt" in tab.info_var.get()
+    assert str(tab.zoom_button.cget("state")) == "normal"
+    before = set(tab.winfo_children())
+    tab.zoom_button.invoke()
+    ui.update()
+    popups = set(tab.winfo_children()) - before
+    assert len(popups) == 1
+    for popup in popups:
+        popup.destroy()
+    tab.note_var.set("已确认需要补充识别")
+    tab.refresh()
+    _wait_ui(ui, lambda: not tab._scan_busy)
+    assert tab.note_var.get() == "已确认需要补充识别"
+    ui.set_button_state("running")
+    try:
+        assert str(tab.buttons[1].cget("state")) == "normal"
+        tab.buttons[1].invoke()
+        _wait_ui(ui, lambda: not tab._busy and not tab._scan_busy and tab.selected is None)
+        assert ui.notebook.tab(tab, "text") == "异常样本"
+        tab.filter_var.set("已处理")
+        tab._render()
+        assert tab.note_var.get() == "已确认需要补充识别"
+        tab.buttons[3].invoke()
+        _wait_ui(ui, lambda: not tab._busy and not tab._scan_busy)
+        assert ui.notebook.tab(tab, "text") == "异常样本 (1)"
     finally:
         ui.set_button_state("idle")

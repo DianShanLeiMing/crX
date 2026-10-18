@@ -1,6 +1,7 @@
 """Worker process and bounded recovery around the serial state machine."""
 
 import logging
+import traceback
 from multiprocessing import Process, Queue
 from multiprocessing.synchronize import Event
 from typing import Any, Protocol
@@ -11,6 +12,7 @@ from crX.bot.states import RuntimeContext, state_tree
 from crX.emulators import EmulatorType, get_emulator_registry
 from crX.emulators.base import EmulatorNotReadyError
 from crX.interface.enums import UIField
+from crX.utils.failure_samples import FailureSampleRecorder
 from crX.utils.logger import ProcessLogger, attach_worker_file_logging
 
 
@@ -44,15 +46,30 @@ class WorkerProcess(Process):
             return None
 
     def _run_bot_loop(self, emulator, jobs, logger) -> bool:
+        diagnostics = None
+        try:
+            diagnostics = FailureSampleRecorder()
+        except Exception:
+            logging.warning("异常采样未能启动，继续执行任务", exc_info=True)
+        try:
+            return self._run_bot_states(emulator, jobs, logger, diagnostics)
+        finally:
+            if diagnostics is not None:
+                diagnostics.close()
+
+    def _run_bot_states(self, emulator, jobs, logger, diagnostics) -> bool:
         state, recoveries = "start", 0
         context = RuntimeContext()
         max_fights = jobs.get(UIField.MAX_FIGHTS, 0)
         while not self.shutdown_event.is_set():
+            logger.failure_frame = None
+            exception = None
             completed = context.completed_jobs
             try:
                 new_state = state_tree(emulator, logger, state, jobs, context)
             except Exception:
                 logging.exception("State failed: %s", state)
+                exception = traceback.format_exc()[-8000:]
                 new_state = "restart"
             if new_state == "rewards_finished":
                 logger.change_status(f"检测到对战奖励已领完，任务已停止（已完成 {context.completed_fights} 局）")
@@ -65,6 +82,19 @@ class WorkerProcess(Process):
             if context.completed_jobs > completed:
                 recoveries = 0
             if new_state == "restart":
+                if diagnostics is not None:
+                    try:
+                        diagnostics.offer(
+                            emulator,
+                            logger,
+                            state=state,
+                            attempt=recoveries + 1,
+                            session_log_path=getattr(self, "session_log_path", None),
+                            context={"mode": context.selected_mode, "completed_fights": context.completed_fights},
+                            exception=exception,
+                        )
+                    except Exception:
+                        logging.warning("异常采样失败，继续恢复", exc_info=True)
                 finish_card_samples()
                 finish_fight_recording(None)
                 recoveries += 1

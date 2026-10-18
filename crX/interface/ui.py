@@ -14,6 +14,7 @@ from crX.emulators import EmulatorType, get_available_emulators
 from crX.interface.card_review import CardReviewTab
 from crX.interface.config import DEFAULTS, JOBS, MAX_FIGHT_LIMIT, THEME_LABELS
 from crX.interface.enums import BATTLE_STAT_LABELS, UIField, has_start_ready_job
+from crX.interface.failure_review import FailureReviewTab
 from crX.interface.widgets import DualRingGauge
 from crX.utils.platform import (
     clear_recordings,
@@ -63,11 +64,13 @@ class CrXUI(ttk.Window):
         self.stats_tab = ttk.Frame(self.notebook, padding=16)
         self.settings_tab = ttk.Frame(self.notebook, padding=16)
         self.card_samples_tab = CardReviewTab(self.notebook, count_callback=self._update_sample_count)
+        self.failure_samples_tab = FailureReviewTab(self.notebook, count_callback=self._update_failure_count)
         for tab, title in (
             (self.jobs_tab, "任务"),
             (self.device_tab, "设备"),
             (self.stats_tab, "统计"),
             (self.card_samples_tab, "卡牌样本"),
+            (self.failure_samples_tab, "异常样本"),
             (self.settings_tab, "设置"),
         ):
             self.notebook.add(tab, text=title)
@@ -88,6 +91,10 @@ class CrXUI(ttk.Window):
     def _update_sample_count(self, count):
         title = f"卡牌样本 ({count})" if count else "卡牌样本"
         self.notebook.tab(self.card_samples_tab, text=title)
+
+    def _update_failure_count(self, count):
+        title = f"异常样本 ({count})" if count else "异常样本"
+        self.notebook.tab(self.failure_samples_tab, text=title)
 
     def _checkbox(self, parent, key, title, tooltip=""):
         widget = ttk.Checkbutton(parent, text=title, variable=self.variables[key])

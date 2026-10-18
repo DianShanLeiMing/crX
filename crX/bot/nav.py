@@ -54,6 +54,7 @@ from crX.bot.state_detect import (
 )
 from crX.detection.image_rec import find_image
 from crX.interface.enums import BATTLE_MODE_LABELS
+from crX.utils.failure_samples import remember_failure_frame
 from crX.utils.logger import Logger
 
 CLASH_MAIN_WAIT_TIMEOUT = 240
@@ -462,6 +463,7 @@ def get_to_main_after_fight(
     result_clicks = 0
     actions = 0
     last_stage = None
+    image = None
     logger.change_status("对战结束，正在返回主界面……")
     while time.monotonic() < deadline:
         image = emulator.screenshot()
@@ -519,6 +521,15 @@ def get_to_main_after_fight(
             logger.change_status("正在等待战后奖励或加载动画，不点击未知页面")
         last_stage = "unknown"
         time.sleep(0.5)
+    reason = "战后奖励操作达到上限" if actions >= POST_BATTLE_MAX_ACTIONS else "战后返回主界面超时"
+    remember_failure_frame(
+        logger,
+        image,
+        reason=reason,
+        stage=last_stage,
+        actions=actions,
+        timeout_s=timeout,
+    )
     logger.change_status(f"战后返回主界面失败：未确认稳定主界面（最后阶段 {last_stage}，已操作 {actions} 次）")
     return False
 

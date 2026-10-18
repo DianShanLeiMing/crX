@@ -70,7 +70,7 @@ def test_removed_settings_cannot_enter_worker_configuration():
     assert "war_user_toggle" not in jobs
 
 
-def test_recovery_is_not_reset_by_skipping_states(monkeypatch):
+def test_recovery_is_not_reset_by_skipping_states(monkeypatch, tmp_path):
     events = []
 
     def tree(emu, logger, state, jobs, context):
@@ -79,6 +79,7 @@ def test_recovery_is_not_reset_by_skipping_states(monkeypatch):
 
     monkeypatch.setattr(worker, "state_tree", tree)
     monkeypatch.setattr(worker, "finish_fight_recording", lambda *a: None)
+    monkeypatch.setattr("crX.utils.failure_samples.get_failure_samples_dir", lambda: tmp_path / "failures")
 
     class Signal:
         def is_set(self):

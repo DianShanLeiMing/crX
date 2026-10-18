@@ -23,7 +23,7 @@ def test_valid_limits_and_default_are_normalized(value, expected):
 
 
 @pytest.fixture
-def gameplay(monkeypatch):
+def gameplay(monkeypatch, tmp_path):
     """Run the real state machine with fake screen/game operations."""
     started_modes = []
     end_results = []
@@ -46,6 +46,7 @@ def gameplay(monkeypatch):
     monkeypatch.setattr(states, "do_fight_state", lambda *args, **kwargs: True)
     monkeypatch.setattr(states, "end_fight_state", lambda *args: end_results.pop(0) if end_results else True)
     monkeypatch.setattr(worker, "finish_fight_recording", lambda *args: None)
+    monkeypatch.setattr("crX.utils.failure_samples.get_failure_samples_dir", lambda: tmp_path / "failures")
     jobs = make_job_dictionary(
         {
             UIField.MAX_FIGHTS: 2,

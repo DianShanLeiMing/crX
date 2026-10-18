@@ -103,6 +103,9 @@ ADB 路径可指向 Android SDK 的 `adb.exe`，或留空使用 PATH 中的 ADB�
 日志按启动时间保存为 `.txt`，旧日志归档为同目录下的 `logs.zip`。
 在 **设置 → 打开日志目录** 中可直接打开；修改日志路径后需重新启动程序生效。
 
+恢复游戏前会尽量保存失败截图和诊断信息到 `crXlogs\failures`，
+可在新增的 **异常样本** 页查看、放大、备注及标记处理状态，见 [异常样本说明](docs/failure-samples.md)。
+
 Windows 的配置、卡牌样本和默认录制目录仍在 `%APPDATA%\crX`：
 
 ```text

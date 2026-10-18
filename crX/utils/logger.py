@@ -91,6 +91,7 @@ class Logger:
         self.current_state = "start"
         self._console_enabled = False
         self.errored = False
+        self.failure_frame: dict | None = None
         self.stats = dict.fromkeys(
             (
                 "wins",
