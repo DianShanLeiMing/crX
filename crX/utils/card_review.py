@@ -10,9 +10,11 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
 from PIL import Image
 
 from crX.bot.card_data import CARD_NAMES_ZH
+from crX.bot.coords import HAND_CARD_SIZE
 
 STATUS_LABELS = {"pending": "待确认", "confirmed": "已确认 · 待补库", "included": "已补库", "ignored": "已忽略"}
 REASON_LABELS = {
@@ -139,19 +141,102 @@ def scan_samples(root: Path) -> tuple[list[ReviewSample], int]:
 
 
 def save_review(sample: ReviewSample, status: str, card_id: str = "", note: str = "") -> None:
+    save_reviews([sample], status, card_id, note)
+
+
+def save_reviews(samples: list[ReviewSample], status: str, card_id: str = "", note: str = "") -> int:
+    """Preflight the selection, then atomically replace each session's annotations."""
     if status not in ("pending", "confirmed", "ignored"):
         raise ValueError("标注状态无效")
     if status == "confirmed" and card_id not in CARD_NAMES_ZH:
         raise ValueError("请从卡牌名录中选择准确的卡名（区分觉醒／精英版本）")
-    path = sample_file(sample.directory, "annotations.json")
-    reviews = read_json(path)
-    reviews[sample.name] = {
+    annotation = {
         "status": status,
         "confirmed_card_id": card_id if status == "confirmed" else None,
         "note": note.strip()[:2000],
         "reviewed_at": time.time(),
     }
-    atomic_json(path, reviews)
+    sessions = {}
+    for sample in samples:
+        if not SAMPLE_NAME.fullmatch(sample.name):
+            raise ValueError("样本编号无效")
+        path = sample_file(sample.directory, "annotations.json")
+        if path not in sessions:
+            sessions[path] = (read_json(path), set())
+        reviews, names = sessions[path]
+        reviews[sample.name] = annotation
+        names.add(sample.name)
+    total = sum(len(names) for _, names in sessions.values())
+    saved = 0
+    for path, (reviews, names) in sessions.items():
+        try:
+            atomic_json(path, reviews)
+        except (OSError, ValueError) as error:
+            raise OSError(
+                f"已保存 {saved}/{total} 张；{path.parent.name} 保存失败：{error}。请刷新后重试未保存条目。"
+            ) from error
+        saved += len(names)
+    return saved
+
+
+def _group_features(sample: ReviewSample) -> tuple[int, np.ndarray] | None:
+    """Only compare complete single-card crops, including their variant artwork."""
+    if type(sample.record.get("slot")) is not int or not 0 <= sample.record["slot"] < 4:
+        return None
+    if sample.record.get("available") is not True:
+        return None
+    try:
+        with Image.open(sample.file("card")) as image:
+            if image.size != HAND_CARD_SIZE:
+                return None
+            pixels = np.asarray(image.convert("RGB").resize((18, 22)), dtype=np.int16)
+            gray = np.asarray(image.convert("L").resize((9, 8)))
+        bits = gray[:, 1:] > gray[:, :-1]
+        hash_value = int.from_bytes(np.packbits(bits).tobytes())
+        return hash_value, pixels
+    except (OSError, ValueError, KeyError, Image.DecompressionBombError):
+        return None
+
+
+@dataclass
+class _GroupReference:
+    key: str
+    hash_value: int
+    pixels: np.ndarray
+    card_id: str
+
+
+def group_similar_samples(samples: list[ReviewSample]) -> dict[str, list[str]]:
+    """Suggest conservative visual groups; never infer a label or chain matches."""
+    groups: dict[str, list[str]] = {}
+    representatives: list[_GroupReference] = []
+    for sample in samples:
+        features = _group_features(sample)
+        matched = None
+        if features is not None:
+            hash_value, pixels = features
+            for reference in representatives:
+                if reference.card_id and sample.card_id and reference.card_id != sample.card_id:
+                    continue
+                if (hash_value ^ reference.hash_value).bit_count() <= 6 and np.abs(
+                    pixels - reference.pixels
+                ).mean() <= 12:
+                    matched = reference
+                    break
+        if matched is None:
+            groups[sample.key] = [sample.key]
+            if features is not None:
+                representatives.append(_GroupReference(sample.key, *features, sample.card_id))
+        else:
+            groups[matched.key].append(sample.key)
+            if sample.card_id:
+                matched.card_id = sample.card_id
+    return groups
+
+
+def scan_grouped_samples(root: Path) -> tuple[list[ReviewSample], int, dict[str, list[str]]]:
+    samples, errors = scan_samples(root)
+    return samples, errors, group_similar_samples(samples)
 
 
 def load_previews(sample: ReviewSample) -> dict:

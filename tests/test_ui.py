@@ -8,7 +8,8 @@ import pytest
 
 from crX.emulators import EmulatorType
 from crX.interface.enums import UIField
-from tests.test_card_review import make_sample
+from crX.utils.card_review import scan_samples
+from tests.test_card_review import add_group_sample, make_sample
 from tests.test_failure_samples import make_failure
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32" and not os.environ.get("DISPLAY"), reason="No desktop display")
@@ -185,3 +186,61 @@ def test_failure_review_notes_status_and_running_state(desktop_ui):
         assert ui.notebook.tab(tab, "text") == "异常样本 (1)"
     finally:
         ui.set_button_state("idle")
+
+
+def test_card_review_group_multi_selection_refresh_and_bulk_actions(desktop_ui):
+    ui, root = desktop_ui
+    first = add_group_sample(root, "bulk-a", "sample-000")
+    second = add_group_sample(root, "bulk-b", "sample-000", slot=2)
+    tab = ui.card_samples_tab
+    tab.filter_var.set("待确认")
+    tab.group_var.set("全部分组")
+    tab.refresh()
+    _wait_ui(ui, lambda: not tab._scan_busy and second.key in tab.samples)
+    tab.tree.selection_set(first.key)
+    tab.tree.focus(first.key)
+    tab._select()
+    tab.select_group_button.invoke()
+    assert set(tab.tree.selection()) == {first.key, second.key}
+    assert "已选 2 张" in tab.selection_var.get()
+    assert str(tab.action_buttons[3].cget("state")) == "disabled"
+    tab.card_var.set("evo_cannon")
+    tab.note_var.set("批量确认")
+    third = add_group_sample(root, "bulk-c", "sample-000", slot=1)
+    tab.refresh()
+    _wait_ui(ui, lambda: not tab._scan_busy and third.key in tab.samples)
+    assert set(tab.tree.selection()) == {first.key, second.key}
+    assert tab.card_var.get() == "evo_cannon" and tab.note_var.get() == "批量确认"
+    tab.action_buttons[0].invoke()
+    _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy)
+    reviewed = {sample.key: sample for sample in scan_samples(root)[0]}
+    assert all(
+        reviewed[key].card_id == "evo_cannon" and reviewed[key].review["note"] == "批量确认"
+        for key in (first.key, second.key)
+    )
+    assert reviewed[third.key].status == "pending"
+    # A group selection only includes rows visible under the status filter.
+    group = tab.sample_groups[third.key]
+    tab.group_var.set(next(label for label, value in tab.group_choices.items() if value == group))
+    tab._render_list()
+    tab.select_group_button.invoke()
+    assert tab.tree.selection() == (third.key,)
+    tab.action_buttons[1].invoke()
+    _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy and tab.selected is None)
+    assert {sample.key: sample.status for sample in scan_samples(root)[0]}[third.key] == "ignored"
+    tab.filter_var.set("已确认")
+    tab._render_list()
+    tab.select_group_button.invoke()
+    assert set(tab.tree.selection()) == {first.key, second.key}
+    tab.action_buttons[1].invoke()
+    _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy and tab.selected is None)
+    reviewed = {sample.key: sample for sample in scan_samples(root)[0]}
+    assert all(reviewed[key].status == "ignored" for key in (first.key, second.key, third.key))
+    tab.filter_var.set("已忽略")
+    tab._render_list()
+    tab.select_group_button.invoke()
+    assert len(tab.tree.selection()) == 3
+    tab.action_buttons[2].invoke()
+    _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy and tab.selected is None)
+    reviewed = {sample.key: sample for sample in scan_samples(root)[0]}
+    assert all(reviewed[key].status == "pending" for key in (first.key, second.key, third.key))
