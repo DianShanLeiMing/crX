@@ -2,23 +2,42 @@
 
 import os
 import sys
+import time
 
 import pytest
 
 from crX.emulators import EmulatorType
 from crX.interface.enums import UIField
+from tests.test_card_review import make_sample
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32" and not os.environ.get("DISPLAY"), reason="No desktop display")
 
 
-def test_tabs_settings_themes_and_running_state():
+@pytest.fixture(scope="module")
+def desktop_ui(tmp_path_factory):
+    """Use one Tcl interpreter, matching the application's single-window lifetime."""
     from crX.interface.ui import CrXUI
 
-    ui = CrXUI()
-    ui.withdraw()
+    root = tmp_path_factory.mktemp("ui-card-samples")
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr("crX.interface.card_review.get_card_samples_dir", lambda: root)
+        ui = CrXUI()
+        ui.withdraw()
+        yield ui, root
+        ui.destroy()
+
+
+def test_tabs_settings_themes_and_running_state(desktop_ui):
+    ui, _root = desktop_ui
     try:
         ui.update()
-        assert [ui.notebook.tab(tab, "text") for tab in ui.notebook.tabs()] == ["任务", "设备", "统计", "设置"]
+        assert [ui.notebook.tab(tab, "text") for tab in ui.notebook.tabs()] == [
+            "任务",
+            "设备",
+            "统计",
+            "卡牌样本",
+            "设置",
+        ]
         assert ui.get_all_values()[UIField.MAX_FIGHTS] == "0"
         ui.set_all_values({UIField.MAX_FIGHTS: 5})
         assert ui.max_fights_spinbox.get() == "5"
@@ -62,4 +81,63 @@ def test_tabs_settings_themes_and_running_state():
         ui.set_button_state("idle")
         assert str(ui.main_btn.cget("text")) == "启动"
     finally:
-        ui.destroy()
+        ui.set_button_state("idle")
+
+
+def _wait_ui(ui, condition):
+    deadline = time.monotonic() + 4
+    while time.monotonic() < deadline:
+        ui.update()
+        if condition():
+            return
+        time.sleep(0.01)
+    raise AssertionError("GUI background operation did not complete")
+
+
+def test_review_tab_confirm_export_ignore_and_reopen(desktop_ui):
+    ui, root = desktop_ui
+    source = make_sample(root)
+    errors = []
+    ui.report_callback_exception = lambda *args: errors.append(args)
+    try:
+        tab = ui.card_samples_tab
+        tab.refresh()
+        _wait_ui(ui, lambda: tab.selected is not None and "card" in tab._images)
+        assert ui.notebook.tab(tab, "text") == "卡牌样本 (1)"
+        assert tab.card_var.get() == ""  # Do not prefill the incorrect top candidate.
+        tab.card_var.set("进化")
+        tab._search_cards()
+        assert tab.card_combo.cget("values")
+        assert all("进化" in value for value in tab.card_combo.cget("values"))
+        tab.card_var.set("evo_cannon")
+        tab.note_var.set("人工核对")
+        tab.refresh()
+        _wait_ui(ui, lambda: not tab._scan_busy)
+        assert tab.card_var.get() == "evo_cannon" and tab.note_var.get() == "人工核对"
+        ui.set_button_state("running")
+        assert str(tab.action_buttons[0].cget("state")) == "normal"
+        tab.action_buttons[0].invoke()
+        _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy and tab.selected is None)
+        assert ui.notebook.tab(tab, "text") == "卡牌样本"
+        tab.filter_var.set("已确认")
+        tab._render_list()
+        assert tab.selected is not None
+        assert tab.selected.card_id == "evo_cannon"
+        assert tab.note_var.get() == "人工核对"
+        tab.action_buttons[3].invoke()
+        _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy)
+        assert (source.directory / "sample-000-candidate.json").is_file()
+        assert tab.selected is not None
+        assert tab.selected.status == "confirmed"
+        tab.action_buttons[1].invoke()
+        _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy and tab.selected is None)
+        tab.filter_var.set("已忽略")
+        tab._render_list()
+        assert tab.selected is not None
+        assert tab.selected.status == "ignored"
+        tab.action_buttons[2].invoke()
+        _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy)
+        assert ui.notebook.tab(tab, "text") == "卡牌样本 (1)"
+        assert not errors
+    finally:
+        ui.set_button_state("idle")

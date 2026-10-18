@@ -11,6 +11,7 @@ import ttkbootstrap as ttk
 from ttkbootstrap.widgets import ToolTip
 
 from crX.emulators import EmulatorType, get_available_emulators
+from crX.interface.card_review import CardReviewTab
 from crX.interface.config import DEFAULTS, JOBS, MAX_FIGHT_LIMIT, THEME_LABELS
 from crX.interface.enums import BATTLE_STAT_LABELS, UIField, has_start_ready_job
 from crX.interface.widgets import DualRingGauge
@@ -61,10 +62,12 @@ class CrXUI(ttk.Window):
         self.device_tab = ttk.Frame(self.notebook, padding=16)
         self.stats_tab = ttk.Frame(self.notebook, padding=16)
         self.settings_tab = ttk.Frame(self.notebook, padding=16)
+        self.card_samples_tab = CardReviewTab(self.notebook, count_callback=self._update_sample_count)
         for tab, title in (
             (self.jobs_tab, "任务"),
             (self.device_tab, "设备"),
             (self.stats_tab, "统计"),
+            (self.card_samples_tab, "卡牌样本"),
             (self.settings_tab, "设置"),
         ):
             self.notebook.add(tab, text=title)
@@ -73,12 +76,18 @@ class CrXUI(ttk.Window):
         self._create_stats()
         self._create_settings()
         self.status_var = tk.StringVar(value="待机")
-        ttk.Label(self, textvariable=self.status_var, padding=(16, 8), wraplength=800).pack(fill="x")
+        ttk.Label(self, textvariable=self.status_var, padding=(16, 8), wraplength=800).pack(
+            side="bottom", fill="x", before=self.notebook
+        )
         self._suspend = False
         for variable in self.variables.values():
             variable.trace_add("write", self._notify)
         self._schedule_storage_update()
         self.after(200, self._poll_storage)
+
+    def _update_sample_count(self, count):
+        title = f"卡牌样本 ({count})" if count else "卡牌样本"
+        self.notebook.tab(self.card_samples_tab, text=title)
 
     def _checkbox(self, parent, key, title, tooltip=""):
         widget = ttk.Checkbutton(parent, text=title, variable=self.variables[key])
