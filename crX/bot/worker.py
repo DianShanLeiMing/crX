@@ -5,6 +5,7 @@ from multiprocessing import Process, Queue
 from multiprocessing.synchronize import Event
 from typing import Any, Protocol
 
+from crX.bot.card_samples import finish_card_samples
 from crX.bot.recorder import finish_fight_recording
 from crX.bot.states import RuntimeContext, state_tree
 from crX.emulators import EmulatorType, get_emulator_registry
@@ -64,6 +65,7 @@ class WorkerProcess(Process):
             if context.completed_jobs > completed:
                 recoveries = 0
             if new_state == "restart":
+                finish_card_samples()
                 finish_fight_recording(None)
                 recoveries += 1
                 if recoveries >= 5:
@@ -88,6 +90,7 @@ class WorkerProcess(Process):
             logging.exception("Worker failed")
             logger.error(f"任务已停止：{error}")
         finally:
+            finish_card_samples()
             finish_fight_recording(None)
             if not logger.errored and not stop_condition_reached:
                 logger.change_status("任务已停止")

@@ -10,10 +10,12 @@ from crX.bot.card_detection import (
     check_which_cards_are_available,
     create_default_bridge_iar,
     get_play_coords_for_card,
+    identify_hand_cards,
     is_hero_champion_ability_visible,
     switch_side,
     trigger_hero_champion_ability,
 )
+from crX.bot.card_samples import active_card_samples, card_sample_session
 from crX.bot.coords import (
     EMOTE_BUTTON_COORD,
     EMOTE_ICON_COORDS,
@@ -82,18 +84,21 @@ def do_fight_state(
 
     # Recording is started/stopped inside the fight loops themselves so each pack
     # brackets exactly the in-battle play loop (no pre-battle wait or post-fight nav).
-    # Run regular fight loop if random mode not toggled
-    if not random_fight_mode and _fight_loop(emulator, logger, recording_flag, fight_mode_chosen, custom_path) is False:
-        logger.change_status("对战操作执行失败")
-        return False
+    with card_sample_session(fight_mode_chosen):
+        # Both play modes observe the same cached availability/recognition frame.
+        if (
+            not random_fight_mode
+            and _fight_loop(emulator, logger, recording_flag, fight_mode_chosen, custom_path) is False
+        ):
+            logger.change_status("对战操作执行失败")
+            return False
 
-    # Run random fight loop if random mode toggled
-    if (
-        random_fight_mode
-        and _random_fight_loop(emulator, logger, recording_flag, fight_mode_chosen, custom_path) is False
-    ):
-        logger.change_status("对战操作执行失败")
-        return False
+        if (
+            random_fight_mode
+            and _random_fight_loop(emulator, logger, recording_flag, fight_mode_chosen, custom_path) is False
+        ):
+            logger.change_status("对战操作执行失败")
+            return False
 
     # Only log the fight if not called from the start
     if not called_from_launching:
@@ -181,6 +186,8 @@ def play_random_available_card(emulator, logger, recording_flag: bool, elapsed_s
         return False  # nothing playable -> no play, nothing recorded (caller re-rolls)
 
     card_index = random.choice(card_indices)
+    if active_card_samples() is not None:
+        identify_hand_cards(emulator, card_index)  # Diagnostics only; random placement stays unchanged.
     left, top, right, bottom = PLAYABLE_PLAY_REGION_LTRB
     play_coord = (random.randint(left, right), random.randint(top, bottom))
 
@@ -190,7 +197,7 @@ def play_random_available_card(emulator, logger, recording_flag: bool, elapsed_s
     time.sleep(0.1)
 
     if recording_flag:
-        # Card identity isn't computed for random plays; home re-derives it from pixels.
+        # Recording retains the hand slot; diagnostic identity does not affect random placement.
         log_play(card_index, play_coord[0], play_coord[1], elapsed_s)
     logger.add_card_played()
     return True

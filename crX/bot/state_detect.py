@@ -169,12 +169,15 @@ ELIXIR_COLOR = [240, 137, 244]
 
 def count_elixir(emulator, elixir_count) -> bool:
     """Method to check for 4 elixir during a battle"""
-    iar = emulator.screenshot()
-    if pixel_is_equal(
-        iar[ELIXIR_COORDS[elixir_count - 1][0], ELIXIR_COORDS[elixir_count - 1][1]], ELIXIR_COLOR, tol=65
-    ):
-        return True
-    return False
+    return image_has_elixir(emulator.screenshot(), elixir_count)
+
+
+def image_has_elixir(image, elixir_count: int) -> bool:
+    """Read elixir from an already captured frame, without another device call."""
+    if image is None or image.shape != (*GAME_SCREEN_SIZE[::-1], 3) or not 1 <= elixir_count <= len(ELIXIR_COORDS):
+        return False
+    y, x = ELIXIR_COORDS[elixir_count - 1]
+    return pixel_is_equal(image[y, x], ELIXIR_COLOR, tol=65)
 
 
 def check_pixels_for_win_in_battle_log(emulator) -> bool:

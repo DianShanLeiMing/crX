@@ -4,18 +4,20 @@ from collections import Counter
 
 import numpy
 
-from crX.bot.card_data import CARD_GROUPS, PLAY_COORDS, card_color_data, get_card_display_name
-from crX.bot.coords import CHAMPION_ABILITY_DISMISS_COORD
+from crX.bot.card_data import (
+    CARD_FINGERPRINT_VARIANTS,
+    CARD_GROUPS,
+    PLAY_COORDS,
+    card_color_data,
+    get_card_display_name,
+)
+from crX.bot.card_samples import active_card_samples
+from crX.bot.coords import CHAMPION_ABILITY_DISMISS_COORD, GAME_SCREEN_SIZE, HAND_CARD_SIZE, HAND_CARD_TOP_LEFTS
+from crX.bot.state_detect import image_has_elixir
 
-toplefts = [
-    (115, 529),
-    (182, 529),
-    (249, 529),
-    (316, 529),
-]
+toplefts = HAND_CARD_TOP_LEFTS
 
-TOTAL_WIDTH = 54
-TOTAL_HEIGHT = 66
+TOTAL_WIDTH, TOTAL_HEIGHT = HAND_CARD_SIZE
 HALF_WIDTH = int(TOTAL_WIDTH / 2)
 HALF_HEIGHT = int(TOTAL_HEIGHT / 2)
 
@@ -62,6 +64,15 @@ for card_name, card_data in card_color_data.items():
 card_color_data: dict[str, list[numpy.ndarray[tuple[int, ...], numpy.dtype[numpy.int64]]]] = (
     _card_color_data_transformed
 )
+_REFERENCE_NAMES = tuple(card_color_data)
+_REFERENCE_MATRIX = numpy.array(list(card_color_data.values()), dtype=numpy.int64)
+_REFERENCE_SOURCES = ("upstream",) * len(_REFERENCE_NAMES)
+for _card_id, _variants in CARD_FINGERPRINT_VARIANTS.items():
+    for _number, _variant in enumerate(_variants, 1):
+        _REFERENCE_NAMES += (_card_id,)
+        _REFERENCE_SOURCES += (f"zh_native_{_number}",)
+        _REFERENCE_MATRIX = numpy.concatenate((_REFERENCE_MATRIX, numpy.array([_variant], dtype=numpy.int64)))
+DIAGNOSTIC_MIN_MARGIN = 100
 
 
 def calculate_offset(card_name, card_data, collected_data_array):
@@ -72,34 +83,41 @@ def calculate_offset(card_name, card_data, collected_data_array):
     return card_name, total_offset
 
 
-def find_closest_card(collected_data):
-    best_card = None
-    best_offset = CARD_MATCH_THRESHOLD + 1
-    # Debug offsets disabled in production
-    debug_offsets = None
-
-    collected_data_array = numpy.array(
-        [list(corner.values()) for corner in collected_data],
-    )
-
-    for card_name, card_data in card_color_data.items():
-        card_name, total_offset = calculate_offset(  # noqa: PLW2901
-            card_name,
-            card_data,
-            collected_data_array,
+def recognize_card_fingerprint(collected_data):
+    """Expose real distances even beyond the acceptance threshold; keep play policy."""
+    collected = numpy.array([[corner[color] for color in COLORS_KEYS] for corner in collected_data], dtype=numpy.int64)
+    distances = numpy.abs(_REFERENCE_MATRIX - collected).sum(axis=(1, 2))
+    candidates = []
+    canonical_seen = set()
+    for index in numpy.argsort(distances, kind="stable"):
+        raw_id = _REFERENCE_NAMES[index]
+        canonical_id = CARD_DETECTION_ALIASES.get(raw_id, raw_id)
+        if canonical_id in canonical_seen:
+            continue
+        canonical_seen.add(canonical_id)
+        candidates.append(
+            {
+                "card_id": canonical_id,
+                "fingerprint_id": raw_id,
+                "source": _REFERENCE_SOURCES[index],
+                "distance": int(distances[index]),
+            }
         )
-        if total_offset < best_offset:
-            best_offset = total_offset
-            best_card = card_name
-        if debug_offsets is not None:
-            debug_offsets.append((card_name, total_offset))
+        if len(candidates) == 3:
+            break
+    best = candidates[0]
+    accepted = best["distance"] <= CARD_MATCH_THRESHOLD
+    return {
+        "card_id": best["card_id"] if accepted else "UNKNOWN",
+        "fingerprint_id": best["fingerprint_id"] if accepted else "UNKNOWN",
+        "candidates": candidates,
+        "candidate_margin": candidates[1]["distance"] - best["distance"],
+        "match_threshold": CARD_MATCH_THRESHOLD,
+    }
 
-    # Debugging output removed from production.
 
-    if best_offset > CARD_MATCH_THRESHOLD:
-        return "UNKNOWN"
-
-    return best_card
+def find_closest_card(collected_data):
+    return recognize_card_fingerprint(collected_data)["fingerprint_id"]
 
 
 # identification methods
@@ -137,6 +155,14 @@ def get_corner_pixels(x_range, y_range, iar):
 
 
 def get_all_pixel_data(emulator, chosen_card_index):
+    return extract_card_fingerprint(battle_iar, chosen_card_index)
+
+
+def extract_card_fingerprint(image, chosen_card_index):
+    if image is None or image.shape != (*GAME_SCREEN_SIZE[::-1], 3):
+        raise ValueError("卡牌指纹需要 419×633 BGR 原生画面")
+    if not 0 <= chosen_card_index < len(toplefts):
+        raise ValueError("手牌位置必须为 0–3")
     topleft = toplefts[chosen_card_index]
 
     corners = [
@@ -155,10 +181,7 @@ def get_all_pixel_data(emulator, chosen_card_index):
         ),
     ]
 
-    color_list = [get_corner_pixels(*corner, battle_iar) for corner in corners]
-
-    # print(f"card_name: {color_list},")
-    return color_list
+    return [get_corner_pixels(*corner, image) for corner in corners]
 
 
 purple_color = numpy.array([255, 43, 227])
@@ -206,20 +229,74 @@ def check_which_cards_are_available(emulator, check_side=False):
     global battle_iar
     battle_iar = emulator.screenshot()
     card_exists_list = []
+    if battle_iar is None or battle_iar.shape != (*GAME_SCREEN_SIZE[::-1], 3):
+        return card_exists_list
 
     if check_side:
         global play_side
         _, play_side = switch_side()
 
-    for i, coords in enumerate(card_coords):
-        x_coords, y_coords = coords
-        iar_pixels = battle_iar[numpy.ix_(y_coords, x_coords)]
-        purple_pixels = numpy.all(numpy.abs(iar_pixels - purple_color) <= 30, axis=-1)
-        count = numpy.sum(purple_pixels)
+    purple_counts = _card_purple_counts(battle_iar)
+    for i, count in enumerate(purple_counts):
         if count >= 26:
             card_exists_list.append(i)
 
+    _observe_hand_diagnostics(battle_iar, card_exists_list, purple_counts)
     return card_exists_list
+
+
+def _card_purple_counts(image):
+    counts = []
+    for coords in card_coords:
+        x_coords, y_coords = coords
+        iar_pixels = image[numpy.ix_(y_coords, x_coords)]
+        purple_pixels = numpy.all(numpy.abs(iar_pixels - purple_color) <= 30, axis=-1)
+        counts.append(int(numpy.sum(purple_pixels)))
+    return counts
+
+
+def _observe_hand_diagnostics(image, available, purple_counts):
+    collector = active_card_samples()
+    if collector is None or not collector.observation_due():
+        return
+    if available or not image_has_elixir(image, 5):
+        collector.empty_observations = 0
+    else:
+        collector.empty_observations += 1
+        if collector.empty_observations >= 3:
+            collector.offer(image, None, {"reason": "no_available_cards_high_elixir", "purple_counts": purple_counts})
+    for slot in available:
+        fingerprint = extract_card_fingerprint(image, slot)
+        recognition = recognize_card_fingerprint(fingerprint)
+        _record_match_sample(
+            image, slot, fingerprint, recognition, trigger="hand_observation", purple_counts=purple_counts
+        )
+
+
+def _record_match_sample(image, slot, fingerprint, recognition, *, trigger, purple_counts=None):
+    collector = active_card_samples()
+    if collector is None:
+        return
+    if recognition["card_id"] == "UNKNOWN":
+        reason = "unknown"
+    elif recognition["candidate_margin"] < DIAGNOSTIC_MIN_MARGIN:
+        reason = "low_margin"
+    else:
+        return
+    if purple_counts is None:
+        purple_counts = _card_purple_counts(image)
+    collector.offer(
+        image,
+        slot,
+        {
+            **recognition,
+            "reason": reason,
+            "trigger": trigger,
+            "fingerprint": fingerprint,
+            "available": purple_counts[slot] >= 26,
+            "purple_counts": purple_counts,
+        },
+    )
 
 
 def trigger_hero_champion_ability(emulator, logger) -> None:
@@ -229,8 +306,10 @@ def trigger_hero_champion_ability(emulator, logger) -> None:
 
 def identify_hand_cards(emulator, card_index):
     color_chosen_card = get_all_pixel_data(emulator, card_index)
-    card_id = find_closest_card(color_chosen_card)
-    return CARD_DETECTION_ALIASES.get(card_id, card_id)
+    recognition = recognize_card_fingerprint(color_chosen_card)
+    # A selected-card failure must not be lost to the periodic observation gate.
+    _record_match_sample(battle_iar, card_index, color_chosen_card, recognition, trigger="selected_card")
+    return recognition["card_id"]
 
 
 # Create the reverse lookup dictionary

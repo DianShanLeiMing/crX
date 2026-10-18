@@ -81,6 +81,9 @@ ADB 路径可指向 Android SDK 的 `adb.exe`，或留空使用 PATH 中的 ADB�
 国服中文商店已补充“免费！”和“已收集！”识别、栏目滚动、免费确认及领取结果校验，
 适配范围和实机验证记录见 [商店每日免费领取](docs/shop-daily.md)。
 
+战斗会自动记录未知／候选分数接近的手牌，战后生成待标注清单，
+不改变配置的战斗次数。样本目录、限制与首批补库记录见 [卡牌采样与识别](docs/card-recognition.md)。
+
 已移除卡牌养成、公主塔升级、部落操作、部落战、多账号、Discord，
 以及 MEmu、BlueStacks、Google Play Games 的专用适配。
 
@@ -98,6 +101,7 @@ Windows 默认目录为 `%APPDATA%\crX`：
 crX/
 ├── user_settings.json
 ├── logs/
+├── card_samples/
 └── recordings/
     ├── <每局数据包>/
     └── zips/

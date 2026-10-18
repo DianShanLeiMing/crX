@@ -1,5 +1,27 @@
 """Card placement profiles, groups and color fingerprints (upstream data)."""
 
+# Additional native BGR fingerprints; preserve upstream entries and card identities.
+# Each quadrant contains 27*33 pixels; channels follow card_detection.COLORS_KEYS.
+# Native names verified against the current client's card information screens.
+CARD_FINGERPRINT_VARIANTS: dict[str, list[list[list[int]]]] = {
+    "minion_giant": [
+        [
+            [0, 120, 0, 0, 0, 110, 2, 0, 0, 92, 24, 0, 31, 405, 42, 65],
+            [0, 268, 0, 0, 0, 23, 1, 8, 1, 121, 30, 0, 5, 361, 27, 46],
+            [0, 32, 0, 10, 0, 207, 10, 0, 30, 16, 21, 0, 9, 168, 70, 318],
+            [0, 149, 5, 8, 0, 53, 16, 67, 41, 194, 120, 0, 24, 95, 96, 23],
+        ],
+    ],
+    "evo_cannon": [
+        [
+            [0, 98, 8, 0, 0, 16, 13, 0, 0, 142, 0, 0, 66, 280, 0, 268],
+            [0, 110, 0, 0, 0, 18, 2, 0, 0, 385, 3, 0, 14, 246, 0, 113],
+            [0, 140, 18, 20, 0, 28, 14, 0, 31, 259, 18, 0, 11, 252, 28, 72],
+            [0, 17, 0, 12, 0, 32, 9, 0, 41, 144, 25, 0, 20, 272, 55, 264],
+        ],
+    ],
+}
+
 # 中文注释使用简体中文常用卡名, 便于对照英文 ID 阅读。
 # evo_ / hero_ 分别标为进化版 / 英雄版, 按现有 ID 区分变体。
 # 名称核对参考: https://royaleapi.com/cards/popular?lang=zh
@@ -138,6 +160,7 @@ CARD_NAMES_ZH: dict[str, str] = {
     "mini_pekka": "迷你皮卡",
     "minion_horde": "亡灵大军",
     "minions": "亡灵",
+    "minion_giant": "亡灵巨人",
     "mirror": "镜像法术",
     "monk": "圣僧",
     "mortar": "迫击炮",
@@ -317,6 +340,7 @@ CARD_GROUPS: dict[str, list[str]] = {
         "evo_goblin_giant",  # 进化版哥布林巨人
         "golem",  # 戈仑石人
         "lava_hound",  # 熔岩猎犬
+        "minion_giant",  # 亡灵巨人
         "royal_giant",  # 皇家巨人
         "evo_royal_giant",  # 进化版皇家巨人
         "rune_giant",  # 符文巨人
@@ -492,6 +516,7 @@ CARD_GROUPS: dict[str, list[str]] = {
 
 # card classification data used for potential future filtering/analytics; currently informational only
 CARD_ATTRIBUTES: dict[str, dict[str, str]] = {
+    "minion_giant": {"type": "Troop", "subtype": "Flying win condition"},  # 亡灵巨人
     "cannon": {"type": "Building", "subtype": "Ground defense"},  # 加农炮
     "cannon_cart": {"type": "Troop/Building", "subtype": "Mobile defense"},  # 加农炮战车
     "tesla": {"type": "Building", "subtype": "Mixed defense"},  # 特斯拉电磁塔
