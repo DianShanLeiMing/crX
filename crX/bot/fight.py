@@ -69,6 +69,7 @@ def do_fight_state(
     called_from_launching=False,
     recording_flag: bool = False,
     custom_path: str | None = None,
+    use_emotes: bool = False,
 ) -> bool:
     """Handle the entirety of a battle state (start fight, do fight, end fight)."""
 
@@ -88,14 +89,18 @@ def do_fight_state(
         # Both play modes observe the same cached availability/recognition frame.
         if (
             not random_fight_mode
-            and _fight_loop(emulator, logger, recording_flag, fight_mode_chosen, custom_path) is False
+            and _fight_loop(emulator, logger, recording_flag, fight_mode_chosen, custom_path, use_emotes=use_emotes)
+            is False
         ):
             logger.change_status("对战操作执行失败")
             return False
 
         if (
             random_fight_mode
-            and _random_fight_loop(emulator, logger, recording_flag, fight_mode_chosen, custom_path) is False
+            and _random_fight_loop(
+                emulator, logger, recording_flag, fight_mode_chosen, custom_path, use_emotes=use_emotes
+            )
+            is False
         ):
             logger.change_status("对战操作执行失败")
             return False
@@ -167,6 +172,11 @@ def send_emote(emulator, logger: Logger):
 
     emote_coord = random.choice(EMOTE_ICON_COORDS)
     emulator.click(emote_coord[0], emote_coord[1])
+
+
+def _maybe_send_emote(emulator, logger, use_emotes: bool):
+    if use_emotes and random.randint(0, 9) == 1:
+        send_emote(emulator, logger)
 
 
 RANDOM_PLAY_ELIXIR_MIN = 3
@@ -364,7 +374,9 @@ def select_card_index(card_indices, last_three_cards):
     return random.choice(preferred_cards)
 
 
-def play_a_card(emulator, logger, recording_flag: bool, battle_strategy: "BattleStrategy") -> bool:
+def play_a_card(
+    emulator, logger, recording_flag: bool, battle_strategy: "BattleStrategy", *, use_emotes: bool = False
+) -> bool:
     print("\n")
 
     # check which cards are available
@@ -421,8 +433,7 @@ def play_a_card(emulator, logger, recording_flag: bool, battle_strategy: "Battle
     logger.change_status(f"已完成出牌，耗时 {click_and_play_card_time_taken} 秒")
     logger.add_card_played()
 
-    if random.randint(0, 9) == 1:
-        send_emote(emulator, logger)
+    _maybe_send_emote(emulator, logger, use_emotes)
     return True
 
 
@@ -496,7 +507,13 @@ class BattleStrategy:
 
 
 def _fight_loop(
-    emulator, logger: Logger, recording_flag: bool, fight_mode: str = "Classic 1v1", custom_path: str | None = None
+    emulator,
+    logger: Logger,
+    recording_flag: bool,
+    fight_mode: str = "Classic 1v1",
+    custom_path: str | None = None,
+    *,
+    use_emotes: bool = False,
 ) -> bool:
     """Method for handling dynamically timed fight"""
     create_default_bridge_iar(emulator)
@@ -567,7 +584,7 @@ def _fight_loop(
             continue
 
         play_start_time = time.time()
-        if play_a_card(emulator, logger, recording_flag, battle_strategy) is False:
+        if play_a_card(emulator, logger, recording_flag, battle_strategy, use_emotes=use_emotes) is False:
             logger.change_status("出牌失败，正在重试……")
             time.sleep(0.2)
         # play_time_taken = str(time.time() - play_start_time)[:4]
@@ -591,6 +608,8 @@ def _random_fight_loop(
     recording_flag: bool = False,
     fight_mode_chosen: str = "Trophy Road",
     custom_path: str | None = None,
+    *,
+    use_emotes: bool = False,
 ) -> bool:
     """Method for handling dynamically timed fight with random plays"""
     logger.change_status(status="开始执行随机出牌对战")
@@ -633,7 +652,8 @@ def _random_fight_loop(
             break
         if elixir_result == "restart":
             return False
-        play_random_available_card(emulator, logger, recording_flag, time.time() - start_time)
+        if play_random_available_card(emulator, logger, recording_flag, time.time() - start_time):
+            _maybe_send_emote(emulator, logger, use_emotes)
 
     # Fight over: freeze capture so the pack excludes post-fight nav (manifest/outcome written later).
     stop_fight_capture()

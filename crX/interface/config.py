@@ -104,6 +104,12 @@ JOBS = [
         tooltip="对战中随机选择出牌位置，不使用默认出牌策略。",
     ),
     JobConfig(
+        UIField.USE_EMOTES,
+        "使用表情",
+        default=False,
+        tooltip="勾选后，对战中出牌成功时有一定概率发送表情；不勾选则不发送。",
+    ),
+    JobConfig(
         UIField.DISABLE_WIN_TRACK_TOGGLE,
         "📊 胜负统计",
         default=False,

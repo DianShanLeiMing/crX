@@ -93,6 +93,7 @@ def state_tree(emulator, logger, state: str, jobs: dict, context: RuntimeContext
             context.selected_mode,
             recording_flag=jobs.get(UIField.RECORD_FIGHTS_TOGGLE, False),
             custom_path=jobs.get(UIField.RECORDING_FOLDER_PATH) or None,
+            use_emotes=jobs.get(UIField.USE_EMOTES, False),
         )
     elif state == "end_fight":
         success = end_fight_state(

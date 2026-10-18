@@ -45,6 +45,10 @@ def test_tabs_settings_themes_and_running_state(desktop_ui):
         ui.set_all_values({UIField.MAX_FIGHTS: 5})
         assert ui.max_fights_spinbox.get() == "5"
         assert ui.get_all_values()[UIField.STOP_AFTER_REWARDS] is False
+        assert ui.get_all_values()[UIField.USE_EMOTES] is False
+        ui.set_all_values({UIField.USE_EMOTES: True})
+        assert ui.get_all_values()[UIField.USE_EMOTES] is True
+        ui.set_all_values({UIField.USE_EMOTES: False})
         ui.set_all_values({UIField.STOP_AFTER_REWARDS: True})
         assert ui.get_all_values()[UIField.STOP_AFTER_REWARDS] is True
         assert ui.stop_after_rewards_checkbox.cget("text") == "奖励领完后停止"
