@@ -112,10 +112,10 @@ def test_review_tab_confirm_export_ignore_and_reopen(desktop_ui):
         _wait_ui(ui, lambda: tab.selected is not None and "card" in tab._images)
         assert ui.notebook.tab(tab, "text") == "卡牌样本 (1)"
         assert tab.card_var.get() == ""  # Do not prefill the incorrect top candidate.
-        tab.card_var.set("进化")
+        tab.card_var.set("觉醒")
         tab._search_cards()
         assert tab.card_combo.cget("values")
-        assert all("进化" in value for value in tab.card_combo.cget("values"))
+        assert all("觉醒" in value for value in tab.card_combo.cget("values"))
         tab.card_var.set("evo_cannon")
         tab.note_var.set("人工核对")
         tab.refresh()

@@ -23,7 +23,7 @@ CARD_FINGERPRINT_VARIANTS: dict[str, list[list[list[int]]]] = {
 }
 
 # 中文注释使用简体中文常用卡名, 便于对照英文 ID 阅读。
-# evo_ / hero_ 分别标为进化版 / 英雄版, 按现有 ID 区分变体。
+# evo_ / hero_ 分别标为觉醒版 / 精英版, 按现有 ID 区分变体。
 # 名称核对参考: https://royaleapi.com/cards/popular?lang=zh
 
 # Display names only; recognition, placement and recording keep the original card IDs.
@@ -58,47 +58,47 @@ CARD_NAMES_ZH: dict[str, str] = {
     "elite_barbarians": "野蛮人精锐",
     "elixir_collector": "圣水收集器",
     "elixir_golem": "圣水戈仑",
-    "evo_archers": "进化版弓箭手",
-    "evo_baby_dragon": "进化版飞龙宝宝",
-    "evo_barbarians": "进化版野蛮人",
-    "evo_bats": "进化版蝙蝠",
-    "evo_battle_ram": "进化版野蛮人攻城槌",
-    "evo_bomber": "进化版炸弹兵",
-    "evo_cannon": "进化版加农炮",
-    "evo_dart_goblin": "进化版吹箭哥布林",
-    "evo_electro_dragon": "进化版雷电飞龙",
-    "evo_executioner": "进化版飞斧屠夫",
-    "evo_fire_cracker": "进化版烟花炮手",
-    "evo_furnace": "进化版烈焰熔炉",
-    "evo_goblin_barrel": "进化版哥布林飞桶",
-    "evo_goblin_cage": "进化版哥布林牢笼",
-    "evo_goblin_drill": "进化版哥布林钻机",
-    "evo_goblin_giant": "进化版哥布林巨人",
-    "evo_hunter": "进化版猎人",
-    "evo_ice_spirit": "进化版冰雪精灵",
-    "evo_inferno_dragon": "进化版地狱飞龙",
-    "evo_knight": "进化版骑士",
-    "evo_lumberjack": "进化版狂暴樵夫",
-    "evo_mega_knight": "进化版超级骑士",
-    "evo_minion_horde": "进化版亡灵大军",
-    "evo_mortar": "进化版迫击炮",
-    "evo_musketeer": "进化版火枪手",
-    "evo_pekka": "进化版皮卡超人",
-    "evo_princess": "进化版公主",
-    "evo_royal_ghost": "进化版皇家幽灵",
-    "evo_royal_giant": "进化版皇家巨人",
-    "evo_royal_hogs": "进化版皇家野猪",
-    "evo_royal_recruits": "进化版皇家卫队",
-    "evo_skeleton_army": "进化版骷髅军团",
-    "evo_skeleton_barrel": "进化版骷髅气球",
-    "evo_skeletons": "进化版骷髅兵",
-    "evo_snowball": "进化版巨大雪球",
-    "evo_tesla": "进化版特斯拉电磁塔",
-    "evo_valkyrie": "进化版瓦基丽武神",
-    "evo_wall_breakers": "进化版攻城炸弹人",
-    "evo_witch": "进化版女巫",
-    "evo_wizard": "进化版法师",
-    "evo_zap": "进化版电击法术",
+    "evo_archers": "觉醒版弓箭手",
+    "evo_baby_dragon": "觉醒版飞龙宝宝",
+    "evo_barbarians": "觉醒版野蛮人",
+    "evo_bats": "觉醒版蝙蝠",
+    "evo_battle_ram": "觉醒版野蛮人攻城槌",
+    "evo_bomber": "觉醒版炸弹兵",
+    "evo_cannon": "觉醒版加农炮",
+    "evo_dart_goblin": "觉醒版吹箭哥布林",
+    "evo_electro_dragon": "觉醒版雷电飞龙",
+    "evo_executioner": "觉醒版飞斧屠夫",
+    "evo_fire_cracker": "觉醒版烟花炮手",
+    "evo_furnace": "觉醒版烈焰熔炉",
+    "evo_goblin_barrel": "觉醒版哥布林飞桶",
+    "evo_goblin_cage": "觉醒版哥布林牢笼",
+    "evo_goblin_drill": "觉醒版哥布林钻机",
+    "evo_goblin_giant": "觉醒版哥布林巨人",
+    "evo_hunter": "觉醒版猎人",
+    "evo_ice_spirit": "觉醒版冰雪精灵",
+    "evo_inferno_dragon": "觉醒版地狱飞龙",
+    "evo_knight": "觉醒版骑士",
+    "evo_lumberjack": "觉醒版狂暴樵夫",
+    "evo_mega_knight": "觉醒版超级骑士",
+    "evo_minion_horde": "觉醒版亡灵大军",
+    "evo_mortar": "觉醒版迫击炮",
+    "evo_musketeer": "觉醒版火枪手",
+    "evo_pekka": "觉醒版皮卡超人",
+    "evo_princess": "觉醒版公主",
+    "evo_royal_ghost": "觉醒版皇家幽灵",
+    "evo_royal_giant": "觉醒版皇家巨人",
+    "evo_royal_hogs": "觉醒版皇家野猪",
+    "evo_royal_recruits": "觉醒版皇家卫队",
+    "evo_skeleton_army": "觉醒版骷髅军团",
+    "evo_skeleton_barrel": "觉醒版骷髅气球",
+    "evo_skeletons": "觉醒版骷髅兵",
+    "evo_snowball": "觉醒版巨大雪球",
+    "evo_tesla": "觉醒版特斯拉电磁塔",
+    "evo_valkyrie": "觉醒版瓦基丽武神",
+    "evo_wall_breakers": "觉醒版攻城炸弹人",
+    "evo_witch": "觉醒版女巫",
+    "evo_wizard": "觉醒版法师",
+    "evo_zap": "觉醒版电击法术",
     "executioner": "飞斧屠夫",
     "fire_cracker": "烟花炮手",
     "fire_spirit": "烈焰精灵",
@@ -125,20 +125,20 @@ CARD_NAMES_ZH: dict[str, str] = {
     "graveyard": "骷髅召唤",
     "guards": "骷髅守卫",
     "heal_spirit": "治疗精灵",
-    "hero_balloon": "英雄版气球兵",
-    "hero_barb_barrel": "英雄版野蛮人滚桶",
-    "hero_bowler": "英雄版巨石投手",
-    "hero_dark_prince": "英雄版黑暗王子",
-    "hero_giant": "英雄版巨人",
-    "hero_goblins": "英雄版哥布林",
-    "hero_ice_golem": "英雄版戈仑冰人",
-    "hero_knight": "英雄版骑士",
-    "hero_magic_archer": "英雄版神箭游侠",
-    "hero_mega_minion": "英雄版重甲亡灵",
-    "hero_mini_pekka": "英雄版迷你皮卡",
-    "hero_musketeer": "英雄版火枪手",
-    "hero_tombstone": "英雄版骷髅墓碑",
-    "hero_wizard": "英雄版法师",
+    "hero_balloon": "精英版气球兵",
+    "hero_barb_barrel": "精英版野蛮人滚桶",
+    "hero_bowler": "精英版巨石投手",
+    "hero_dark_prince": "精英版黑暗王子",
+    "hero_giant": "精英版巨人",
+    "hero_goblins": "精英版哥布林",
+    "hero_ice_golem": "精英版戈仑冰人",
+    "hero_knight": "精英版骑士",
+    "hero_magic_archer": "精英版神箭游侠",
+    "hero_mega_minion": "精英版重甲亡灵",
+    "hero_mini_pekka": "精英版迷你皮卡",
+    "hero_musketeer": "精英版火枪手",
+    "hero_tombstone": "精英版骷髅墓碑",
+    "hero_wizard": "精英版法师",
     "hog": "野猪骑士",
     "hunter": "猎人",
     "ice_golem": "戈仑冰人",
@@ -311,78 +311,78 @@ CARD_GROUPS: dict[str, list[str]] = {
     "king_lane": [
         "archer_queen",  # 弓箭女皇
         "electro_dragon",  # 雷电飞龙
-        "evo_electro_dragon",  # 进化版雷电飞龙
+        "evo_electro_dragon",  # 觉醒版雷电飞龙
         "goblin_demolisher",  # 哥布林爆破手
         "little_prince",  # 小王子
         "mega_minion",  # 重甲亡灵
-        "hero_mega_minion",  # 英雄版重甲亡灵
+        "hero_mega_minion",  # 精英版重甲亡灵
         "mother_witch",  # 女巫婆婆
         "night_witch",  # 暗夜女巫
         "royal_recruits",  # 皇家卫队
-        "evo_royal_recruits",  # 进化版皇家卫队
+        "evo_royal_recruits",  # 觉醒版皇家卫队
         "three_musketeers",  # 三个火枪手
         "witch",  # 女巫
-        "evo_witch",  # 进化版女巫
+        "evo_witch",  # 觉醒版女巫
     ],
     "princess": [
         "princess",  # 公主
-        "evo_princess",  # 进化版公主
+        "evo_princess",  # 觉醒版公主
     ],
     "bridge_line": [
         "balloon",  # 气球兵
-        "hero_balloon",  # 英雄版气球兵
+        "hero_balloon",  # 精英版气球兵
         "electro_giant",  # 雷电巨人
         "elixir_golem",  # 圣水戈仑
         "giant",  # 巨人
-        "hero_giant",  # 英雄版巨人
+        "hero_giant",  # 精英版巨人
         "giant_skeleton",  # 骷髅巨人
         "goblin_giant",  # 哥布林巨人
-        "evo_goblin_giant",  # 进化版哥布林巨人
+        "evo_goblin_giant",  # 觉醒版哥布林巨人
         "golem",  # 戈仑石人
         "lava_hound",  # 熔岩猎犬
         "minion_giant",  # 亡灵巨人
         "royal_giant",  # 皇家巨人
-        "evo_royal_giant",  # 进化版皇家巨人
+        "evo_royal_giant",  # 觉醒版皇家巨人
         "rune_giant",  # 符文巨人
         "sparky",  # 电磁炮
         "bandit",  # 幻影刺客
         "barbarians",  # 野蛮人
-        "evo_barbarians",  # 进化版野蛮人
+        "evo_barbarians",  # 觉醒版野蛮人
         "boss_bandit",  # 刺客头领
         "bowler",  # 巨石投手
-        "hero_bowler",  # 英雄版巨石投手
+        "hero_bowler",  # 精英版巨石投手
         "dark_prince",  # 黑暗王子
-        "hero_dark_prince",  # 英雄版黑暗王子
+        "hero_dark_prince",  # 精英版黑暗王子
         "elite_barbarians",  # 野蛮人精锐
         "fisherman",  # 渔夫
         "golden_knight",  # 黄金圣骑
         "guards",  # 骷髅守卫
         "ice_golem",  # 戈仑冰人
-        "hero_ice_golem",  # 英雄版戈仑冰人
+        "hero_ice_golem",  # 精英版戈仑冰人
         "knight",  # 骑士
-        "evo_knight",  # 进化版骑士
-        "hero_knight",  # 英雄版骑士
+        "evo_knight",  # 觉醒版骑士
+        "hero_knight",  # 精英版骑士
         "mega_knight",  # 超级骑士
-        "evo_mega_knight",  # 进化版超级骑士
+        "evo_mega_knight",  # 觉醒版超级骑士
         "mighty_miner",  # 威猛矿工
         "mini_pekka",  # 迷你皮卡
-        "hero_mini_pekka",  # 英雄版迷你皮卡
+        "hero_mini_pekka",  # 精英版迷你皮卡
         "monk",  # 圣僧
         "pekka",  # 皮卡超人
-        "evo_pekka",  # 进化版皮卡超人
+        "evo_pekka",  # 觉醒版皮卡超人
         "clone",  # 克隆法术
         "prince",  # 王子
         "royal_ghost",  # 皇家幽灵
-        "evo_royal_ghost",  # 进化版皇家幽灵
+        "evo_royal_ghost",  # 觉醒版皇家幽灵
         "skeleton_king",  # 骷髅帝王
         "valkyrie",  # 瓦基丽武神
-        "evo_valkyrie",  # 进化版瓦基丽武神
+        "evo_valkyrie",  # 觉醒版瓦基丽武神
         "berserker",  # 狂战士
         "spirit_empress",  # 精灵女王
     ],
     "center_spell": [
         "barb_barrel",  # 野蛮人滚桶
-        "hero_barb_barrel",  # 英雄版野蛮人滚桶
+        "hero_barb_barrel",  # 精英版野蛮人滚桶
         "mirror",  # 镜像法术
         "royal_delivery",  # 皇家速递
     ],
@@ -390,7 +390,7 @@ CARD_GROUPS: dict[str, list[str]] = {
         "fireball",  # 火球
         "log",  # 复仇滚木
         "snowball",  # 巨大雪球
-        "evo_snowball",  # 进化版巨大雪球
+        "evo_snowball",  # 觉醒版巨大雪球
     ],
     "large_spell": [
         "earthquake",
@@ -404,7 +404,7 @@ CARD_GROUPS: dict[str, list[str]] = {
         "fire_spirit",  # 烈焰精灵
         "heal_spirit",  # 治疗精灵
         "ice_spirit",  # 冰雪精灵
-        "evo_ice_spirit",  # 进化版冰雪精灵
+        "evo_ice_spirit",  # 觉醒版冰雪精灵
     ],
     "reactive_spell": [
         "gob_curse",  # 哥布林诅咒
@@ -412,104 +412,104 @@ CARD_GROUPS: dict[str, list[str]] = {
         "void",  # 虚空法术
         "vines",  # 藤蔓法术
         "zap",  # 电击法术
-        "evo_zap",  # 进化版电击法术
+        "evo_zap",  # 觉醒版电击法术
     ],
     "rocket": ["rocket"],  # 火箭
     "tornado": ["tornado"],  # 飓风法术
-    "goblin_drill": ["goblin_drill", "evo_goblin_drill"],  # 哥布林钻机、进化版哥布林钻机
+    "goblin_drill": ["goblin_drill", "evo_goblin_drill"],  # 哥布林钻机、觉醒版哥布林钻机
     "graveyard": ["graveyard"],  # 骷髅召唤
     "defense_building": [
         "bomb_tower",  # 炸弹塔
         "cannon",  # 加农炮
-        "evo_cannon",  # 进化版加农炮
+        "evo_cannon",  # 觉醒版加农炮
         "cannon_cart",  # 加农炮战车
         "goblin_cage",  # 哥布林牢笼
-        "evo_goblin_cage",  # 进化版哥布林牢笼
+        "evo_goblin_cage",  # 觉醒版哥布林牢笼
         "goblinstein",  # 科学怪哥布林
         "inferno_tower",  # 地狱之塔
         "tesla",  # 特斯拉电磁塔
-        "evo_tesla",  # 进化版特斯拉电磁塔
+        "evo_tesla",  # 觉醒版特斯拉电磁塔
     ],
     "bridge_rush": [
         "battle_ram",  # 野蛮人攻城槌
-        "evo_battle_ram",  # 进化版野蛮人攻城槌
+        "evo_battle_ram",  # 觉醒版野蛮人攻城槌
         "hog",  # 野猪骑士
         "lumberjack",  # 狂暴樵夫
-        "evo_lumberjack",  # 进化版狂暴樵夫
+        "evo_lumberjack",  # 觉醒版狂暴樵夫
         "ram_rider",  # 蛮羊骑士
         "royal_hogs",  # 皇家野猪
-        "evo_royal_hogs",  # 进化版皇家野猪
+        "evo_royal_hogs",  # 觉醒版皇家野猪
         "skeleton_barrel",  # 骷髅气球
-        "evo_skeleton_barrel",  # 进化版骷髅气球
+        "evo_skeleton_barrel",  # 觉醒版骷髅气球
         "suspicious_bush",  # 可疑草丛
         "wall_breakers",  # 攻城炸弹人
-        "evo_wall_breakers",  # 进化版攻城炸弹人
+        "evo_wall_breakers",  # 觉醒版攻城炸弹人
     ],
     "miner": [
         "miner",  # 掘地矿工
     ],
     "goblin_barrel": [
         "goblin_barrel",  # 哥布林飞桶
-        "evo_goblin_barrel",  # 进化版哥布林飞桶
+        "evo_goblin_barrel",  # 觉醒版哥布林飞桶
     ],
     "siege_building": [
         "mortar",  # 迫击炮
-        "evo_mortar",  # 进化版迫击炮
+        "evo_mortar",  # 觉醒版迫击炮
         "xbow",  # X连弩
     ],
     "back_support": [
         "archers",  # 弓箭手
-        "evo_archers",  # 进化版弓箭手
+        "evo_archers",  # 觉醒版弓箭手
         "baby_dragon",  # 飞龙宝宝
-        "evo_baby_dragon",  # 进化版飞龙宝宝
+        "evo_baby_dragon",  # 觉醒版飞龙宝宝
         "barb_hut",  # 野蛮人小屋
         "bats",  # 蝙蝠
-        "evo_bats",  # 进化版蝙蝠
+        "evo_bats",  # 觉醒版蝙蝠
         "battle_healer",  # 战斗天使
         "bomber",  # 炸弹兵
-        "evo_bomber",  # 进化版炸弹兵
+        "evo_bomber",  # 觉醒版炸弹兵
         "dart_goblin",  # 吹箭哥布林
-        "evo_dart_goblin",  # 进化版吹箭哥布林
+        "evo_dart_goblin",  # 觉醒版吹箭哥布林
         "electro_wizard",  # 闪电法师
         "elixir_collector",  # 圣水收集器
         "executioner",  # 飞斧屠夫
-        "evo_executioner",  # 进化版飞斧屠夫
+        "evo_executioner",  # 觉醒版飞斧屠夫
         "fire_cracker",  # 烟花炮手
-        "evo_fire_cracker",  # 进化版烟花炮手
+        "evo_fire_cracker",  # 觉醒版烟花炮手
         "flying_machine",  # 飞行器
         "furnace",  # 烈焰熔炉
-        "evo_furnace",  # 进化版烈焰熔炉
+        "evo_furnace",  # 觉醒版烈焰熔炉
         "goblin_gang",  # 哥布林团伙
         "goblin_hut",  # 哥布林小屋
         "goblin_machine",  # 哥布林机甲
         "goblins",  # 哥布林
-        "hero_goblins",  # 英雄版哥布林
+        "hero_goblins",  # 精英版哥布林
         "hunter",  # 猎人
-        "evo_hunter",  # 进化版猎人
+        "evo_hunter",  # 觉醒版猎人
         "ice_wizard",  # 寒冰法师
         "inferno_dragon",  # 地狱飞龙
-        "evo_inferno_dragon",  # 进化版地狱飞龙
+        "evo_inferno_dragon",  # 觉醒版地狱飞龙
         "magic_archer",  # 神箭游侠
-        "hero_magic_archer",  # 英雄版神箭游侠
+        "hero_magic_archer",  # 精英版神箭游侠
         "minion_horde",  # 亡灵大军
-        "evo_minion_horde",  # 进化版亡灵大军
+        "evo_minion_horde",  # 觉醒版亡灵大军
         "minions",  # 亡灵
         "musketeer",  # 火枪手
-        "evo_musketeer",  # 进化版火枪手
-        "hero_musketeer",  # 英雄版火枪手
+        "evo_musketeer",  # 觉醒版火枪手
+        "hero_musketeer",  # 精英版火枪手
         "phoenix",  # 凤凰
         "rascals",  # 绿林团伙
         "skeleton_army",  # 骷髅军团
-        "evo_skeleton_army",  # 进化版骷髅军团
+        "evo_skeleton_army",  # 觉醒版骷髅军团
         "skeleton_dragons",  # 骷髅飞龙
         "skeletons",  # 骷髅兵
-        "evo_skeletons",  # 进化版骷髅兵
+        "evo_skeletons",  # 觉醒版骷髅兵
         "spear_goblins",  # 哥布林投矛手
         "tombstone",  # 骷髅墓碑
-        "hero_tombstone",  # 英雄版骷髅墓碑
+        "hero_tombstone",  # 精英版骷髅墓碑
         "wizard",  # 法师
-        "evo_wizard",  # 进化版法师
-        "hero_wizard",  # 英雄版法师
+        "evo_wizard",  # 觉醒版法师
+        "hero_wizard",  # 精英版法师
         "zappies",  # 电击车小队
     ],
 }
@@ -2749,7 +2749,7 @@ card_color_data = {
             "Maroon": 10,
         },
     ],
-    "evo_battle_ram": [  # 进化版野蛮人攻城槌
+    "evo_battle_ram": [  # 觉醒版野蛮人攻城槌
         {
             "Red": 0,
             "Orange": 0,
@@ -2823,7 +2823,7 @@ card_color_data = {
             "Maroon": 2,
         },
     ],
-    "evo_fire_cracker": [  # 进化版烟花炮手
+    "evo_fire_cracker": [  # 觉醒版烟花炮手
         {
             "Red": 0,
             "Orange": 46,
@@ -5709,7 +5709,7 @@ card_color_data = {
             "Maroon": 23,
         },
     ],
-    "hero_knight": [  # 英雄版骑士
+    "hero_knight": [  # 精英版骑士
         {
             "Red": 0,
             "Orange": 50,
@@ -5783,7 +5783,7 @@ card_color_data = {
             "Maroon": 2,
         },
     ],
-    "hero_magic_archer": [  # 英雄版神箭游侠
+    "hero_magic_archer": [  # 精英版神箭游侠
         {
             "Red": 0,
             "Orange": 7,
@@ -8003,7 +8003,7 @@ card_color_data = {
             "Maroon": 3,
         },
     ],
-    "evo_royal_giant": [  # 进化版皇家巨人
+    "evo_royal_giant": [  # 觉醒版皇家巨人
         {
             "Red": 0,
             "Orange": 0,
@@ -8077,7 +8077,7 @@ card_color_data = {
             "Maroon": 59,
         },
     ],
-    "hero_barb_barrel": [  # 英雄版野蛮人滚桶
+    "hero_barb_barrel": [  # 精英版野蛮人滚桶
         {
             "Red": 0,
             "Orange": 0,
@@ -8151,7 +8151,7 @@ card_color_data = {
             "Maroon": 1,
         },
     ],
-    "hero_bowler": [  # 英雄版巨石投手
+    "hero_bowler": [  # 精英版巨石投手
         {
             "Red": 0,
             "Orange": 0,
@@ -8669,7 +8669,7 @@ card_color_data = {
             "Maroon": 39,
         },
     ],
-    "evo_knight": [  # 进化版骑士
+    "evo_knight": [  # 觉醒版骑士
         {
             "Red": 0,
             "Orange": 0,
@@ -8743,7 +8743,7 @@ card_color_data = {
             "Maroon": 6,
         },
     ],
-    "evo_mortar": [  # 进化版迫击炮
+    "evo_mortar": [  # 觉醒版迫击炮
         {
             "Red": 0,
             "Orange": 135,
@@ -9261,7 +9261,7 @@ card_color_data = {
             "Maroon": 357,
         },
     ],
-    "evo_goblin_cage": [  # 进化版哥布林牢笼
+    "evo_goblin_cage": [  # 觉醒版哥布林牢笼
         {
             "Red": 0,
             "Orange": 38,
@@ -9335,7 +9335,7 @@ card_color_data = {
             "Maroon": 84,
         },
     ],
-    "evo_ice_spirit": [  # 进化版冰雪精灵
+    "evo_ice_spirit": [  # 觉醒版冰雪精灵
         {
             "Red": 0,
             "Orange": 7,
@@ -9631,7 +9631,7 @@ card_color_data = {
             "Maroon": 160,
         },
     ],
-    "hero_goblins": [  # 英雄版哥布林
+    "hero_goblins": [  # 精英版哥布林
         {
             "Red": 0,
             "Orange": 1,
@@ -10149,7 +10149,7 @@ card_color_data = {
             "Maroon": 4,
         },
     ],
-    "evo_archers": [  # 进化版弓箭手
+    "evo_archers": [  # 觉醒版弓箭手
         {
             "Red": 0,
             "Orange": 0,
@@ -10223,7 +10223,7 @@ card_color_data = {
             "Maroon": 16,
         },
     ],
-    "evo_baby_dragon": [  # 进化版飞龙宝宝
+    "evo_baby_dragon": [  # 觉醒版飞龙宝宝
         {
             "Red": 0,
             "Orange": 40,
@@ -10297,7 +10297,7 @@ card_color_data = {
             "Maroon": 2,
         },
     ],
-    "evo_bats": [  # 进化版蝙蝠
+    "evo_bats": [  # 觉醒版蝙蝠
         {
             "Red": 0,
             "Orange": 0,
@@ -10371,7 +10371,7 @@ card_color_data = {
             "Maroon": 86,
         },
     ],
-    "evo_tesla": [  # 进化版特斯拉电磁塔
+    "evo_tesla": [  # 觉醒版特斯拉电磁塔
         {
             "Red": 0,
             "Orange": 0,
@@ -10445,7 +10445,7 @@ card_color_data = {
             "Maroon": 36,
         },
     ],
-    "evo_zap": [  # 进化版电击法术
+    "evo_zap": [  # 觉醒版电击法术
         {
             "Red": 0,
             "Orange": 0,
@@ -10963,7 +10963,7 @@ card_color_data = {
             "Maroon": 77,
         },
     ],
-    "evo_wizard": [  # 进化版法师
+    "evo_wizard": [  # 觉醒版法师
         {
             "Red": 0,
             "Orange": 0,
@@ -11037,7 +11037,7 @@ card_color_data = {
             "Maroon": 232,
         },
     ],
-    "evo_bomber": [  # 进化版炸弹兵
+    "evo_bomber": [  # 觉醒版炸弹兵
         {
             "Red": 0,
             "Orange": 0,
@@ -11111,7 +11111,7 @@ card_color_data = {
             "Maroon": 18,
         },
     ],
-    "hero_mini_pekka": [  # 英雄版迷你皮卡
+    "hero_mini_pekka": [  # 精英版迷你皮卡
         {
             "Red": 0,
             "Orange": 1,
@@ -11185,7 +11185,7 @@ card_color_data = {
             "Maroon": 2,
         },
     ],
-    "hero_musketeer": [  # 英雄版火枪手
+    "hero_musketeer": [  # 精英版火枪手
         {
             "Red": 0,
             "Orange": 3,
@@ -11259,7 +11259,7 @@ card_color_data = {
             "Maroon": 76,
         },
     ],
-    "evo_barbarians": [  # 进化版野蛮人
+    "evo_barbarians": [  # 觉醒版野蛮人
         {
             "Red": 0,
             "Orange": 45,
@@ -11333,7 +11333,7 @@ card_color_data = {
             "Maroon": 8,
         },
     ],
-    "evo_goblin_barrel": [  # 进化版哥布林飞桶
+    "evo_goblin_barrel": [  # 觉醒版哥布林飞桶
         {
             "Red": 0,
             "Orange": 0,
@@ -11407,7 +11407,7 @@ card_color_data = {
             "Maroon": 12,
         },
     ],
-    "evo_dart_goblin": [  # 进化版吹箭哥布林
+    "evo_dart_goblin": [  # 觉醒版吹箭哥布林
         {
             "Red": 0,
             "Orange": 75,
@@ -11481,7 +11481,7 @@ card_color_data = {
             "Maroon": 25,
         },
     ],
-    "evo_furnace": [  # 进化版烈焰熔炉
+    "evo_furnace": [  # 觉醒版烈焰熔炉
         {
             "Red": 0,
             "Orange": 0,
@@ -11555,7 +11555,7 @@ card_color_data = {
             "Maroon": 7,
         },
     ],
-    "evo_hunter": [  # 进化版猎人
+    "evo_hunter": [  # 觉醒版猎人
         {
             "Red": 0,
             "Orange": 27,
@@ -11629,7 +11629,7 @@ card_color_data = {
             "Maroon": 4,
         },
     ],
-    "evo_mega_knight": [  # 进化版超级骑士
+    "evo_mega_knight": [  # 觉醒版超级骑士
         {
             "Red": 0,
             "Orange": 11,

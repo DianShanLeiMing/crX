@@ -142,7 +142,7 @@ def save_review(sample: ReviewSample, status: str, card_id: str = "", note: str 
     if status not in ("pending", "confirmed", "ignored"):
         raise ValueError("标注状态无效")
     if status == "confirmed" and card_id not in CARD_NAMES_ZH:
-        raise ValueError("请从卡牌名录中选择准确的卡名（区分进化／英雄版本）")
+        raise ValueError("请从卡牌名录中选择准确的卡名（区分觉醒／精英版本）")
     path = sample_file(sample.directory, "annotations.json")
     reviews = read_json(path)
     reviews[sample.name] = {

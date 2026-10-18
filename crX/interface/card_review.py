@@ -104,7 +104,7 @@ class CardReviewTab(ttk.Frame):
         self.card_combo = ttk.Combobox(edit, textvariable=self.card_var, values=sorted(self.card_choices), width=32)
         self.card_combo.pack(side="left", padx=8)
         self.card_combo.bind("<KeyRelease>", self._search_cards)
-        ttk.Label(edit, text="区分进化 / 英雄版本").pack(side="left")
+        ttk.Label(edit, text="区分觉醒 / 精英版本").pack(side="left")
         notes = ttk.Frame(self)
         notes.grid(row=5, column=0, sticky="ew", pady=4)
         ttk.Label(notes, text="处理备注").pack(side="left")
