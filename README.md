@@ -78,6 +78,9 @@ ADB 路径可指向 Android SDK 的 `adb.exe`，或留空使用 PATH 中的 ADB�
 - 可选对战录制、归档、自定义录制目录、存储大小查看和手动清理。
 - GUI 主题和配置持久化。
 
+国服中文商店已补充“免费！”和“已收集！”识别、栏目滚动、免费确认及领取结果校验，
+适配范围和实机验证记录见 [商店每日免费领取](docs/shop-daily.md)。
+
 已移除卡牌养成、公主塔升级、部落操作、部落战、多账号、Discord，
 以及 MEmu、BlueStacks、Google Play Games 的专用适配。
 

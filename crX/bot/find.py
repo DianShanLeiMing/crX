@@ -8,11 +8,19 @@ predicate module that does not import from find).
 
 from typing import Literal
 
+import numpy as np
+
 from crX.bot.coords import (
     BATTLE_RESULT_BUTTON_REGION,
     GAME_SCREEN_SIZE,
     OPPONENT_WINNER_LABEL_REGION,
     PLAYER_WINNER_LABEL_REGION,
+    SHOP_CATALOG_REGION,
+    SHOP_DAILY_FIRST_COLUMN,
+    SHOP_DAILY_LABEL_OFFSETS,
+    SHOP_DIALOG_CLOSE_REGION,
+    SHOP_FREE_CONFIRM_REGION,
+    SHOP_RECOMMENDATIONS_REGION,
 )
 from crX.detection.image_rec import find_image, pixel_is_equal
 
@@ -73,9 +81,71 @@ def find_battle_outcome(emulator) -> Literal["win", "loss"] | None:
 
 
 def locate_free_shop_offer_icon(emulator) -> tuple[int, int] | None:
-    """Find the free daily shop offer icon anywhere on the current screen.
-
-    Returns (x, y) of the match, or None if not found.
-    """
+    """Locate the Chinese free label in the daily section's first offer only."""
     image = emulator.screenshot()
-    return find_image(image, "daily_free_shop_offer_icon", tolerance=0.9)
+    region = _daily_shop_offer_region(image)
+    if region is None:
+        return None
+    coord = find_image(image, "shop_daily_free", tolerance=0.94, subcrop=region)
+    if coord is None or not _is_bright_green(image, coord, (62, 26)):
+        return None
+    return coord[0] + 20, coord[1] + 12
+
+
+def _shop_image_is_valid(image) -> bool:
+    return image is not None and image.shape == (*GAME_SCREEN_SIZE[::-1], 3)
+
+
+def find_daily_shop_heading(image) -> tuple[int, int] | None:
+    if not _shop_image_is_valid(image):
+        return None
+    return find_image(image, "shop_daily_section", tolerance=0.92, subcrop=SHOP_CATALOG_REGION)
+
+
+def _daily_shop_offer_region(image) -> tuple[int, int, int, int] | None:
+    heading = find_daily_shop_heading(image)
+    if heading is None:
+        return None
+    left, right = SHOP_DAILY_FIRST_COLUMN
+    start, end = SHOP_DAILY_LABEL_OFFSETS
+    top, bottom = heading[1] + start, min(SHOP_CATALOG_REGION[3], heading[1] + end)
+    return (left, top, right, bottom) if bottom - top >= 26 else None
+
+
+def find_collected_shop_offer(image) -> tuple[int, int] | None:
+    region = _daily_shop_offer_region(image)
+    if region is None:
+        return None
+    return find_image(image, "shop_daily_collected", tolerance=0.92, subcrop=region)
+
+
+def _is_bright_green(image, coord, size) -> bool:
+    x, y = coord
+    width, height = size
+    pixels = image[y : y + height, x : x + width].astype(np.int16)
+    blue, green, red = pixels[..., 0], pixels[..., 1], pixels[..., 2]
+    # Grayscale template matching also matches dimmed labels behind a modal.
+    return bool(np.mean((green > 150) & (green > blue + 35) & (green > red + 20)) > 0.25)
+
+
+def find_shop_offer_dialog_close(image) -> tuple[int, int] | None:
+    if not _shop_image_is_valid(image):
+        return None
+    coord = find_image(image, "shop_offer_dialog_close", tolerance=0.92, subcrop=SHOP_DIALOG_CLOSE_REGION)
+    return (coord[0] + 9, coord[1] + 10) if coord is not None else None
+
+
+def find_free_shop_confirmation(image) -> tuple[int, int] | None:
+    """Require the offer dialog AND its explicit, undimmed 免费 button."""
+    if find_shop_offer_dialog_close(image) is None:
+        return None
+    coord = find_image(image, "shop_free_confirmation", tolerance=0.94, subcrop=SHOP_FREE_CONFIRM_REGION)
+    if coord is None or not _is_bright_green(image, coord, (71, 29)):
+        return None
+    return coord[0] + 35, coord[1] + 14
+
+
+def find_shop_recommendations(image) -> tuple[int, int] | None:
+    if not _shop_image_is_valid(image):
+        return None
+    return find_image(image, "shop_recommendations", tolerance=0.92, subcrop=SHOP_RECOMMENDATIONS_REGION)

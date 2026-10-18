@@ -152,9 +152,14 @@ class AdbBasedController(BaseEmulatorController):
             if clicks > 1:
                 time.sleep(max(0.0, interval))
 
-    def swipe(self, x_coord1: int, y_coord1: int, x_coord2: int, y_coord2: int):
+    def swipe(self, x_coord1: int, y_coord1: int, x_coord2: int, y_coord2: int, duration_ms: int | None = None):
         """Swipe on the screen using ADB input swipe."""
-        self.adb(f"shell input swipe {x_coord1} {y_coord1} {x_coord2} {y_coord2}")
+        command = ["shell", "input", "swipe", str(x_coord1), str(y_coord1), str(x_coord2), str(y_coord2)]
+        if duration_ms is not None:
+            if not 1 <= duration_ms <= 10000:
+                raise ValueError("滑动时长必须为 1–10000 毫秒")
+            command.append(str(duration_ms))
+        self.adb(command)
 
     def screenshot(self) -> np.ndarray:
         """

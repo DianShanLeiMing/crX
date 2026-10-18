@@ -23,9 +23,20 @@ from crX.bot.coords import (
     OK_BUTTON_COORDS_IN_TROPHY_REWARD_PAGE,
     REWARD_LEFT_CHOICE_COORD,
     REWARD_RIGHT_CHOICE_COORD,
+    SHOP_CATALOG_SWIPE,
+    SHOP_DAILY_ALIGN_SWIPE,
+    SHOP_DAILY_MAX_HEADING_Y,
+    SHOP_OFFERS_TAB_COORD,
+    SHOP_RECOMMENDATIONS_TAB_COORD,
+    SHOP_SWIPE_DURATION_MS,
 )
 from crX.bot.coords import CLASH_MAIN_DEADSPACE_COORD as CLASH_MAIN_MENU_DEADSPACE_COORD
-from crX.bot.find import find_fight_mode_icon, find_post_battle_button
+from crX.bot.find import (
+    find_daily_shop_heading,
+    find_fight_mode_icon,
+    find_post_battle_button,
+    find_shop_recommendations,
+)
 from crX.bot.state_detect import (
     check_for_reward_choice_screen,
     check_for_trophy_reward_menu,
@@ -336,8 +347,8 @@ def navigate_main_page(emulator, logger: Logger, start_page: str, end_page: str)
     """Navigate from start_page to end_page using the recorded click sequence.
 
     Caller must ensure the bot is on start_page before calling. Sleeps 2 s after
-    every click (between clicks AND between the last click and the destination
-    check). Returns True iff check_if_on_<end_page>(emulator) is True.
+    every click, then polls the destination for up to five seconds to allow
+    menu animations to settle. Never repeats a navigation click on a timeout.
     """
     if not MAIN_PAGE_CHECKS[start_page](emulator):
         return False
@@ -351,9 +362,55 @@ def navigate_main_page(emulator, logger: Logger, start_page: str, end_page: str)
         logger.log(f"  step {i}/{len(clicks)}: clicking ({x}, {y})")
         emulator.click(x, y)
         time.sleep(2)
-    arrived = MAIN_PAGE_CHECKS[end_page](emulator)
+    arrived = False
+    for _ in range(20):
+        arrived = MAIN_PAGE_CHECKS[end_page](emulator)
+        if arrived:
+            break
+        time.sleep(0.25)
     logger.log(f"  arrival check: on {end_page}? {arrived}")
     return arrived
+
+
+def align_daily_shop_offer(emulator) -> bool:
+    """Keep the first daily offer's status above the fixed bottom navigation."""
+    for _ in range(7):
+        if not check_if_on_shop(emulator):
+            return False
+        heading = find_daily_shop_heading(emulator.screenshot())
+        if heading is None:
+            return False
+        if heading[1] <= SHOP_DAILY_MAX_HEADING_Y:
+            return True
+        emulator.swipe(*SHOP_DAILY_ALIGN_SWIPE, duration_ms=SHOP_SWIPE_DURATION_MS)
+        time.sleep(0.4)
+    return False
+
+
+def navigate_daily_shop(emulator, logger: Logger) -> bool:
+    """Select 超值推荐, then slowly scroll overlapping views to 每日精选."""
+    if not check_if_on_shop(emulator):
+        return False
+    for coord in (SHOP_OFFERS_TAB_COORD, SHOP_RECOMMENDATIONS_TAB_COORD):
+        emulator.click(*coord)
+        time.sleep(0.6)
+        if not check_if_on_shop(emulator):
+            return False
+    if find_shop_recommendations(emulator.screenshot()) is None:
+        logger.change_status("未能确认商店超值推荐栏目")
+        return False
+    # Slow swipes avoid fling inertia skipping an entire daily section.
+    for index in range(48):
+        if not check_if_on_shop(emulator):
+            return False
+        if find_daily_shop_heading(emulator.screenshot()) is not None:
+            return align_daily_shop_offer(emulator)
+        if index % 8 == 0:
+            logger.change_status(f"正在查找商店每日精选（第 {index + 1} 页）")
+        emulator.swipe(*SHOP_CATALOG_SWIPE, duration_ms=SHOP_SWIPE_DURATION_MS)
+        time.sleep(0.4)
+    logger.change_status("未找到商店每日精选，未完成本次检查")
+    return False
 
 
 def _navigate_to_deck_selection(emulator, logger: Logger) -> bool:

@@ -103,7 +103,7 @@ class BaseEmulatorController:
         """
         raise NotImplementedError
 
-    def swipe(self, x_coord1: int, y_coord1: int, x_coord2: int, y_coord2: int):
+    def swipe(self, x_coord1: int, y_coord1: int, x_coord2: int, y_coord2: int, duration_ms: int | None = None):
         """
         This method is used to swipe on the emulator screen.
         """

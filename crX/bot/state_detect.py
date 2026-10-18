@@ -554,6 +554,8 @@ def check_if_on_battle_log_page(emulator) -> bool:
 
 def check_if_on_shop(emulator) -> bool:
     iar = emulator.screenshot()
+    if iar is None or iar.shape != (*GAME_SCREEN_SIZE[::-1], 3):
+        return False
     pixels = [iar[589][16], iar[609][19], iar[14][212], iar[15][331], iar[600][128]]
     colors = [[140, 107, 73], [151, 116, 77], [57, 160, 214], [22, 186, 59], [255, 225, 137]]
     for i, p in enumerate(pixels):
