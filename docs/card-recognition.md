@@ -45,6 +45,42 @@ summary.json          保存、去重、丢弃和错误计数
 
 ## 补库与验证
 
+### 卡名名录范围
+
+2026-10-18 已逐项核对用户提供的
+[RoyaleAPI Ranked 卡牌列表](https://royaleapi.com/cards/popular?time=7d&mode=grid&cat=Ranked&sort=rating)：
+页面列出的 188 项均已收录到 `CARD_NAMES_ZH`，觉醒和精英变体独立计数。
+加上程序原有的精灵女王空中／地面形态 ID，本地名录共 190 项。
+这是核对当日该页面的静态名录，后续游戏更新仍需补充，也不据此判断国服的上线进度。
+
+本次补充 11 项：
+
+| 英文 ID | 确认卡名 |
+| --- | --- |
+| `ronin` | 浪人 |
+| `evo_electro_giant` | 觉醒版雷电巨人 |
+| `evo_elite_barbarians` | 觉醒版野蛮人精锐 |
+| `hero_berserker` | 精英版狂战士 |
+| `hero_electro_wizard` | 精英版闪电法师 |
+| `hero_ice_wizard` | 精英版寒冰法师 |
+| `hero_valkyrie` | 精英版瓦基丽武神 |
+| `tower_princess` | 皇家塔公主 |
+| `cannoneer` | 炮兵 |
+| `dagger_duchess` | 飞刀女爵 |
+| `royal_chef` | 皇家大厨 |
+
+基础中文名参考 RoyaleAPI 的简体中文卡牌详情页，例如
+[浪人](https://royaleapi.com/card/ronin/matchup?lang=zh)、
+[皇家塔公主](https://royaleapi.com/card/tower-princess?lang=zh)、
+[炮兵](https://royaleapi.com/card/cannoneer/matchup?lang=zh)、
+[飞刀女爵](https://royaleapi.com/card/dagger-duchess/matchup?lang=zh)、
+[皇家大厨](https://royaleapi.com/card/royal-chef?lang=zh)；`hero_` 继续采用本程序约定的“精英版”。
+保留已有 `barb_barrel`、`hog`、`log` 等英文 ID，避免因网站写法不同而重复添加。
+
+“确认卡名”列表直接使用这份名录，重启程序后可选择新增名称。
+塔楼部队也收录名称供对照，但它们不是可投放的手牌，不为其增加出牌分组。
+名称补齐不等于识别补库：新增普通／觉醒／精英卡仍需真实手牌样本和独立画面验证后才能加入指纹库。
+
 ### 在程序中处理样本
 
 程序新增“卡牌样本”标签页，每 5 秒在后台读取已落盘的样本。标签页标题中的数字表示待确认数量，

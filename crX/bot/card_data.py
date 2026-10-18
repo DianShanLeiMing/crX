@@ -24,7 +24,9 @@ CARD_FINGERPRINT_VARIANTS: dict[str, list[list[list[int]]]] = {
 
 # 中文注释使用简体中文常用卡名, 便于对照英文 ID 阅读。
 # evo_ / hero_ 分别标为觉醒版 / 精英版, 按现有 ID 区分变体。
-# 名称核对参考: https://royaleapi.com/cards/popular?lang=zh
+# 2026-10-18 核对 RoyaleAPI Ranked 列表 188 项, 另保留精灵女王的两种形态 ID。
+# 名称核对参考: https://royaleapi.com/cards/popular?time=7d&mode=grid&cat=Ranked&sort=rating
+# 包含塔楼部队的显示名称; 名录收录不代表已有手牌指纹或出牌分组。
 
 # Display names only; recognition, placement and recording keep the original card IDs.
 CARD_NAMES_ZH: dict[str, str] = {
@@ -47,7 +49,9 @@ CARD_NAMES_ZH: dict[str, str] = {
     "bowler": "巨石投手",
     "cannon": "加农炮",
     "cannon_cart": "加农炮战车",
+    "cannoneer": "炮兵",
     "clone": "克隆法术",
+    "dagger_duchess": "飞刀女爵",
     "dark_prince": "黑暗王子",
     "dart_goblin": "吹箭哥布林",
     "earthquake": "地震法术",
@@ -67,6 +71,8 @@ CARD_NAMES_ZH: dict[str, str] = {
     "evo_cannon": "觉醒版加农炮",
     "evo_dart_goblin": "觉醒版吹箭哥布林",
     "evo_electro_dragon": "觉醒版雷电飞龙",
+    "evo_electro_giant": "觉醒版雷电巨人",
+    "evo_elite_barbarians": "觉醒版野蛮人精锐",
     "evo_executioner": "觉醒版飞斧屠夫",
     "evo_fire_cracker": "觉醒版烟花炮手",
     "evo_furnace": "觉醒版烈焰熔炉",
@@ -127,17 +133,21 @@ CARD_NAMES_ZH: dict[str, str] = {
     "heal_spirit": "治疗精灵",
     "hero_balloon": "精英版气球兵",
     "hero_barb_barrel": "精英版野蛮人滚桶",
+    "hero_berserker": "精英版狂战士",
     "hero_bowler": "精英版巨石投手",
     "hero_dark_prince": "精英版黑暗王子",
+    "hero_electro_wizard": "精英版闪电法师",
     "hero_giant": "精英版巨人",
     "hero_goblins": "精英版哥布林",
     "hero_ice_golem": "精英版戈仑冰人",
+    "hero_ice_wizard": "精英版寒冰法师",
     "hero_knight": "精英版骑士",
     "hero_magic_archer": "精英版神箭游侠",
     "hero_mega_minion": "精英版重甲亡灵",
     "hero_mini_pekka": "精英版迷你皮卡",
     "hero_musketeer": "精英版火枪手",
     "hero_tombstone": "精英版骷髅墓碑",
+    "hero_valkyrie": "精英版瓦基丽武神",
     "hero_wizard": "精英版法师",
     "hog": "野猪骑士",
     "hunter": "猎人",
@@ -176,6 +186,8 @@ CARD_NAMES_ZH: dict[str, str] = {
     "ram_rider": "蛮羊骑士",
     "rascals": "绿林团伙",
     "rocket": "火箭",
+    "ronin": "浪人",
+    "royal_chef": "皇家大厨",
     "royal_delivery": "皇家速递",
     "royal_ghost": "皇家幽灵",
     "royal_giant": "皇家巨人",
@@ -198,6 +210,7 @@ CARD_NAMES_ZH: dict[str, str] = {
     "three_musketeers": "三个火枪手",
     "tombstone": "骷髅墓碑",
     "tornado": "飓风法术",
+    "tower_princess": "皇家塔公主",
     "valkyrie": "瓦基丽武神",
     "vines": "藤蔓法术",
     "void": "虚空法术",
