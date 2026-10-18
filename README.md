@@ -95,12 +95,16 @@ ADB 路径可指向 Android SDK 的 `adb.exe`，或留空使用 PATH 中的 ADB�
 约 5 GiB 的散装数据会归入 ZIP；归档用于整理，并非显著压缩或限制总存储空间。
 磁盘可用空间不足 10% 时跳过新录制。
 
-Windows 默认目录为 `%APPDATA%\crX`：
+运行日志保存在工程目录旁的 `crXlogs` 目录，与启动命令所在目录无关。
+例如工程为 `D:\DaYe\crX` 时，日志目录为 `D:\DaYe\crXlogs`；目录在启动时自动创建。
+日志按启动时间保存为 `.txt`，旧日志归档为同目录下的 `logs.zip`。
+在 **设置 → 打开日志目录** 中可直接打开；修改日志路径后需重新启动程序生效。
+
+Windows 的配置、卡牌样本和默认录制目录仍在 `%APPDATA%\crX`：
 
 ```text
 crX/
 ├── user_settings.json
-├── logs/
 ├── card_samples/
 └── recordings/
     ├── <每局数据包>/

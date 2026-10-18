@@ -41,13 +41,11 @@ def get_app_data_dir(app_name: str) -> str:
 
 
 def get_log_dir(app_name: str) -> str:
-    """Return OS-appropriate directory for log files."""
-    platform = get_platform()
-    if platform == Platform.MACOS:
-        return os.path.join(os.path.expanduser("~/Library/Logs"), app_name)
-    elif platform == Platform.LINUX:
-        return os.path.join(os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state")), app_name, "logs")
-    return os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), app_name, "logs")
+    """Store logs beside the project (or packaged app directory), regardless of cwd."""
+    project_dir = (
+        Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parents[2]
+    )
+    return str(project_dir.parent / f"{app_name}logs")
 
 
 def get_recordings_dir(app_name: str = "crX", custom_path: str | None = None) -> str:
