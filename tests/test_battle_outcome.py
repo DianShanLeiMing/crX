@@ -22,6 +22,8 @@ class ResultScreen:
         self.clicks = []
 
     def screenshot(self):
+        if self.on_main:
+            return open_from_path(str(FIXTURES / "post-battle-main-native.png"))
         return self.image
 
     def click(self, x, y):
@@ -89,9 +91,6 @@ def result_flow(monkeypatch):
     monkeypatch.setattr(fight.time, "sleep", sleep)
     monkeypatch.setattr(fight, "is_recording", lambda: False)
     monkeypatch.setattr(fight, "finish_fight_recording", finished.append)
-    monkeypatch.setattr(nav, "check_if_on_clash_main_menu", lambda screen: screen.on_main)
-    monkeypatch.setattr(nav, "check_for_trophy_reward_menu", lambda screen: False)
-    monkeypatch.setattr(nav, "check_for_reward_choice_screen", lambda screen: False)
 
     def no_battle_log(*args, **kwargs):
         pytest.fail("Result collection must not open the battle log")
@@ -121,8 +120,8 @@ def test_real_result_navigation_updates_statistics_and_completed_count(result_fl
     assert logger.stats["losses"] == losses
     assert logger.stats["completed_fights"] == context.completed_fights == 1
     assert logger.stats["restarts_after_failure"] == 0
-    # Includes the existing three-second main-menu settle; outcome wait is bounded.
-    assert elapsed[0] < 7
+    # Includes the result-click cooldown and three uninterrupted seconds on main.
+    assert elapsed[0] < 8
 
 
 def test_disabled_statistics_still_collect_recording_outcome(result_flow, monkeypatch):

@@ -8,6 +8,9 @@ This module is a leaf: the only crX.bot module it imports from is
 `coords` (itself a leaf — pure data, no imports). No nav, fight, deck, etc.
 """
 
+from typing import Literal
+
+import cv2
 import numpy
 
 from crX.bot.coords import (
@@ -16,6 +19,10 @@ from crX.bot.coords import (
     BATTLE_REWARD_CROWN_REGION,
     BATTLE_REWARDS_REGION,
     GAME_SCREEN_SIZE,
+    POST_BATTLE_REWARD_EDGE_REGIONS,
+    POST_BATTLE_REWARD_OBJECT_REGION,
+    POST_BATTLE_REWARD_STARS_REGION,
+    POST_BATTLE_REWARD_TOP_REGION,
 )
 from crX.detection.image_rec import all_pixels_are_equal, check_line_for_color, find_image, pixel_is_equal
 
@@ -86,7 +93,12 @@ def check_for_post_battle_button(emulator) -> bool:
 
 
 def check_for_trophy_reward_menu(emulator) -> bool:
-    iar = emulator.screenshot()
+    return is_trophy_reward_image(emulator.screenshot())
+
+
+def is_trophy_reward_image(iar) -> bool:
+    if iar is None or iar.shape != (*GAME_SCREEN_SIZE[::-1], 3):
+        return False
     pixels = [
         iar[592][172],
         iar[617][180],
@@ -117,7 +129,12 @@ def check_for_trophy_reward_menu(emulator) -> bool:
 
 def check_for_reward_choice_screen(emulator) -> bool:
     """Detect the post-battle 'Choose your reward' screen by its banner text."""
-    iar = emulator.screenshot()
+    return is_reward_choice_image(emulator.screenshot())
+
+
+def is_reward_choice_image(iar) -> bool:
+    if iar is None or iar.shape != (*GAME_SCREEN_SIZE[::-1], 3):
+        return False
     pixels = [
         iar[193][90],
         iar[196][103],
@@ -242,6 +259,60 @@ def _is_clash_main_menu_image(image) -> bool:
         if all_pixels_are_equal(pixels, colors, 25):
             return True
     return False
+
+
+def is_clash_main_menu_image(image) -> bool:
+    """Inspect the same frame as reward detection, without another screenshot."""
+    return _is_clash_main_menu_image(image)
+
+
+def _region(image, region):
+    left, top, right, bottom = region
+    return image[top:bottom, left:right]
+
+
+def detect_post_battle_reward(image) -> Literal["lucky_chest", "event_reward"] | None:
+    """Require a full reward backdrop AND its foreground; color alone is insufficient.
+
+    HSV ranges describe the orange/purple lucky chest and blue framed event
+    reward. Attached enlarged images are calibration examples, not templates.
+    """
+    if image is None or image.shape != (*GAME_SCREEN_SIZE[::-1], 3):
+        return None
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    hue, saturation, value = hsv.transpose(2, 0, 1)
+    vivid = (saturation > 70) & (value > 40)
+
+    def backdrop(lower, upper):
+        mask = (hue >= lower) & (hue <= upper) & vivid
+        uniform_top = _region(mask, POST_BATTLE_REWARD_TOP_REGION).mean() > 0.94
+        uniform_sides = all(_region(mask, region).mean() > 0.94 for region in POST_BATTLE_REWARD_EDGE_REGIONS)
+        return mask if uniform_top and uniform_sides else None
+
+    orange, purple, blue = backdrop(8, 35), backdrop(125, 165), backdrop(90, 120)
+    if orange is not None or purple is not None:
+        pixels = _region(image, POST_BATTLE_REWARD_STARS_REGION).astype(numpy.int16)
+        b, g, r = pixels.transpose(2, 0, 1)
+        stars = ((r > 215) & (g > 205) & (b < 225) & (r > b + 25)).astype(numpy.uint8)
+        _, _, components, _ = cv2.connectedComponentsWithStats(stars)
+        centers = [
+            (x + width / 2, y + height / 2)
+            for x, y, width, height, area in components[1:]
+            if 12 <= width <= 40 and 12 <= height <= 40 and 0.3 < area / (width * height) < 0.75
+        ]
+        aligned = 1 <= len(centers) <= 5 and max(y for _, y in centers) - min(y for _, y in centers) < 8
+        background = orange if orange is not None else purple
+        foreground = 1 - _region(background, POST_BATTLE_REWARD_OBJECT_REGION).mean()
+        if aligned and foreground > 0.12:
+            return "lucky_chest"
+    if blue is not None:
+        gold = (hue >= 5) & (hue <= 35) & vivid
+        # Both closed mystery frames and revealed pieces have visible wooden/gold borders.
+        has_frame = _region(gold, POST_BATTLE_REWARD_OBJECT_REGION).mean() > 0.06
+        foreground = 1 - _region(blue, POST_BATTLE_REWARD_OBJECT_REGION).mean()
+        if has_frame and foreground > 0.12:
+            return "event_reward"
+    return None
 
 
 def check_if_battle_rewards_finished(emulator) -> bool:

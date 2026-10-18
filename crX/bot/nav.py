@@ -21,6 +21,7 @@ from crX.bot.coords import (
     DECK_TABS_REGION,
     DECKS_PAGE_BUTTON_COORDS,
     OK_BUTTON_COORDS_IN_TROPHY_REWARD_PAGE,
+    POST_BATTLE_REWARD_CONTINUE_COORD,
     REWARD_LEFT_CHOICE_COORD,
     REWARD_RIGHT_CHOICE_COORD,
     SHOP_CATALOG_SWIPE,
@@ -34,11 +35,10 @@ from crX.bot.coords import CLASH_MAIN_DEADSPACE_COORD as CLASH_MAIN_MENU_DEADSPA
 from crX.bot.find import (
     find_daily_shop_heading,
     find_fight_mode_icon,
-    find_post_battle_button,
+    find_post_battle_button_in_image,
     find_shop_recommendations,
 )
 from crX.bot.state_detect import (
-    check_for_reward_choice_screen,
     check_for_trophy_reward_menu,
     check_if_in_battle,
     check_if_on_battle_log_page,
@@ -47,12 +47,19 @@ from crX.bot.state_detect import (
     check_if_on_clash_main_burger_button_options_menu,
     check_if_on_clash_main_menu,
     check_if_on_shop,
+    detect_post_battle_reward,
+    is_clash_main_menu_image,
+    is_reward_choice_image,
+    is_trophy_reward_image,
 )
 from crX.detection.image_rec import find_image
 from crX.interface.enums import BATTLE_MODE_LABELS
 from crX.utils.logger import Logger
 
 CLASH_MAIN_WAIT_TIMEOUT = 240
+POST_BATTLE_TIMEOUT_S = 120
+POST_BATTLE_MAIN_STABLE_S = 3.0
+POST_BATTLE_MAX_ACTIONS = 40
 
 
 def wait_for_battle_start(emulator, logger, timeout: int = 120) -> bool:
@@ -289,7 +296,7 @@ def select_mode(emulator, mode: str, logger: Logger | None = None):
         else:
             print(msg)
         return False
-    if not check_if_on_clash_main_menu(emulator):
+    if not check_if_on_clash_main_menu(emulator) and not finish_pending_battle_rewards(emulator, logger):
         msg = "当前不在主界面，无法选择对战模式"
         if logger is not None:
             logger.change_status(msg)
@@ -436,39 +443,99 @@ def switch_deck_page(emulator, logger: Logger) -> bool:
     return False
 
 
-def get_to_main_after_fight(emulator, logger, on_result_screen: Callable[[], None] | None = None):
-    timeout = 120
-    start_time = time.time()
-    clicked_ok_or_exit = False
+def get_to_main_after_fight(
+    emulator,
+    logger,
+    on_result_screen: Callable[[], None] | None = None,
+    *,
+    timeout: float = POST_BATTLE_TIMEOUT_S,
+    allow_result_button: bool = True,
+):
+    """Drain recognized rewards, then verify an uninterrupted, settled main menu.
+
+    Every action is chosen from a fresh frame. Unknown scenes only wait; the
+    caller's existing recovery policy handles the bounded failure.
+    """
+    deadline = time.monotonic() + timeout
+    main_since = None
+    captured_outcome = False
+    result_clicks = 0
+    actions = 0
+    last_stage = None
     logger.change_status("对战结束，正在返回主界面……")
-    while time.time() - start_time < timeout:
-        if check_if_on_clash_main_menu(emulator) is True:
-            time.sleep(3)
-            if check_for_trophy_reward_menu(emulator):
-                handle_trophy_reward_menu(emulator, logger, printmode=True)
-                time.sleep(2)
-            logger.change_status("对战结束后已返回主界面")
-            return True
-        if check_for_trophy_reward_menu(emulator):
+    while time.monotonic() < deadline:
+        image = emulator.screenshot()
+        reward = detect_post_battle_reward(image)
+        if reward is not None:
+            main_since = None
+            if actions >= POST_BATTLE_MAX_ACTIONS:
+                break
+            labels = {"lucky_chest": "正在开启战后奖励宝箱", "event_reward": "正在领取战后活动奖励"}
+            if reward != last_stage:
+                logger.change_status(labels[reward])
+            logger.log(f"战后奖励推进：{reward}，第 {actions + 1} 次操作")
+            emulator.click(*POST_BATTLE_REWARD_CONTINUE_COORD)
+            actions += 1
+            last_stage = reward
+            time.sleep(1)
+            continue
+        if is_clash_main_menu_image(image):
+            if main_since is None:
+                main_since = time.monotonic()
+                logger.change_status("检测到主界面，正在确认奖励弹窗已结束")
+            last_stage = "main"
+            if time.monotonic() - main_since >= POST_BATTLE_MAIN_STABLE_S:
+                logger.change_status("对战结束后已确认稳定返回主界面")
+                return True
+            time.sleep(0.5)
+            continue
+        main_since = None
+        if actions >= POST_BATTLE_MAX_ACTIONS:
+            break
+        if is_trophy_reward_image(image):
             handle_trophy_reward_menu(emulator, logger, printmode=True)
-            time.sleep(3)
+            actions += 1
+            last_stage = "trophy_reward"
             continue
-        if check_for_reward_choice_screen(emulator):
+        if is_reward_choice_image(image):
             handle_reward_choice(emulator, logger)
-            time.sleep(3)
+            actions += 2
+            last_stage = "reward_choice"
             continue
-        if not clicked_ok_or_exit:
-            button_coord = find_post_battle_button(emulator)
+        if allow_result_button and result_clicks < 5:
+            button_coord = find_post_battle_button_in_image(image)
             if button_coord is not None:
-                if on_result_screen is not None:
+                if not captured_outcome and on_result_screen is not None:
                     on_result_screen()
+                captured_outcome = True
                 logger.change_status("正在点击战后确认按钮")
-                emulator.click(button_coord[0], button_coord[1])
-                clicked_ok_or_exit = True
+                emulator.click(*button_coord)
+                result_clicks += 1
+                actions += 1
+                last_stage = "result"
+                time.sleep(1)
                 continue
-        time.sleep(1)
-        emulator.click(CLASH_MAIN_MENU_DEADSPACE_COORD[0], CLASH_MAIN_MENU_DEADSPACE_COORD[1])
+        if last_stage != "unknown":
+            logger.change_status("正在等待战后奖励或加载动画，不点击未知页面")
+        last_stage = "unknown"
+        time.sleep(0.5)
+    logger.change_status(f"战后返回主界面失败：未确认稳定主界面（最后阶段 {last_stage}，已操作 {actions} 次）")
     return False
+
+
+def finish_pending_battle_rewards(emulator, logger) -> bool:
+    """Catch a late reward overlay before matchmaking without recounting a battle."""
+    image = emulator.screenshot()
+    if is_clash_main_menu_image(image):
+        return True
+    if detect_post_battle_reward(image) is None and not (
+        is_trophy_reward_image(image) or is_reward_choice_image(image)
+    ):
+        return False
+    if logger is None:
+        logger = Logger()
+    logger.change_status("开战前发现残留奖励，先完成领取")
+    return get_to_main_after_fight(emulator, logger, timeout=45, allow_result_button=False)
 
 
 if __name__ == "__main__":

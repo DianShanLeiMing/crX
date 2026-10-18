@@ -53,7 +53,13 @@ def find_post_battle_button(emulator):
     Returns:
         tuple[int, int] | None: Button coordinates (x, y) or None if not found
     """
-    iar = emulator.screenshot()
+    return find_post_battle_button_in_image(emulator.screenshot())
+
+
+def find_post_battle_button_in_image(iar):
+    """Same-frame result button lookup for the post-battle navigation loop."""
+    if iar is None or iar.shape != (*GAME_SCREEN_SIZE[::-1], 3):
+        return None
     pixels = [iar[545][178], iar[547][239], iar[553][214], iar[554][201]]
     colors = [[255, 187, 104], [255, 187, 104], [255, 255, 255], [255, 255, 255]]
     pixel_match = True

@@ -27,6 +27,7 @@ from crX.bot.coords import (
 from crX.bot.find import find_battle_outcome
 from crX.bot.nav import (
     check_for_in_battle_with_delay,
+    finish_pending_battle_rewards,
     get_to_main_after_fight,
     wait_for_battle_start,
 )
@@ -40,7 +41,6 @@ from crX.bot.recorder import (
 from crX.bot.state_detect import (
     check_if_battle_has_ended,
     check_if_in_battle,
-    check_if_on_clash_main_menu,
     count_elixir,
 )
 from crX.interface.enums import BATTLE_MODE_LABELS
@@ -138,7 +138,7 @@ def start_fight(emulator, logger, mode) -> bool:
 
     # Check if on clash main menu
     logger.log("Checking if on main menu before starting fight...")
-    if not check_if_on_clash_main_menu(emulator):
+    if not finish_pending_battle_rewards(emulator, logger):
         logger.change_status("当前不在主界面，无法开始对战")
         return False
 
