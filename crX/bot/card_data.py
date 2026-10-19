@@ -320,6 +320,7 @@ PLAY_COORDS = {
 # Maps card ids → arena zone profile → PLAY_COORDS (see #674).
 # Includes base, Evolution, and Hero ids even before card_color_data fingerprints exist so
 # new detection work automatically picks up tuned clicks instead of the No group fallback.
+# New-card role rationale and sources: docs/placement-zones.md.
 CARD_GROUPS: dict[str, list[str]] = {
     "king_lane": [
         "archer_queen",  # 弓箭女皇
@@ -345,6 +346,7 @@ CARD_GROUPS: dict[str, list[str]] = {
         "balloon",  # 气球兵
         "hero_balloon",  # 精英版气球兵
         "electro_giant",  # 雷电巨人
+        "evo_electro_giant",  # 觉醒版雷电巨人: 沿用本体的前场推进点
         "elixir_golem",  # 圣水戈仑
         "giant",  # 巨人
         "hero_giant",  # 精英版巨人
@@ -367,6 +369,7 @@ CARD_GROUPS: dict[str, list[str]] = {
         "dark_prince",  # 黑暗王子
         "hero_dark_prince",  # 精英版黑暗王子
         "elite_barbarians",  # 野蛮人精锐
+        "evo_elite_barbarians",  # 觉醒版野蛮人精锐: 近战推进, 沿用本体落点
         "fisherman",  # 渔夫
         "golden_knight",  # 黄金圣骑
         "guards",  # 骷髅守卫
@@ -385,12 +388,15 @@ CARD_GROUPS: dict[str, list[str]] = {
         "evo_pekka",  # 觉醒版皮卡超人
         "clone",  # 克隆法术
         "prince",  # 王子
+        "ronin",  # 浪人: 近战单体交战, 使用己方前场点
         "royal_ghost",  # 皇家幽灵
         "evo_royal_ghost",  # 觉醒版皇家幽灵
         "skeleton_king",  # 骷髅帝王
         "valkyrie",  # 瓦基丽武神
         "evo_valkyrie",  # 觉醒版瓦基丽武神
+        "hero_valkyrie",  # 精英版瓦基丽武神: 近战范围清理, 沿用本体落点
         "berserker",  # 狂战士
+        "hero_berserker",  # 精英版狂战士: 近战输出, 沿用本体落点
         "spirit_empress",  # 精灵女王
     ],
     "center_spell": [
@@ -484,6 +490,7 @@ CARD_GROUPS: dict[str, list[str]] = {
         "dart_goblin",  # 吹箭哥布林
         "evo_dart_goblin",  # 觉醒版吹箭哥布林
         "electro_wizard",  # 闪电法师
+        "hero_electro_wizard",  # 精英版闪电法师: 后排控制支援, 沿用本体落点
         "elixir_collector",  # 圣水收集器
         "executioner",  # 飞斧屠夫
         "evo_executioner",  # 觉醒版飞斧屠夫
@@ -500,6 +507,7 @@ CARD_GROUPS: dict[str, list[str]] = {
         "hunter",  # 猎人
         "evo_hunter",  # 觉醒版猎人
         "ice_wizard",  # 寒冰法师
+        "hero_ice_wizard",  # 精英版寒冰法师: 后排减速支援, 沿用本体落点
         "inferno_dragon",  # 地狱飞龙
         "evo_inferno_dragon",  # 觉醒版地狱飞龙
         "magic_archer",  # 神箭游侠
