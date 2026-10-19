@@ -16,12 +16,20 @@ from PIL import Image
 from crX.bot.card_data import CARD_NAMES_ZH
 from crX.bot.coords import HAND_CARD_SIZE
 
-STATUS_LABELS = {"pending": "待确认", "confirmed": "已确认 · 待补库", "included": "已补库", "ignored": "已忽略"}
+STATUS_LABELS = {
+    "pending": "待确认",
+    "confirmed": "已确认 · 待补库",
+    "trial": "试用 · 待验证",
+    "included": "已补库",
+    "covered": "无需补库",
+    "ignored": "已忽略",
+}
 REASON_LABELS = {
     "unknown": "未知卡牌",
     "unknown_card": "未知卡牌",
     "low_margin": "候选接近",
     "no_available_cards_high_elixir": "手牌可用性异常",
+    "trial_match": "试用指纹命中",
 }
 SAMPLE_NAME = re.compile(r"sample-\d{3,}")
 
@@ -67,6 +75,8 @@ class ReviewSample:
 
     @property
     def status(self) -> str:
+        if self.review.get("library_status") in ("trial", "included", "covered"):
+            return self.review["library_status"]
         status = self.review.get("status")
         if status in ("pending", "confirmed", "ignored"):
             return status
@@ -137,6 +147,28 @@ def scan_samples(root: Path) -> tuple[list[ReviewSample], int]:
                 seen.add(name)
             except (ValueError, KeyError, TypeError, AttributeError):
                 errors += 1
+    from crX.utils.card_library import read_library
+
+    try:
+        entries = read_library(root)
+    except (OSError, ValueError, TypeError):
+        entries = []
+        errors += 1
+    library_sources = {(source, entry["card_id"]): entry for entry in entries for source in entry["sources"]}
+    for sample in samples:
+        entry = library_sources.get((sample.key, sample.card_id))
+        if entry and sample.status in ("confirmed", "included"):
+            sample.review = {
+                **sample.review,
+                "library_status": {
+                    "trial": "trial",
+                    "active": "included",
+                    "covered": "covered",
+                    "disabled": "confirmed",
+                }[entry["status"]],
+                "library_id": entry["id"],
+                "validation": entry.get("validation", {}),
+            }
     return samples, errors
 
 
@@ -176,6 +208,10 @@ def save_reviews(samples: list[ReviewSample], status: str, card_id: str = "", no
                 f"已保存 {saved}/{total} 张；{path.parent.name} 保存失败：{error}。请刷新后重试未保存条目。"
             ) from error
         saved += len(names)
+    from crX.utils.card_library import recheck_library
+
+    for root in {sample.directory.parent for sample in samples}:
+        recheck_library(root)
     return saved
 
 
@@ -187,15 +223,19 @@ def _group_features(sample: ReviewSample) -> tuple[int, np.ndarray] | None:
         return None
     try:
         with Image.open(sample.file("card")) as image:
-            if image.size != HAND_CARD_SIZE:
-                return None
-            pixels = np.asarray(image.convert("RGB").resize((18, 22)), dtype=np.int16)
-            gray = np.asarray(image.convert("L").resize((9, 8)))
-        bits = gray[:, 1:] > gray[:, :-1]
-        hash_value = int.from_bytes(np.packbits(bits).tobytes())
-        return hash_value, pixels
+            return image_group_features(image)
     except (OSError, ValueError, KeyError, Image.DecompressionBombError):
         return None
+
+
+def image_group_features(image: Image.Image) -> tuple[int, np.ndarray] | None:
+    """Use the same conservative appearance comparison during capture and review."""
+    if image.size != HAND_CARD_SIZE:
+        return None
+    pixels = np.asarray(image.convert("RGB").resize((18, 22)), dtype=np.int16)
+    gray = np.asarray(image.convert("L").resize((9, 8)))
+    bits = gray[:, 1:] > gray[:, :-1]
+    return int.from_bytes(np.packbits(bits).tobytes()), pixels
 
 
 @dataclass

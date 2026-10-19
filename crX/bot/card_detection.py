@@ -14,6 +14,7 @@ from crX.bot.card_data import (
 from crX.bot.card_samples import active_card_samples
 from crX.bot.coords import CHAMPION_ABILITY_DISMISS_COORD, GAME_SCREEN_SIZE, HAND_CARD_SIZE, HAND_CARD_TOP_LEFTS
 from crX.bot.state_detect import image_has_elixir
+from crX.utils.card_library import runtime_entries
 
 toplefts = HAND_CARD_TOP_LEFTS
 
@@ -87,10 +88,18 @@ def recognize_card_fingerprint(collected_data):
     """Expose real distances even beyond the acceptance threshold; keep play policy."""
     collected = numpy.array([[corner[color] for color in COLORS_KEYS] for corner in collected_data], dtype=numpy.int64)
     distances = numpy.abs(_REFERENCE_MATRIX - collected).sum(axis=(1, 2))
+    names = _REFERENCE_NAMES
+    sources = _REFERENCE_SOURCES
+    local = runtime_entries()
+    if local:
+        local_distances = numpy.abs(numpy.array([entry["fingerprint"] for entry in local]) - collected).sum(axis=(1, 2))
+        distances = numpy.concatenate((distances, local_distances))
+        names += tuple(entry["card_id"] for entry in local)
+        sources += tuple(f"local_{entry['status']}:{entry['id']}" for entry in local)
     candidates = []
     canonical_seen = set()
     for index in numpy.argsort(distances, kind="stable"):
-        raw_id = _REFERENCE_NAMES[index]
+        raw_id = names[index]
         canonical_id = CARD_DETECTION_ALIASES.get(raw_id, raw_id)
         if canonical_id in canonical_seen:
             continue
@@ -99,7 +108,7 @@ def recognize_card_fingerprint(collected_data):
             {
                 "card_id": canonical_id,
                 "fingerprint_id": raw_id,
-                "source": _REFERENCE_SOURCES[index],
+                "source": sources[index],
                 "distance": int(distances[index]),
             }
         )
@@ -110,6 +119,7 @@ def recognize_card_fingerprint(collected_data):
     return {
         "card_id": best["card_id"] if accepted else "UNKNOWN",
         "fingerprint_id": best["fingerprint_id"] if accepted else "UNKNOWN",
+        "source": best["source"] if accepted else "",
         "candidates": candidates,
         "candidate_margin": candidates[1]["distance"] - best["distance"],
         "match_threshold": CARD_MATCH_THRESHOLD,
@@ -279,6 +289,8 @@ def _record_match_sample(image, slot, fingerprint, recognition, *, trigger, purp
         return
     if recognition["card_id"] == "UNKNOWN":
         reason = "unknown"
+    elif recognition.get("source", "").startswith("local_trial:"):
+        reason = "trial_match"
     elif recognition["candidate_margin"] < DIAGNOSTIC_MIN_MARGIN:
         reason = "low_margin"
     else:

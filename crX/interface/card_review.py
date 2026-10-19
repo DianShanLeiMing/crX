@@ -14,6 +14,7 @@ from ttkbootstrap.widgets.scrolled import ScrolledFrame
 
 from crX.bot.card_data import CARD_NAMES_ZH
 from crX.bot.card_samples import get_card_samples_dir
+from crX.utils.card_library import update_library
 from crX.utils.card_review import (
     REASON_LABELS,
     STATUS_LABELS,
@@ -58,7 +59,7 @@ class CardReviewTab(ttk.Frame):
         self.filter_combo = ttk.Combobox(
             tools,
             textvariable=self.filter_var,
-            values=["待确认", "已确认", "已补库", "已忽略", "全部"],
+            values=["待确认", "已确认", "试用待验证", "已补库", "无需补库", "已忽略", "全部"],
             state="readonly",
             width=8,
         )
@@ -144,8 +145,20 @@ class CardReviewTab(ttk.Frame):
             button.pack(side="left", padx=(0, 8))
             self.action_buttons.append(button)
         self.message_var = tk.StringVar(value="分组仅供参考，请核对普通／觉醒／精英版本；批量标注不自动补库。")
+        library_actions = ttk.Frame(self)
+        library_actions.grid(row=7, column=0, sticky="ew", pady=2)
+        self.library_buttons = []
+        for title, action in (("试用补库", "trial"), ("验证并保留", "validate"), ("撤销补库", "revoke")):
+            button = ttk.Button(
+                library_actions,
+                text=title,
+                command=lambda action=action: self._library_action(action),
+                state="disabled",
+            )
+            button.pack(side="left", padx=(0, 8))
+            self.library_buttons.append(button)
         message = ttk.Label(self, textvariable=self.message_var, wraplength=640)
-        message.grid(row=7, column=0, sticky="ew", pady=(4, 0))
+        message.grid(row=8, column=0, sticky="ew", pady=(4, 0))
         message.bind("<Configure>", lambda event: message.configure(wraplength=max(200, event.width - 8)))
         self._later(100, self._poll)
         self._later(5000, self._auto_refresh)
@@ -209,7 +222,7 @@ class CardReviewTab(ttk.Frame):
                     self._update_groups(groups)
                     counts = Counter(sample.status for sample in samples)
                     self.summary_var.set(
-                        f"待确认 {counts['pending']}  |  已确认待补库 {counts['confirmed']}  |  已补库 {counts['included']}  |  已忽略 {counts['ignored']}"
+                        f"待确认 {counts['pending']}  |  待补库 {counts['confirmed']}  |  试用 {counts['trial']}  |  已补库 {counts['included']}  |  无需补库 {counts['covered']}  |  已忽略 {counts['ignored']}"
                     )
                     if self.count_callback:
                         self.count_callback(counts["pending"])
@@ -231,14 +244,18 @@ class CardReviewTab(ttk.Frame):
                         photo = ImageTk.PhotoImage(preview, master=self) if preview is not None else None
                         self._images[image_kind] = photo
                         widget.configure(image=photo or "", text="图片缺失或损坏" if photo is None else "")
-            elif kind in ("save", "export"):
+            elif kind in ("save", "export", "library"):
                 self._action_busy = False
                 self._set_action_state()
                 if error is None:
                     self.message_var.set(
-                        f"补库候选已导出：{result}；验证后再加入识别库。"
-                        if kind == "export"
-                        else f"已保存 {result} 张样本的标注；对战继续按配置执行。确认卡名不等于已补库。"
+                        result
+                        if kind == "library"
+                        else (
+                            f"补库候选已导出：{result}；验证后再加入识别库。"
+                            if kind == "export"
+                            else f"已保存 {result} 张样本的标注；对战继续按配置执行。确认卡名不等于已补库。"
+                        )
                     )
                 self.refresh()
             if error:
@@ -258,7 +275,14 @@ class CardReviewTab(ttk.Frame):
         )
 
     def _render_list(self):
-        states = {"待确认": {"pending"}, "已确认": {"confirmed"}, "已补库": {"included"}, "已忽略": {"ignored"}}
+        states = {
+            "待确认": {"pending"},
+            "已确认": {"confirmed"},
+            "试用待验证": {"trial"},
+            "已补库": {"included"},
+            "无需补库": {"covered"},
+            "已忽略": {"ignored"},
+        }
         selected = self.selected.key if self.selected else None
         selection = self.tree.selection()
         group_filter = self.group_choices.get(self.group_var.get())
@@ -374,6 +398,12 @@ class CardReviewTab(ttk.Frame):
         self.detail_var.set(
             f"{captured}  |  {MODE_LABELS.get(record.get('mode'), record.get('mode', '未知模式'))}  |  第 {slot + 1 if type(slot) is int else '—'} 张手牌  |  对局 {record.get('elapsed_s', '?')} 秒\n{REASON_LABELS.get(record.get('reason'), '识别异常')}  ·  {STATUS_LABELS[sample.status]}\n候选仅供参考（距离越小越接近，阈值 {record.get('match_threshold', '—')}）：\n{candidates or '无卡名候选，此样本用于手牌可用性诊断'}"
         )
+        if sample.review.get("library_id"):
+            validation = sample.review.get("validation", {})
+            self.detail_var.set(
+                self.detail_var.get()
+                + f"\n补库 {sample.review['library_id']} · 独立样本命中正确 {validation.get('correct', 0)} / 误认 {validation.get('wrong', 0)} / 新增覆盖 {validation.get('extra', 0)}"
+            )
 
     def _resize_frame(self):
         if self._frame_preview is None:
@@ -398,6 +428,21 @@ class CardReviewTab(ttk.Frame):
                 state="normal" if enabled else "disabled", text=f"{title}（{count}）" if index < 3 else title
             )
         self.select_group_button.configure(state="normal" if count and not self._action_busy else "disabled")
+        statuses = {self.samples[key].status for key in self.tree.selection() if key in self.samples}
+        for button, allowed in zip(
+            self.library_buttons, ({"confirmed"}, {"trial", "included"}, {"trial", "included", "covered"}), strict=True
+        ):
+            button.configure(state="normal" if statuses.intersection(allowed) and not self._action_busy else "disabled")
+
+    def _library_action(self, action):
+        samples = [self.samples[key] for key in self.tree.selection() if key in self.samples]
+        if not samples or self._action_busy:
+            return
+        self._revision += 1
+        self._action_busy = True
+        self._set_action_state()
+        self.message_var.set("正在处理补库；验证使用其他对局的人工确认样本，证据不足会继续试用。")
+        self._background("library", lambda: update_library(self.root, samples, action))
 
     def _save(self, status):
         samples = [self.samples[key] for key in self.tree.selection() if key in self.samples]

@@ -10,10 +10,13 @@ import threading
 import time
 import uuid
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import cv2
+import numpy as np
+from PIL import Image
 
 from crX.bot.coords import GAME_SCREEN_SIZE, HAND_CARD_SIZE, HAND_CARD_TOP_LEFTS, HAND_DIAGNOSTIC_REGION
 from crX.utils.platform import get_app_data_dir
@@ -22,6 +25,15 @@ LOG = logging.getLogger(__name__)
 MAX_ROOT_BYTES = 128 * 1024 * 1024
 MAX_SAMPLES_PER_FIGHT = 32
 OBSERVATION_INTERVAL_S = 1.0
+MAX_SIMILAR_SAMPLES = 3
+MAX_SAMPLE_GROUPS = 512
+
+
+@dataclass
+class _SampleGroup:
+    hash_value: int
+    pixels: np.ndarray
+    count: int
 
 
 def get_card_samples_dir() -> Path:
@@ -55,6 +67,7 @@ class CardSampleCollector:
         self._stop = threading.Event()
         self._seen: list[tuple[str, int]] = []
         self._records: list[dict[str, Any]] = []
+        self._groups: list[_SampleGroup] | None = None
         self._thread = threading.Thread(target=self._run, name="card-samples", daemon=True)
         self._thread.start()
 
@@ -75,6 +88,9 @@ class CardSampleCollector:
             width, height = HAND_CARD_SIZE
             right, bottom = left + width, top + height
         else:
+            return False
+        if slot is not None and metadata.get("available") is False:
+            self.stats["dropped"] += 1
             return False
         crop = frame[top:bottom, left:right]
         reason = str(metadata["reason"])
@@ -139,6 +155,9 @@ class CardSampleCollector:
                 LOG.warning("卡牌样本清单保存失败，原始样本仍可检查", exc_info=True)
 
     def _save(self, frame, record: dict, used_bytes: int) -> int:
+        if not self._keep_representative(frame, record):
+            self.stats["duplicates"] += 1
+            return 0
         name = f"sample-{len(self._records):03d}"
         left, top, right, bottom = record["crop"]
         hx1, hy1, hx2, hy2 = HAND_DIAGNOSTIC_REGION
@@ -164,6 +183,33 @@ class CardSampleCollector:
         self._records.append(record)
         self.stats["saved"] += 1
         return size
+
+    def _keep_representative(self, frame, record) -> bool:
+        """Cross-fight filtering runs on the disk worker, never on the gameplay thread."""
+        from crX.utils.card_review import _group_features, image_group_features, scan_grouped_samples
+
+        if type(record.get("slot")) is not int or record.get("available") is not True:
+            return True
+        if self._groups is None:
+            samples, _, groups = scan_grouped_samples(self.root)
+            by_key = {sample.key: sample for sample in samples}
+            self._groups = []
+            for key, members in list(groups.items())[:MAX_SAMPLE_GROUPS]:
+                features = _group_features(by_key[key])
+                if features is not None:
+                    self._groups.append(_SampleGroup(*features, len(members)))
+        left, top, right, bottom = record["crop"]
+        features = image_group_features(Image.fromarray(cv2.cvtColor(frame[top:bottom, left:right], cv2.COLOR_BGR2RGB)))
+        if features is None:
+            return False
+        hash_value, pixels = features
+        for group in self._groups:
+            if (hash_value ^ group.hash_value).bit_count() <= 6 and np.abs(pixels - group.pixels).mean() <= 12:
+                group.count += 1
+                return group.count <= MAX_SIMILAR_SAMPLES
+        if len(self._groups) < MAX_SAMPLE_GROUPS:
+            self._groups.append(_SampleGroup(hash_value, pixels, 1))
+        return True
 
     def _write_report(self) -> None:
         rows = []
