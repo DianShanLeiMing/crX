@@ -151,7 +151,7 @@ def test_review_tab_confirm_export_ignore_and_reopen(desktop_ui):
         ui.set_button_state("idle")
 
 
-def test_failure_review_notes_status_and_running_state(desktop_ui):
+def test_failure_review_status_and_running_state(desktop_ui):
     ui, root = desktop_ui
     make_failure(root / "failures")
     tab = ui.failure_samples_tab
@@ -168,20 +168,19 @@ def test_failure_review_notes_status_and_running_state(desktop_ui):
     assert len(popups) == 1
     for popup in popups:
         popup.destroy()
-    tab.note_var.set("已确认需要补充识别")
+    assert not hasattr(tab, "note_var")
+    assert [button.cget("text") for button in tab.buttons] == ["标记已处理", "忽略", "恢复待处理"]
     tab.refresh()
     _wait_ui(ui, lambda: not tab._scan_busy)
-    assert tab.note_var.get() == "已确认需要补充识别"
     ui.set_button_state("running")
     try:
-        assert str(tab.buttons[1].cget("state")) == "normal"
-        tab.buttons[1].invoke()
+        assert str(tab.buttons[0].cget("state")) == "normal"
+        tab.buttons[0].invoke()
         _wait_ui(ui, lambda: not tab._busy and not tab._scan_busy and tab.selected is None)
         assert ui.notebook.tab(tab, "text") == "异常样本"
         tab.filter_var.set("已处理")
         tab._render()
-        assert tab.note_var.get() == "已确认需要补充识别"
-        tab.buttons[3].invoke()
+        tab.buttons[2].invoke()
         _wait_ui(ui, lambda: not tab._busy and not tab._scan_busy)
         assert ui.notebook.tab(tab, "text") == "异常样本 (1)"
     finally:

@@ -49,7 +49,7 @@ class FailureReviewTab(ttk.Frame):
         self._after_ids = set()
         self.bind("<Destroy>", self._destroyed, add="+")
         self.columnconfigure(0, weight=1)
-        self.rowconfigure(3, weight=1)
+        self.rowconfigure(2, weight=1)
         self.summary_var = tk.StringVar(value="正在读取异常样本……")
         ttk.Label(self, textvariable=self.summary_var).grid(row=0, column=0, sticky="w")
         toolbar = ttk.Frame(self)
@@ -62,8 +62,10 @@ class FailureReviewTab(ttk.Frame):
         combo.bind("<<ComboboxSelected>>", lambda _: self._render())
         ttk.Button(toolbar, text="刷新", command=self.refresh).pack(side="left", padx=8)
         ttk.Button(toolbar, text="打开样本目录", command=self._open_folder).pack(side="left")
-        table = ttk.Frame(self)
-        table.grid(row=2, column=0, sticky="ew")
+        self.review_panes = ttk.Panedwindow(self, orient="vertical")
+        self.review_panes.grid(row=2, column=0, rowspan=2, sticky="nsew", pady=(0, 10))
+        table = ttk.Frame(self.review_panes)
+        self.review_panes.add(table, weight=1)
         self.tree = ttk.Treeview(
             table, columns=("time", "step", "reason", "status"), show="headings", height=3, selectmode="browse"
         )
@@ -77,11 +79,11 @@ class FailureReviewTab(ttk.Frame):
             self.tree.column(column, width=width, minwidth=65)
         scroll = ttk.Scrollbar(table, command=self.tree.yview)
         self.tree.configure(yscrollcommand=scroll.set)
-        self.tree.pack(side="left", fill="x", expand=True)
+        self.tree.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
         self.tree.bind("<<TreeviewSelect>>", self._select)
-        self.details = ttk.Notebook(self)
-        self.details.grid(row=3, column=0, sticky="nsew", pady=10)
+        self.details = ttk.Notebook(self.review_panes)
+        self.review_panes.add(self.details, weight=2)
         picture = ttk.Frame(self.details)
         info = ScrolledFrame(self.details, padding=8, height=240)
         self.details.add(picture, text="失败截图")
@@ -92,16 +94,10 @@ class FailureReviewTab(ttk.Frame):
         self.image_label.bind("<Double-Button-1>", lambda _: self._zoom())
         self.info_var = tk.StringVar()
         ttk.Label(info, textvariable=self.info_var, wraplength=700, justify="left").pack(anchor="w", fill="x")
-        notes = ttk.Frame(self)
-        notes.grid(row=4, column=0, sticky="ew", pady=4)
-        ttk.Label(notes, text="处理备注").pack(side="left")
-        self.note_var = tk.StringVar()
-        ttk.Entry(notes, textvariable=self.note_var).pack(side="left", fill="x", expand=True, padx=8)
         actions = ttk.Frame(self)
-        actions.grid(row=5, column=0, sticky="ew", pady=6)
+        actions.grid(row=4, column=0, sticky="ew", pady=6)
         self.buttons = []
         for title, status in (
-            ("保存备注", None),
             ("标记已处理", "handled"),
             ("忽略", "ignored"),
             ("恢复待处理", "pending"),
@@ -112,7 +108,7 @@ class FailureReviewTab(ttk.Frame):
         self.zoom_button = ttk.Button(actions, text="放大截图", command=self._zoom, state="disabled")
         self.zoom_button.pack(side="left", padx=(0, 8))
         self.message_var = tk.StringVar(value="恢复前自动留样；人工标记不影响任务运行，也不会自动修改识别规则。")
-        ttk.Label(self, textvariable=self.message_var, wraplength=730).grid(row=6, column=0, sticky="w", pady=4)
+        ttk.Label(self, textvariable=self.message_var, wraplength=730).grid(row=5, column=0, sticky="w", pady=4)
         self.refresh()
         self._later(100, self._poll)
         self._later(5000, self._auto_refresh)
@@ -229,7 +225,6 @@ class FailureReviewTab(ttk.Frame):
             self._preview = self._photo = None
             self.image_label.configure(image="", text="暂无此类异常样本")
             self.info_var.set("")
-            self.note_var.set("")
         self._set_buttons()
 
     def _select(self, _event=None):
@@ -240,7 +235,6 @@ class FailureReviewTab(ttk.Frame):
         if self.selected and self.selected["key"] == record["key"]:
             return
         self.selected = record
-        self.note_var.set(record["review"].get("note", ""))
         data = record["data"]
         try:
             captured = datetime.fromtimestamp(data["captured_at"]).strftime("%Y-%m-%d %H:%M:%S")
@@ -294,9 +288,8 @@ class FailureReviewTab(ttk.Frame):
     def _save(self, status):
         if not self.selected or self._busy:
             return
-        record, note = self.selected, self.note_var.get()
-        status = status or record["review"].get("status", "pending")
+        record = self.selected
         self._busy = True
         self._revision += 1
         self._set_buttons()
-        self._background("save", lambda: save_failure_review(record, status, note))
+        self._background("save", lambda: save_failure_review(record, status, record["review"].get("note", "")))
