@@ -9,6 +9,7 @@ from tkinter import filedialog, messagebox
 
 import ttkbootstrap as ttk
 from ttkbootstrap.widgets import ToolTip
+from ttkbootstrap.widgets.scrolled import ScrolledFrame
 
 from crX.emulators import EmulatorType, get_available_emulators
 from crX.interface.card_review import CardReviewTab
@@ -279,22 +280,38 @@ class CrXUI(ttk.Window):
         self.device_help_var.set(help_text + "\n启动游戏前，程序会将所选设备设为 419×633 分辨率、160 DPI。")
 
     def _create_stats(self):
-        self.gauge = DualRingGauge(self.stats_tab, diameter=100, canvas_bg=self.style.colors.bg)
+        self.stats_splitter = tk.PanedWindow(
+            self.stats_tab,
+            orient="vertical",
+            sashwidth=8,
+            sashrelief="flat",
+            borderwidth=0,
+            background=self.style.colors.bg,
+        )
+        self.stats_splitter.pack(fill="both", expand=True)
+        summary = ScrolledFrame(self.stats_splitter, height=460, autohide=True)
+        self.stats_splitter.add(summary.container, minsize=120, stretch="never")
+        self.gauge = DualRingGauge(summary, diameter=100, canvas_bg=self.style.colors.bg)
         self.gauge.grid(row=0, column=0, rowspan=3, padx=(0, 25), sticky="n")
         self.stat_variables = {}
         for index, (key, title) in enumerate(BATTLE_STAT_LABELS.items()):
             row, column = divmod(index, 2)
-            box = ttk.Frame(self.stats_tab, padding=6)
+            box = ttk.Frame(summary, padding=6)
             box.grid(row=row, column=column + 1, sticky="ew")
             ttk.Label(box, text=title).pack(anchor="w")
             variable = tk.StringVar(value="0")
             self.stat_variables[key] = variable
             ttk.Label(box, textvariable=variable, font=("Segoe UI", 13, "bold")).pack(anchor="w")
-        self.stats_tab.columnconfigure(1, weight=1)
-        self.stats_tab.columnconfigure(2, weight=1)
-        self.log = tk.Text(self.stats_tab, height=10, state="disabled", wrap="word")
-        self.log.grid(row=8, column=0, columnspan=3, sticky="nsew", pady=(16, 0))
-        self.stats_tab.rowconfigure(8, weight=1)
+        summary.columnconfigure(1, weight=1)
+        summary.columnconfigure(2, weight=1)
+        log_frame = ttk.Frame(self.stats_splitter)
+        self.stats_splitter.add(log_frame, minsize=80, stretch="always")
+        ttk.Separator(log_frame, orient="horizontal").pack(fill="x", pady=(0, 6))
+        scrollbar = ttk.Scrollbar(log_frame, orient="vertical")
+        scrollbar.pack(side="right", fill="y")
+        self.log = tk.Text(log_frame, height=6, state="disabled", wrap="word", yscrollcommand=scrollbar.set)
+        self.log.pack(fill="both", expand=True)
+        scrollbar.configure(command=self.log.yview)
         self.last_status = ""
 
     def _create_settings(self):
@@ -376,6 +393,7 @@ class CrXUI(ttk.Window):
             self.theme_label_var.set(self.theme_labels[name])
             self.style.theme_use(name)
             colors = self.style.colors
+            self.stats_splitter.configure(background=colors.bg)
             self.gauge.set_colours(colors.success, colors.danger, colors.fg, canvas_bg=colors.bg)
             self.log.configure(background=colors.inputbg, foreground=colors.inputfg, insertbackground=colors.fg)
 
