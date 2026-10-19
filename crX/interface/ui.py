@@ -64,7 +64,11 @@ class CrXUI(ttk.Window):
         self.device_tab = ttk.Frame(self.notebook, padding=16)
         self.stats_tab = ttk.Frame(self.notebook, padding=16)
         self.settings_tab = ttk.Frame(self.notebook, padding=16)
-        self.card_samples_tab = CardReviewTab(self.notebook, count_callback=self._update_sample_count)
+        self.card_samples_tab = CardReviewTab(
+            self.notebook,
+            count_callback=self._update_sample_count,
+            clear_busy_callback=lambda busy: self.main_btn.configure(state="disabled" if busy else "normal"),
+        )
         self.failure_samples_tab = FailureReviewTab(self.notebook, count_callback=self._update_failure_count)
         for tab, title in (
             (self.jobs_tab, "任务"),
@@ -426,6 +430,7 @@ class CrXUI(ttk.Window):
 
     def set_button_state(self, state):
         self._state = state
+        self.card_samples_tab.set_running(state == "running")
         self.main_btn.configure(
             text="停止" if state == "running" else "启动", bootstyle="danger" if state == "running" else "success"
         )

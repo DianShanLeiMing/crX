@@ -155,3 +155,40 @@ def test_capture_limits_similar_samples_across_fights(tmp_path):
         assert not collector._keep_representative(frame, record)
     finally:
         collector.close()
+
+
+def test_clear_samples_retains_formal_library_after_future_reviews(tmp_path, samples):
+    first = samples("source")
+    samples("positive")
+    samples("negative", card="cannon", channel=3)
+    library.update_library(tmp_path, [first], "trial")
+    library.update_library(tmp_path, [first], "validate")
+    trial = samples("trial-source", channel=5)
+    library.update_library(tmp_path, [trial], "trial")
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    (unrelated / "keep.txt").write_text("keep", encoding="utf-8")
+    assert library.clear_samples(tmp_path) == 4
+    assert not scan_samples(tmp_path)[0]
+    entries = library.read_library(tmp_path)
+    assert entries[0]["status"] == "active" and entries[0]["sources_cleared"]
+    assert entries[1]["status"] == "disabled"
+    assert (unrelated / "keep.txt").read_text(encoding="utf-8") == "keep"
+    samples("future", card="cannon", channel=3)
+    assert library.read_library(tmp_path)[0]["status"] == "active"
+    assert library.clear_samples(tmp_path) == 1
+    assert library.clear_samples(tmp_path) == 0
+
+
+def test_clear_samples_refuses_nested_external_link(tmp_path, samples):
+    sample = samples("source")
+    outside = tmp_path.parent / (tmp_path.name + "-outside.txt")
+    outside.write_text("keep", encoding="utf-8")
+    try:
+        (sample.directory / "link.txt").symlink_to(outside)
+    except OSError:
+        pytest.skip("Symlink creation requires Windows developer mode or elevation")
+    with pytest.raises(ValueError, match="链接"):
+        library.clear_samples(tmp_path)
+    assert outside.read_text(encoding="utf-8") == "keep"
+    assert sample.file("frame").exists()

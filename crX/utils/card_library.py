@@ -4,19 +4,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import shutil
 import threading
 import time
 from collections import Counter
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import cv2
 import numpy as np
 
 from crX.bot.card_data import CARD_NAMES_ZH
 from crX.utils.card_review import atomic_json, read_json, sample_file
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 MAX_PER_CARD = 8
 MAX_TRIALS_PER_CARD = 5
@@ -121,7 +120,9 @@ def recheck_library(root: Path) -> int:
                 continue
             source = sources.get(entry["sources"][0])
             invalid_source = (
-                source is None or source.card_id != entry["card_id"] or source.status in ("pending", "ignored")
+                not entry.get("sources_cleared", False)
+                if source is None
+                else source.card_id != entry["card_id"] or source.status in ("pending", "ignored")
             )
             result = _validate(entry, evidence)
             entry["validation"] = result
@@ -130,6 +131,48 @@ def recheck_library(root: Path) -> int:
                 changed += 1
         _write_library(root, entries)
         return changed
+
+
+def clear_samples(root: Path) -> int:
+    """Delete only captured sessions; retain learned references and stop trials."""
+    if not root.exists():
+        return 0
+    if root.is_symlink() or root.is_junction():
+        raise ValueError("样本目录不能是链接")
+    base = root.resolve(strict=True)
+    with _LOCK:
+        targets = []
+        for directory in root.iterdir():
+            if directory.is_symlink() or directory.is_junction() or not directory.is_dir():
+                continue
+            if not (directory / "samples.jsonl").is_file():
+                continue
+            if directory.resolve().parent != base:
+                raise ValueError("样本目录超出允许范围")
+            for current, folders, files in os.walk(directory, followlinks=False):
+                for name in (*folders, *files):
+                    child = Path(current) / name
+                    if child.is_symlink() or child.is_junction() or not child.resolve().is_relative_to(base):
+                        raise ValueError("样本中包含链接或外部路径，请先移除链接")
+            targets.append(directory)
+        entries = read_library(root)
+        for entry in entries:
+            if entry["status"] == "active":
+                entry["sources_cleared"] = True
+            elif entry["status"] in ("trial", "covered"):
+                entry["status"] = "disabled"
+        if entries:
+            _write_library(root, entries)
+        removed = 0
+        for directory in targets:
+            if directory.is_symlink() or directory.is_junction() or directory.resolve().parent != base:
+                raise ValueError("样本目录已变化，已停止清空")
+            try:
+                shutil.rmtree(directory)
+            except OSError as error:
+                raise OSError(f"已清空 {removed}/{len(targets)} 局样本；请刷新后重试：{error}") from error
+            removed += 1
+        return removed
 
 
 def sample_fingerprint(sample) -> np.ndarray:

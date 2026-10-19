@@ -7,6 +7,7 @@ import tkinter as tk
 from collections import Counter
 from datetime import datetime
 from queue import Empty, Queue
+from tkinter import messagebox
 
 import ttkbootstrap as ttk
 from PIL import ImageTk
@@ -14,7 +15,7 @@ from ttkbootstrap.widgets.scrolled import ScrolledFrame
 
 from crX.bot.card_data import CARD_NAMES_ZH
 from crX.bot.card_samples import get_card_samples_dir
-from crX.utils.card_library import update_library
+from crX.utils.card_library import clear_samples, update_library
 from crX.utils.card_review import (
     REASON_LABELS,
     STATUS_LABELS,
@@ -29,10 +30,12 @@ MODE_LABELS = {"practice": "练习", "1v1": "1v1", "2v2": "2v2"}
 
 
 class CardReviewTab(ttk.Frame):
-    def __init__(self, parent, *, root=None, count_callback=None):
+    def __init__(self, parent, *, root=None, count_callback=None, clear_busy_callback=None):
         super().__init__(parent, padding=12)
         self.root = root if root is not None else get_card_samples_dir()
         self.count_callback = count_callback
+        self.clear_busy_callback = clear_busy_callback
+        self._running = self.clearing = False
         self.samples = {}
         self.groups = {}
         self.sample_groups = {}
@@ -75,6 +78,8 @@ class CardReviewTab(ttk.Frame):
         ttk.Button(tools, text="打开样本目录", command=self._open_folder).pack(side="left")
         self.select_group_button = ttk.Button(tools, text="选中本组", command=self._select_group, state="disabled")
         self.select_group_button.pack(side="left", padx=8)
+        self.clear_button = ttk.Button(tools, text="清空样本", bootstyle="danger-outline", command=self._clear_samples)
+        self.clear_button.pack(side="left")
         self.review_panes = ttk.Panedwindow(self, orient="vertical")
         self.review_panes.grid(row=2, column=0, rowspan=2, sticky="nsew", pady=(0, 4))
         table = ttk.Frame(self.review_panes)
@@ -201,6 +206,32 @@ class CardReviewTab(ttk.Frame):
         root = str(self.root)
         self._background("folder", lambda: open_folder(root))
 
+    def set_running(self, running):
+        self._running = running
+        self.clear_button.configure(state="disabled" if running or self._action_busy else "normal")
+
+    def _clear_samples(self):
+        if self._running or self._action_busy:
+            return
+        if (
+            not messagebox.askyesno(
+                "清空卡牌样本",
+                "清空全部卡牌样本的截图、标注和导出文件？此操作无法撤销。\n"
+                "已正式保留的补库指纹会保留，未验证的试用候选将停用。",
+                parent=self,
+            )
+            or self._running
+            or self._action_busy
+        ):
+            return
+        self._revision += 1
+        self._selection_version += 1
+        self._action_busy = self.clearing = True
+        self._set_action_state()
+        if self.clear_busy_callback:
+            self.clear_busy_callback(True)
+        self._background("clear", lambda: clear_samples(self.root))
+
     def _auto_refresh(self):
         self.refresh()
         self._later(5000, self._auto_refresh)
@@ -244,13 +275,19 @@ class CardReviewTab(ttk.Frame):
                         photo = ImageTk.PhotoImage(preview, master=self) if preview is not None else None
                         self._images[image_kind] = photo
                         widget.configure(image=photo or "", text="图片缺失或损坏" if photo is None else "")
-            elif kind in ("save", "export", "library"):
+            elif kind in ("save", "export", "library", "clear"):
                 self._action_busy = False
+                if kind == "clear":
+                    self.clearing = False
+                    if self.clear_busy_callback:
+                        self.clear_busy_callback(False)
+                    if error is None:
+                        result = f"已清空 {result} 局卡牌样本；正式补库指纹已保留，试用候选已停用。"
                 self._set_action_state()
                 if error is None:
                     self.message_var.set(
                         result
-                        if kind == "library"
+                        if kind in ("library", "clear")
                         else (
                             f"补库候选已导出：{result}；验证后再加入识别库。"
                             if kind == "export"
@@ -419,6 +456,7 @@ class CardReviewTab(ttk.Frame):
         self.card_combo.configure(values=[label for label in sorted(self.card_choices) if query in label.lower()])
 
     def _set_action_state(self):
+        self.set_running(self._running)
         count = len(self.tree.selection())
         self.selection_var.set(f"已选 {count} 张；Ctrl / Shift 多选，卡名和备注应用于全部选中样本。")
         titles = ("确认并保存", "忽略选中", "恢复待确认", "导出补库候选")

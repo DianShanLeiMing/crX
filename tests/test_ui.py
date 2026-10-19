@@ -243,3 +243,28 @@ def test_card_review_group_multi_selection_refresh_and_bulk_actions(desktop_ui):
     _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy and tab.selected is None)
     reviewed = {sample.key: sample for sample in scan_samples(root)[0]}
     assert all(reviewed[key].status == "pending" for key in (first.key, second.key, third.key))
+
+
+def test_card_samples_clear_confirmation_running_guard_and_refresh(desktop_ui, monkeypatch):
+    ui, root = desktop_ui
+    sample = make_sample(root)
+    tab = ui.card_samples_tab
+    _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy)
+    monkeypatch.setattr("crX.interface.card_review.messagebox.askyesno", lambda *_args, **_kwargs: False)
+    tab.clear_button.invoke()
+    assert sample.file("frame").exists()
+    ui.set_button_state("running")
+    try:
+        assert str(tab.clear_button.cget("state")) == "disabled"
+        tab._clear_samples()
+        assert sample.file("frame").exists()
+    finally:
+        ui.set_button_state("idle")
+    monkeypatch.setattr("crX.interface.card_review.messagebox.askyesno", lambda *_args, **_kwargs: True)
+    tab.clear_button.invoke()
+    assert tab.clearing and str(ui.main_btn.cget("state")) == "disabled"
+    _wait_ui(ui, lambda: not tab.clearing and not tab._scan_busy and not tab.samples)
+    assert not sample.directory.exists()
+    assert not tab.tree.get_children() and tab.selected is None
+    assert ui.notebook.tab(tab, "text") == "卡牌样本"
+    assert str(ui.main_btn.cget("state")) == "normal"
