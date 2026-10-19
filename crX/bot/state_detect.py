@@ -19,7 +19,12 @@ from crX.bot.coords import (
     BATTLE_REWARD_CROWN_REGION,
     BATTLE_REWARDS_REGION,
     GAME_SCREEN_SIZE,
+    MAIN_BATTLE_BUTTON_REGION,
+    MAIN_BURGER_BUTTON_REGION,
+    POST_BATTLE_COIN_REWARD_REGION,
+    POST_BATTLE_RAINBOW_CHEST_REGION,
     POST_BATTLE_REWARD_EDGE_REGIONS,
+    POST_BATTLE_REWARD_FLOOR_REGION,
     POST_BATTLE_REWARD_OBJECT_REGION,
     POST_BATTLE_REWARD_STARS_REGION,
     POST_BATTLE_REWARD_TOP_REGION,
@@ -217,7 +222,7 @@ def check_if_on_clash_main_menu(emulator) -> bool:
 
 
 def _is_clash_main_menu_image(image) -> bool:
-    if image is None or image.shape[:2] != GAME_SCREEN_SIZE[::-1]:
+    if image is None or image.shape != (*GAME_SCREEN_SIZE[::-1], 3):
         return False
     pixels = [
         image[14][209],
@@ -258,7 +263,13 @@ def _is_clash_main_menu_image(image) -> bool:
     for colors in [colors_1, colors_2, colors_3]:
         if all_pixels_are_equal(pixels, colors, 25):
             return True
-    return False
+    # Currency digits and their glints change the upper pixels. Require three
+    # independent fixed UI anchors rather than relaxing every color tolerance.
+    return (
+        all_pixels_are_equal(pixels[-3:], colors_1[-3:], 25)
+        and find_image(image, "main_battle_button", tolerance=0.95, subcrop=MAIN_BATTLE_BUTTON_REGION) is not None
+        and find_image(image, "main_burger_button", tolerance=0.95, subcrop=MAIN_BURGER_BUTTON_REGION) is not None
+    )
 
 
 def is_clash_main_menu_image(image) -> bool:
@@ -290,6 +301,17 @@ def detect_post_battle_reward(image) -> Literal["lucky_chest", "event_reward"] |
         return mask if uniform_top and uniform_sides else None
 
     orange, purple, blue = backdrop(8, 35), backdrop(125, 165), backdrop(90, 120)
+    # The four-star chest uses a rainbow gradient instead of a uniform backdrop.
+    # Require both the warm top / teal floor and the actual chest artwork.
+    top = _region(image, POST_BATTLE_REWARD_TOP_REGION).mean(axis=(0, 1))
+    floor = _region(image, POST_BATTLE_REWARD_FLOOR_REGION).mean(axis=(0, 1))
+    rainbow = top[2] > top[0] + 50 and top[2] > top[1] + 50 and floor[0] > floor[2] + 50 and floor[1] > floor[2] + 50
+    if (
+        rainbow
+        and find_image(image, "post_battle_rainbow_chest", tolerance=0.93, subcrop=POST_BATTLE_RAINBOW_CHEST_REGION)
+        is not None
+    ):
+        return "lucky_chest"
     if orange is not None or purple is not None:
         pixels = _region(image, POST_BATTLE_REWARD_STARS_REGION).astype(numpy.int16)
         b, g, r = pixels.transpose(2, 0, 1)
@@ -306,6 +328,11 @@ def detect_post_battle_reward(image) -> Literal["lucky_chest", "event_reward"] |
         if aligned and foreground > 0.12:
             return "lucky_chest"
     if blue is not None:
+        if (
+            find_image(image, "post_battle_coin_reward", tolerance=0.93, subcrop=POST_BATTLE_COIN_REWARD_REGION)
+            is not None
+        ):
+            return "event_reward"
         gold = (hue >= 5) & (hue <= 35) & vivid
         # Both closed mystery frames and revealed pieces have visible wooden/gold borders.
         has_frame = _region(gold, POST_BATTLE_REWARD_OBJECT_REGION).mean() > 0.06

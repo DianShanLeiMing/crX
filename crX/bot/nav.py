@@ -1,4 +1,3 @@
-import random
 import time
 from collections.abc import Callable
 from typing import Literal
@@ -39,7 +38,6 @@ from crX.bot.find import (
     find_shop_recommendations,
 )
 from crX.bot.state_detect import (
-    check_for_trophy_reward_menu,
     check_if_in_battle,
     check_if_on_battle_log_page,
     check_if_on_card_page,
@@ -138,33 +136,35 @@ def handle_clan_voyage_page(emulator) -> None:
 
 
 def wait_for_clash_main_menu(emulator, logger: Logger, deadspace_click=True, timeout: float | None = None) -> bool:
-    """Waits for the user to be on the clash main menu.
-    Returns True if on main menu, prints the pixels if False then return False
+    """Wait on fresh frames; only dismiss recognized popups, never tap loading screens.
+
+    Keep the legacy deadspace_click option for callers; it now controls dismissal
+    of the known voyage popup rather than random clicks on unknown pages.
     """
     wait_timeout = CLASH_MAIN_WAIT_TIMEOUT if timeout is None else timeout
-    start_time: float = time.time()
-    while check_if_on_clash_main_menu(emulator) is not True:
-        if time.time() - start_time > wait_timeout:
-            logger.change_status("等待主界面超时")
-            break
-        if check_for_trophy_reward_menu(emulator):
-            print("Handling trophy reward menu")
+    deadline = time.monotonic() + wait_timeout
+    image = None
+    while time.monotonic() < deadline:
+        image = emulator.screenshot()
+        if is_clash_main_menu_image(image):
+            return True
+        if is_trophy_reward_image(image):
             handle_trophy_reward_menu(emulator, logger)
             time.sleep(2)
             continue
-        if check_if_on_clan_voyage(emulator):
+        if detect_post_battle_reward(image) is not None:
+            return get_to_main_after_fight(
+                emulator, logger, timeout=max(0, deadline - time.monotonic()), allow_result_button=False
+            )
+        if deadspace_click and check_if_on_clan_voyage(emulator):
             logger.change_status("正在关闭部落旅途弹窗")
             handle_clan_voyage_page(emulator)
             time.sleep(2)
             continue
-        if deadspace_click and random.randint(0, 1) == 0:
-            emulator.click(CLASH_MAIN_MENU_DEADSPACE_COORD[0], CLASH_MAIN_MENU_DEADSPACE_COORD[1])
         time.sleep(1)
-    time.sleep(1)
-    if check_if_on_clash_main_menu(emulator) is not True:
-        print("Failed to get to clash main! Saw these pixels before restarting:")
-        return False
-    return True
+    remember_failure_frame(logger, image, reason="等待主界面超时", stage="unknown", timeout_s=wait_timeout)
+    logger.change_status("等待主界面超时，已保留最后判定画面")
+    return False
 
 
 def get_to_card_page_from_clash_main(emulator, logger: Logger) -> Literal["restart", "good"]:
@@ -472,7 +472,7 @@ def get_to_main_after_fight(
             main_since = None
             if actions >= POST_BATTLE_MAX_ACTIONS:
                 break
-            labels = {"lucky_chest": "正在开启战后奖励宝箱", "event_reward": "正在领取战后活动奖励"}
+            labels = {"lucky_chest": "正在开启战后奖励宝箱", "event_reward": "正在领取战后奖励"}
             if reward != last_stage:
                 logger.change_status(labels[reward])
             logger.log(f"战后奖励推进：{reward}，第 {actions + 1} 次操作")

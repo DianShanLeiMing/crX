@@ -67,7 +67,10 @@ def test_attached_reward_stages(number):
 
 def test_non_reward_screens_and_plain_backgrounds_are_not_clickable():
     for path in FIXTURES.glob("*.png"):
-        if not path.name.startswith("post-battle-attached-"):
+        if not path.name.startswith("post-battle-attached-") and path.name not in (
+            "failure-chest-rainbow.png",
+            "failure-reward-coins.png",
+        ):
             assert detect_post_battle_reward(cv2.imread(str(path))) is None, path.name
     for color in ((20, 140, 235), (160, 15, 110), (100, 60, 30)):
         assert detect_post_battle_reward(np.full((633, 419, 3), color, dtype=np.uint8)) is None
@@ -179,3 +182,76 @@ def test_matchmaking_refuses_unknown_screens_without_taps(clock):
     screen = RewardSequence(clock, [(image("shop-paid-dialog-zh.png"), None)])
     assert not fight.start_fight(screen, Logger(), "Classic 1v1")
     assert screen.clicks == []
+
+
+@pytest.mark.parametrize(
+    ("filename", "expected"),
+    [("failure-chest-rainbow.png", "lucky_chest"), ("failure-reward-coins.png", "event_reward")],
+)
+def test_failure_samples_are_recognized_rewards(filename, expected):
+    assert detect_post_battle_reward(image(filename)) == expected
+    assert not is_clash_main_menu_image(image(filename))
+
+
+@pytest.mark.parametrize("filename", ["failure-main-currency.png", "failure-main-recovered.png"])
+def test_failure_main_menus_ignore_currency_glints(filename):
+    main = image(filename)
+    assert is_clash_main_menu_image(main)
+    main[:35] = 0  # Resource counters are not a reliable main-menu anchor.
+    assert is_clash_main_menu_image(main)
+
+
+def test_main_menu_fallback_requires_all_fixed_anchors():
+    for region in ((150, 455, 275, 530), (370, 45, 410, 90), (150, 575, 275, 633)):
+        main = image("failure-main-currency.png")
+        left, top, right, bottom = region
+        main[top:bottom, left:right] = 0
+        assert not is_clash_main_menu_image(main)
+    main = image("failure-main-currency.png")
+    assert not is_clash_main_menu_image((main * 0.5).astype(np.uint8))
+
+
+def test_new_reward_backdrops_require_foreground_artwork():
+    chest = image("failure-chest-rainbow.png")
+    chest[230:420, 90:330] = chest[230, 90]
+    assert detect_post_battle_reward(chest) is None
+    coins = image("failure-reward-coins.png")
+    coins[140:390, 130:290] = coins[140, 130]
+    assert detect_post_battle_reward(coins) is None
+
+
+def test_failed_reward_chain_reaches_stable_main_without_restart(clock):
+    screen = RewardSequence(
+        clock,
+        [
+            (image("failure-chest-rainbow.png"), None),
+            (image("failure-reward-coins.png"), None),
+            (image("failure-main-currency.png"), None),
+        ],
+    )
+    assert nav.get_to_main_after_fight(screen, Logger())
+    assert [index for index, _, _ in screen.clicks] == [0, 1]
+
+
+def test_startup_wait_can_drain_recognized_rewards(clock):
+    screen = RewardSequence(
+        clock,
+        [
+            (image("failure-reward-coins.png"), None),
+            (image("failure-main-currency.png"), None),
+        ],
+    )
+    assert nav.wait_for_clash_main_menu(screen, Logger(), timeout=10)
+    assert len(screen.clicks) == 1
+
+
+def test_startup_unknown_timeout_remembers_exact_frame_without_clicks(clock, monkeypatch):
+    unknown = np.zeros((633, 419, 3), dtype=np.uint8)
+    screen = RewardSequence(clock, [(unknown, 2.0), (image("failure-main-recovered.png"), None)])
+    monkeypatch.setattr(nav, "check_if_on_clan_voyage", lambda _: False)
+    logger = Logger()
+    assert not nav.wait_for_clash_main_menu(screen, logger, timeout=2)
+    assert screen.clicks == []
+    assert logger.failure_frame is not None
+    assert np.array_equal(logger.failure_frame["image"], unknown)
+    assert is_clash_main_menu_image(screen.screenshot())  # A later capture must not replace the failed frame.
