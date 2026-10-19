@@ -348,7 +348,7 @@ def read_battle_outcome(emulator, logger: Logger) -> Literal["win", "loss"] | No
 
 # main fight loops
 
-# Initialize a deque with a maximum length of 3 to store the last three chosen cards
+# Keep the three most recently played distinct hand slots, oldest first.
 last_three_cards = collections.deque(maxlen=3)
 
 
@@ -397,8 +397,6 @@ def play_a_card(
     )
 
     card_index = select_card_index(card_indices, last_three_cards)
-    if card_index not in last_three_cards:
-        last_three_cards.append(card_index)
     logger.change_status(f"选择手牌位置：{card_index}")
 
     # get a coord based on the selected side
@@ -426,6 +424,9 @@ def play_a_card(
         return False
 
     emulator.click(play_coord[0], play_coord[1])
+    if card_index in last_three_cards:
+        last_three_cards.remove(card_index)
+    last_three_cards.append(card_index)
     click_and_play_card_time_taken = str(time.time() - click_and_play_card_start_time)[:3]
     if recording_flag:
         log_play(card_index, play_coord[0], play_coord[1], battle_strategy.get_elapsed_time())
