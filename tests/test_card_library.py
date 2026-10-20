@@ -113,8 +113,13 @@ def test_runtime_reads_local_library_and_reload_after_revoke(tmp_path, samples, 
     monkeypatch.setattr("crX.bot.card_samples.get_card_samples_dir", lambda: tmp_path)
     monkeypatch.setattr(library, "_cache", (None, 0, []))
     collected = [dict(zip(card_detection.COLORS_KEYS, row, strict=True)) for row in fingerprint().tolist()]
+    assert library.runtime_entries() == []  # An unverified candidate must not enter gameplay.
+    samples("positive")
+    samples("negative", card="cannon", channel=3)
+    library.refresh_ranked_library(tmp_path)
+    monkeypatch.setattr(library, "_cache", (None, 0, []))
     result = card_detection.recognize_card_fingerprint(collected)
-    assert result["card_id"] == "knight" and result["source"].startswith("local_trial:")
+    assert result["card_id"] == "knight" and result["source"].startswith("local_active:")
     library.update_library(tmp_path, [first], "revoke")
     monkeypatch.setattr(library, "_cache", (None, 0, []))
     assert not card_detection.recognize_card_fingerprint(collected)["source"].startswith("local_")

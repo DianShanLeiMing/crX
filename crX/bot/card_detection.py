@@ -297,6 +297,7 @@ def _record_match_sample(image, slot, fingerprint, recognition, *, trigger, purp
     collector = active_card_samples()
     if collector is None:
         return
+    collector.observe_library_match(recognition)
     if recognition["card_id"] == "UNKNOWN":
         reason = "unknown"
     elif recognition.get("source", "").startswith("local_trial:"):

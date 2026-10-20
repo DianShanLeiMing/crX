@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
+import re
 import shutil
+import tempfile
 import threading
 import time
 from collections import Counter
@@ -16,7 +19,7 @@ import numpy as np
 
 from crX.bot.card_data import CARD_NAMES_ZH
 from crX.bot.coords import GAME_SCREEN_SIZE, LEGACY_SCREEN_SIZE
-from crX.utils.card_review import atomic_json, read_json, sample_file
+from crX.utils.card_review import atomic_json, read_json, sample_file, validation_passed
 
 MAX_PER_CARD = 8
 MAX_TRIALS_PER_CARD = 5
@@ -24,6 +27,44 @@ MAX_ENTRIES = 2048
 MAX_LIBRARY_BYTES = 2 * 1024 * 1024
 _LOCK = threading.Lock()
 _cache: tuple[Path | None, float, list[dict]] = (None, 0, [])
+MAX_MATCH_OBSERVATIONS = 100000
+
+
+def read_match_stats(root: Path) -> dict:
+    path = sample_file(root, "runtime-matches.json")
+    if path.exists() and path.stat().st_size > MAX_LIBRARY_BYTES:
+        raise ValueError("运行匹配记录过大")
+    records = read_json(path).get("entries", {})
+    if not isinstance(records, dict) or len(records) > MAX_ENTRIES:
+        raise ValueError("运行匹配记录无效")
+    for identifier, values in records.items():
+        if not re.fullmatch(r"[0-9a-f]{16}", identifier) or not isinstance(values, dict):
+            raise ValueError("运行匹配记录无效")
+        for field in ("matches", "distance_total", "margin_total"):
+            limit = MAX_MATCH_OBSERVATIONS if field == "matches" else MAX_MATCH_OBSERVATIONS * 10000
+            if type(values.get(field)) is not int or not 0 <= values[field] <= limit:
+                raise ValueError("运行匹配计数无效")
+    return records
+
+
+def merge_match_stats(root: Path, observations: dict) -> None:
+    """Only the gameplay collector writes; UI clearing is disabled during a fight."""
+    records = read_match_stats(root)
+    live_ids = {entry["id"] for entry in read_library(root)}
+    records = {key: value for key, value in records.items() if key in live_ids}
+    for identifier, values in observations.items():
+        if identifier not in live_ids:
+            continue
+        current = records.setdefault(identifier, {"matches": 0, "distance_total": 0, "margin_total": 0})
+        remaining = MAX_MATCH_OBSERVATIONS - current["matches"]
+        count = min(remaining, values["matches"])
+        if not count:
+            continue
+        for field in ("distance_total", "margin_total"):
+            current[field] += round(values[field] * count / values["matches"])
+        current["matches"] += count
+    root.mkdir(parents=True, exist_ok=True)
+    atomic_json(sample_file(root, "runtime-matches.json"), {"entries": records})
 
 
 def library_path(root: Path | None = None) -> Path:
@@ -68,6 +109,13 @@ def read_library(root: Path | None = None) -> list[dict]:
         ):
             raise ValueError("本地指纹格式无效")
         identifiers.add(entry["id"])
+        score = entry.get("score")
+        if score is not None and (type(score) not in (int, float) or not math.isfinite(score) or not 0 <= score <= 100):
+            raise ValueError("本地指纹评分无效")
+        if type(entry.get("auto_selected", False)) is not bool:
+            raise ValueError("本地指纹选用状态无效")
+        if not isinstance(entry.get("validation", {}), dict) or not isinstance(entry.get("runtime", {}), dict):
+            raise ValueError("本地指纹验证信息无效")
         if entry["status"] in ("trial", "active"):
             counts[entry["card_id"]] += 1
     if any(count > MAX_PER_CARD for count in counts.values()):
@@ -97,7 +145,17 @@ def runtime_entries() -> list[dict]:
         return []
     if path != _cache[0] or now - _cache[1] >= 1:
         try:
-            entries = [entry for entry in read_library() if entry["status"] in ("trial", "active")]
+            eligible = [
+                entry
+                for entry in read_library()
+                if entry["status"] == "active"
+                and entry.get("auto_selected") is True
+                and validation_passed(entry.get("validation", {}))
+            ]
+            best = {}
+            for entry in sorted(eligible, key=lambda item: (-(item.get("score") or 0), item["id"])):
+                best.setdefault(entry["card_id"], entry)
+            entries = list(best.values())
         except (OSError, ValueError, TypeError):
             entries = []
         _cache = (path, now, entries)
@@ -176,6 +234,98 @@ def clear_samples(root: Path) -> int:
         return removed
 
 
+def clear_filtered_samples(
+    root: Path, keys: set[str], *, statuses: set[str] | None = None, preserve_selected_cards: bool = False
+) -> int:
+    """Clear an explicit UI snapshot; preflight paths before removing any records."""
+    from crX.utils.card_review import sample_progress, scan_samples
+
+    if not root.exists() or not keys:
+        return 0
+    if root.is_symlink() or root.is_junction():
+        raise ValueError("样本目录不能是链接")
+    base = root.resolve(strict=True)
+    with _LOCK:
+        samples, errors = scan_samples(root)
+        if errors:
+            raise ValueError("样本记录存在错误，请修复后再清空，避免丢失未解析的内容")
+        protected_cards = {
+            sample.card_id for sample in samples if preserve_selected_cards and sample_progress(sample)[2] == "当前使用"
+        }
+        selected = [
+            sample
+            for sample in samples
+            if sample.key in keys
+            and (statuses is None or sample.status in statuses)
+            and sample.card_id not in protected_cards
+        ]
+        keys = {sample.key for sample in selected}
+        plans = []
+        for directory in {sample.directory for sample in selected}:
+            if directory.is_symlink() or directory.is_junction() or directory.resolve().parent != base:
+                raise ValueError("样本目录超出允许范围或包含链接")
+            names = {sample.name for sample in selected if sample.directory == directory}
+            files = []
+            for sample in selected:
+                if sample.directory != directory:
+                    continue
+                for kind in ("card", "hand", "frame"):
+                    if sample.record["files"][kind] != f"{sample.name}-{kind}.png":
+                        raise ValueError("样本图片命名异常，已停止清空")
+                files.extend(sample_file(directory, f"{sample.name}-{kind}.png") for kind in ("card", "hand", "frame"))
+                files.append(sample_file(directory, f"{sample.name}-candidate.json"))
+            source = sample_file(directory, "samples.jsonl")
+            lines = source.read_text(encoding="utf-8").splitlines()
+            remaining = [
+                line for line in lines if json.loads(line)["files"]["card"].removesuffix("-card.png") not in names
+            ]
+            reviews = {}
+            for filename in ("review.json", "annotations.json"):
+                path = sample_file(directory, filename)
+                if path.exists():
+                    reviews[path] = {name: review for name, review in read_json(path).items() if name not in names}
+            files.extend(sample_file(directory, filename) for filename in ("index.html", "summary.json"))
+            if any(
+                path.is_symlink() or path.is_junction() or (path.exists() and not path.is_file())
+                for path in [source, *reviews, *files]
+            ):
+                raise ValueError("样本包含链接或异常文件，已停止清空")
+            plans.append((directory, source, remaining, reviews, files))
+        prior_entries = read_library(root)
+        removed_ids = {entry["id"] for entry in prior_entries if keys.intersection(entry["sources"])}
+        entries = [entry for entry in prior_entries if entry["id"] not in removed_ids]
+        match_stats = {key: value for key, value in read_match_stats(root).items() if key not in removed_ids}
+        if selected:
+            _write_library(root, entries)
+            if sample_file(root, "runtime-matches.json").exists():
+                atomic_json(sample_file(root, "runtime-matches.json"), {"entries": match_stats})
+        for directory, source, remaining, reviews, files in plans:
+            if directory.is_symlink() or directory.is_junction() or directory.resolve().parent != base:
+                raise ValueError("样本目录已变化，已停止清空")
+            # The collector cannot run while the UI clears. Replace the manifest atomically.
+            descriptor, temporary = tempfile.mkstemp(prefix="samples-", suffix=".tmp", dir=directory)
+            try:
+                with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                    stream.write("\n".join(remaining) + ("\n" if remaining else ""))
+                os.replace(temporary, source)
+            finally:
+                Path(temporary).unlink(missing_ok=True)
+            for path, reviews_left in reviews.items():
+                atomic_json(path, reviews_left)
+            for path in files:
+                if path.is_symlink() or path.resolve().parent != directory.resolve():
+                    raise ValueError("样本文件已变化，已停止清空")
+                path.unlink(missing_ok=True)
+            if not remaining:
+                source.unlink()
+                for path, reviews_left in reviews.items():
+                    if not reviews_left:
+                        path.unlink()
+                if not any(directory.iterdir()):
+                    directory.rmdir()
+        return len(selected)
+
+
 def sample_fingerprint(sample) -> np.ndarray:
     from crX.bot.card_detection import COLORS_KEYS, extract_card_fingerprint
 
@@ -221,11 +371,13 @@ def _validate(entry, evidence, retained=()) -> dict:
     from crX.bot.card_detection import CARD_MATCH_THRESHOLD
 
     source_sessions = {entry["sources"][0].split("/")[0]}
-    result = {"correct": 0, "wrong": 0, "extra": 0, "other_cards": 0}
+    result = {"correct": 0, "wrong": 0, "extra": 0, "other_cards": 0, "same_card_samples": 0, "distance_total": 0}
     for sample, fingerprint, (base_card, base_distance) in evidence:
         if sample.directory.name in source_sessions:
             continue
         same_card = sample.card_id == entry["card_id"]
+        if same_card:
+            result["same_card_samples"] += 1
         if not same_card:
             result["other_cards"] += 1
         distance = int(np.abs(fingerprint - np.array(entry["fingerprint"])).sum())
@@ -233,6 +385,7 @@ def _validate(entry, evidence, retained=()) -> dict:
             continue
         result["correct" if same_card else "wrong"] += 1
         if same_card:
+            result["distance_total"] += distance
             retained_card, retained_distance = base_card, base_distance
             for other in retained:
                 if other["id"] == entry["id"] or other["status"] != "active":
@@ -245,6 +398,70 @@ def _validate(entry, evidence, retained=()) -> dict:
             ):
                 result["extra"] += 1
     return result
+
+
+def refresh_ranked_library(root: Path) -> None:
+    """Rank from independent labels plus matching quality; predictions are never labels."""
+    from crX.bot.card_detection import CARD_MATCH_THRESHOLD
+    from crX.utils.card_review import scan_samples
+
+    if not library_path(root).exists():
+        return
+    with _LOCK:
+        entries = read_library(root)
+        before = json.dumps(entries, sort_keys=True)
+        samples, errors = scan_samples(root)
+        if errors:
+            raise ValueError("样本记录不完整，本轮不调整补库选用")
+        sources = {sample.key: sample for sample in samples}
+        evidence = _evidence(root)
+        stats = read_match_stats(root)
+        qualified: dict[str, list[dict]] = {}
+        previously_selected = {entry["id"] for entry in entries if entry.get("auto_selected") is True}
+        for entry in entries:
+            if entry["status"] not in ("trial", "active", "covered"):
+                entry["auto_selected"] = False
+                continue
+            source = sources.get(entry["sources"][0])
+            invalid = (
+                not entry.get("sources_cleared", False)
+                if source is None
+                else source.card_id != entry["card_id"] or source.status in ("pending", "ignored")
+            )
+            result = _validate(entry, evidence)
+            entry["validation"] = result
+            entry["runtime"] = runtime = stats.get(entry["id"], {"matches": 0, "distance_total": 0, "margin_total": 0})
+            correct = result["correct"]
+            quality = (
+                max(0.0, 1 - result["distance_total"] / max(1, correct) / CARD_MATCH_THRESHOLD) if correct else 0.0
+            )
+            runtime_quality = max(
+                0.0, 1 - runtime["distance_total"] / max(1, runtime["matches"]) / CARD_MATCH_THRESHOLD
+            )
+            entry["score"] = round(
+                70 * quality + (20 * runtime_quality if runtime["matches"] else 0) + min(10, correct * 2), 1
+            )
+            entry["auto_selected"] = False
+            if invalid or result["wrong"]:
+                entry["status"] = "disabled"
+            elif entry["status"] != "covered" and validation_passed(result):
+                qualified.setdefault(entry["card_id"], []).append(entry)
+            elif entry["status"] == "active":
+                entry["status"] = "trial"
+        for candidates in qualified.values():
+            candidates.sort(
+                key=lambda entry: (
+                    -entry["score"],
+                    entry["id"] not in previously_selected,
+                    -entry["validation"]["correct"],
+                    entry["id"],
+                )
+            )
+            for index, entry in enumerate(candidates):
+                entry["status"] = "active" if index == 0 else "trial"
+                entry["auto_selected"] = index == 0
+        if json.dumps(entries, sort_keys=True) != before:
+            _write_library(root, entries)
 
 
 def update_library(root: Path, selected, action: str) -> str:
@@ -332,7 +549,7 @@ def update_library(root: Path, selected, action: str) -> str:
                         counts["waiting"] += 1
         _write_library(root, entries)
     labels = {
-        "trial": "新增试用",
+        "trial": "新增离线验证候选",
         "covered": "原库已识别，无需补库",
         "duplicate": "合并近似候选",
         "limit": "达到单卡上限",
@@ -340,7 +557,7 @@ def update_library(root: Path, selected, action: str) -> str:
         "disabled": "已撤销",
         "failed": "验证误认，已停用",
         "active": "验证通过并保留",
-        "waiting": "证据不足，继续待验证",
+        "waiting": "证据不足，保持未启用",
         "redundant": "已有指纹覆盖，无需重复保留",
     }
     return "；".join(f"{labels[key]} {value}" for key, value in counts.items()) or "没有可处理的候选"

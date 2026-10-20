@@ -8,7 +8,7 @@ import pytest
 
 from crX.emulators import EmulatorType
 from crX.interface.enums import UIField
-from crX.utils.card_review import scan_samples
+from crX.utils.card_review import save_review, scan_samples
 from tests.test_card_review import add_group_sample, make_sample
 from tests.test_failure_samples import make_failure
 
@@ -102,7 +102,7 @@ def _wait_ui(ui, condition):
     raise AssertionError("GUI background operation did not complete")
 
 
-def test_review_tab_confirm_export_ignore_and_reopen(desktop_ui):
+def test_review_tab_confirm_trial_and_revoke(desktop_ui):
     ui, root = desktop_ui
     source = make_sample(root)
     errors = []
@@ -123,29 +123,23 @@ def test_review_tab_confirm_export_ignore_and_reopen(desktop_ui):
         _wait_ui(ui, lambda: not tab._scan_busy)
         assert tab.card_var.get() == "evo_cannon" and tab.note_var.get() == "人工核对"
         ui.set_button_state("running")
-        assert str(tab.action_buttons[0].cget("state")) == "normal"
-        tab.action_buttons[0].invoke()
+        assert str(tab.stage_buttons["confirm"].cget("state")) == "normal"
+        tab.stage_buttons["confirm"].invoke()
         _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy and tab.selected is None)
         assert ui.notebook.tab(tab, "text") == "卡牌样本"
-        tab.filter_var.set("已确认")
+        tab.filter_var.set("补库")
         tab._render_list()
         assert tab.selected is not None
         assert tab.selected.card_id == "evo_cannon"
         assert tab.note_var.get() == "人工核对"
-        tab.action_buttons[3].invoke()
+        assert tab.selected.status in ("trial", "covered")
+        assert not (source.directory / "sample-000-candidate.json").exists()
+        tab.stage_buttons["revoke"].invoke()
         _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy)
-        assert (source.directory / "sample-000-candidate.json").is_file()
-        assert tab.selected is not None
-        assert tab.selected.status == "confirmed"
-        tab.action_buttons[1].invoke()
-        _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy and tab.selected is None)
-        tab.filter_var.set("已忽略")
+        tab.filter_var.set("补库")
         tab._render_list()
-        assert tab.selected is not None
-        assert tab.selected.status == "ignored"
-        tab.action_buttons[2].invoke()
-        _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy)
-        assert ui.notebook.tab(tab, "text") == "卡牌样本 (1)"
+        assert tab.selected.status == "confirmed" and tab.selected.card_id == "evo_cannon"
+        assert tab.note_var.get() == "人工核对"
         assert not errors
     finally:
         ui.set_button_state("idle")
@@ -187,7 +181,8 @@ def test_failure_review_status_and_running_state(desktop_ui):
         ui.set_button_state("idle")
 
 
-def test_card_review_group_multi_selection_refresh_and_bulk_actions(desktop_ui):
+def test_card_review_group_multi_selection_refresh_and_bulk_actions(desktop_ui, monkeypatch):
+    monkeypatch.setattr("crX.utils.card_library.base_match", lambda _: ("UNKNOWN", 10000))
     ui, root = desktop_ui
     first = add_group_sample(root, "bulk-a", "sample-000")
     second = add_group_sample(root, "bulk-b", "sample-000", slot=2)
@@ -202,7 +197,6 @@ def test_card_review_group_multi_selection_refresh_and_bulk_actions(desktop_ui):
     tab.select_group_button.invoke()
     assert set(tab.tree.selection()) == {first.key, second.key}
     assert "已选 2 张" in tab.selection_var.get()
-    assert str(tab.action_buttons[3].cget("state")) == "disabled"
     tab.card_var.set("evo_cannon")
     tab.note_var.set("批量确认")
     third = add_group_sample(root, "bulk-c", "sample-000", slot=1)
@@ -210,7 +204,7 @@ def test_card_review_group_multi_selection_refresh_and_bulk_actions(desktop_ui):
     _wait_ui(ui, lambda: not tab._scan_busy and third.key in tab.samples)
     assert set(tab.tree.selection()) == {first.key, second.key}
     assert tab.card_var.get() == "evo_cannon" and tab.note_var.get() == "批量确认"
-    tab.action_buttons[0].invoke()
+    tab.stage_buttons["confirm"].invoke()
     _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy)
     reviewed = {sample.key: sample for sample in scan_samples(root)[0]}
     assert all(
@@ -224,34 +218,65 @@ def test_card_review_group_multi_selection_refresh_and_bulk_actions(desktop_ui):
     tab._render_list()
     tab.select_group_button.invoke()
     assert tab.tree.selection() == (third.key,)
-    tab.action_buttons[1].invoke()
+    monkeypatch.setattr("crX.interface.card_review.messagebox.askyesno", lambda *_args, **_kwargs: True)
+    tab.clear_button.invoke()
     _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy and tab.selected is None)
-    assert {sample.key: sample.status for sample in scan_samples(root)[0]}[third.key] == "ignored"
-    tab.filter_var.set("已确认")
-    tab._render_list()
-    tab.select_group_button.invoke()
-    assert set(tab.tree.selection()) == {first.key, second.key}
-    tab.action_buttons[1].invoke()
-    _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy and tab.selected is None)
+    assert third.key not in {sample.key for sample in scan_samples(root)[0]}
     reviewed = {sample.key: sample for sample in scan_samples(root)[0]}
-    assert all(reviewed[key].status == "ignored" for key in (first.key, second.key, third.key))
-    tab.filter_var.set("已忽略")
+    assert all(reviewed[key].status in ("trial", "covered") for key in (first.key, second.key))
+    tab.filter_var.set("补库")
     tab._render_list()
-    tab.select_group_button.invoke()
-    assert len(tab.tree.selection()) == 3
-    tab.action_buttons[2].invoke()
-    _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy and tab.selected is None)
+    trial_keys = [key for key in tab.tree.get_children() if tab.samples[key].status == "trial"]
+    assert len(trial_keys) == 1
+    assert all(tab.tree.set(key, "status") == "暂无可用补库" for key in trial_keys)
+    assert {first.key, second.key}.issubset(tab.samples)  # Hidden candidates remain available.
+    labels_before = {key: tab.tree.set(key, "status") for key in trial_keys}
+    tab.filter_var.set("全部")
+    tab._render_list()
+    assert all(tab.tree.set(key, "status") == "证据不足" for key in trial_keys)
+    tab.filter_var.set("补库")
+    tab._render_list()
+    assert {key: tab.tree.set(key, "status") for key in trial_keys} == labels_before
+    assert str(tab.select_group_button.cget("state")) == "disabled"
+    assert len(tab.tree.selection()) == 1
+    tab.stage_buttons["revoke"].invoke()
+    _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy)
     reviewed = {sample.key: sample for sample in scan_samples(root)[0]}
-    assert all(reviewed[key].status == "pending" for key in (first.key, second.key, third.key))
+    assert all(reviewed[key].status == "confirmed" for key in (first.key, second.key))
 
 
 def test_card_samples_clear_confirmation_running_guard_and_refresh(desktop_ui, monkeypatch):
     ui, root = desktop_ui
-    sample = make_sample(root)
+    sample = add_group_sample(root, "clear-all-visible", "sample-000")
     tab = ui.card_samples_tab
-    _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy)
-    monkeypatch.setattr("crX.interface.card_review.messagebox.askyesno", lambda *_args, **_kwargs: False)
+    tab.filter_var.set("待确认")
+    tab.group_var.set("全部分组")
+    tab.refresh()
+    _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy and sample.key in tab.tree.get_children())
+    assert any(item.status == "confirmed" for item in tab.samples.values())
+    group = tab.sample_groups[sample.key]
+    tab.group_var.set(next(label for label, value in tab.group_choices.items() if value == group))
+    tab._render_list()
+    assert len(tab.tree.get_children()) < len(tab.samples)
+    assert tab.clear_button.cget("text") == "清空选中"
+    prompts = []
+    monkeypatch.setattr(
+        "crX.interface.card_review.messagebox.askyesno",
+        lambda title, message, **kwargs: prompts.append(message) or False,
+    )
+    tab.clear_selection_button.invoke()
+    assert not tab.tree.selection() and str(tab.clear_button.cget("state")) == "disabled"
+    tab.refresh()
+    _wait_ui(ui, lambda: not tab._scan_busy)
+    assert not tab.tree.selection() and str(tab.clear_button.cget("state")) == "disabled"
+    tab._clear_samples()
+    assert not prompts
+    tab.select_all_button.invoke()
+    selected_keys = set(tab.tree.get_children())
+    before = set(tab.samples)
+    assert set(tab.tree.selection()) == selected_keys and selected_keys < before
     tab.clear_button.invoke()
+    assert "当前列表中选中的" in prompts[0]
     assert sample.file("frame").exists()
     ui.set_button_state("running")
     try:
@@ -263,8 +288,262 @@ def test_card_samples_clear_confirmation_running_guard_and_refresh(desktop_ui, m
     monkeypatch.setattr("crX.interface.card_review.messagebox.askyesno", lambda *_args, **_kwargs: True)
     tab.clear_button.invoke()
     assert tab.clearing and str(ui.main_btn.cget("state")) == "disabled"
-    _wait_ui(ui, lambda: not tab.clearing and not tab._scan_busy and not tab.samples)
+    _wait_ui(ui, lambda: not tab.clearing and not tab._scan_busy and sample.key not in tab.samples)
+    assert set(tab.samples) == before - selected_keys
     assert not sample.directory.exists()
     assert not tab.tree.get_children() and tab.selected is None
     assert ui.notebook.tab(tab, "text") == "卡牌样本"
     assert str(ui.main_btn.cget("state")) == "normal"
+    tab.filter_var.set("全部")
+    tab.group_var.set("全部分组")
+    tab._render_list()
+    tab.select_all_button.invoke()
+    assert set(tab.tree.selection()) == set(tab.samples)
+    tab.clear_button.invoke()
+    _wait_ui(ui, lambda: not tab.clearing and not tab._scan_busy and not tab.samples)
+
+
+def test_stage_buttons_and_clearing_preserve_other_stages(desktop_ui, monkeypatch):
+    monkeypatch.setattr("crX.utils.card_library.base_match", lambda _: ("UNKNOWN", 10000))
+    ui, root = desktop_ui
+    source = add_group_sample(root, "simple-a", "sample-000")
+    other = add_group_sample(root, "simple-b", "sample-000")
+    tab = ui.card_samples_tab
+    assert tuple(tab.filter_combo.cget("values")) == ("待确认", "补库", "全部")
+    assert "trial" not in tab.stage_buttons
+    assert {"score", "runtime", "chosen"}.issubset(tab.tree.cget("columns"))
+    tab.filter_var.set("待确认")
+    tab.group_var.set("全部分组")
+    tab.refresh()
+    _wait_ui(ui, lambda: not tab._scan_busy and source.key in tab.tree.get_children())
+    tab.tree.selection_set(source.key)
+    tab.tree.focus(source.key)
+    tab._select()
+    tab.card_var.set("evo_cannon")
+
+    def visible_buttons():
+        return [button.cget("text") for button in tab.stage_buttons.values() if button.winfo_manager()]
+
+    assert visible_buttons() == ["确认"]
+    tab.stage_buttons["confirm"].invoke()
+    _wait_ui(
+        ui,
+        lambda: not tab._action_busy
+        and not tab._scan_busy
+        and tab.selected is not None
+        and tab.selected.key == other.key,
+    )
+    reviewed = {sample.key: sample for sample in scan_samples(root)[0]}
+    assert reviewed[source.key].status == "trial"
+    assert reviewed[other.key].status == "pending"
+    tab.filter_var.set("补库")
+    tab._render_list()
+    assert visible_buttons() == ["重新验证", "撤销"]
+    assert tab.tree.get_children() == (source.key,)
+    assert tab.tree.set(source.key, "score") == "—"
+    assert tab.tree.set(source.key, "status") == "暂无可用补库"
+    assert tab.tree.set(source.key, "runtime") == "无匹配记录"
+    assert tab.tree.set(source.key, "chosen") == "未使用"
+    assert "缺少其他对局的同卡样本" in tab.tree.set(source.key, "validation_reason")
+    if tab.selected.status == "trial":
+        tab.stage_buttons["promote"].invoke()
+        _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy)
+        assert "未合格项保持未启用" in tab.message_var.get()
+    prompts = []
+    monkeypatch.setattr(
+        "crX.interface.card_review.messagebox.askyesno",
+        lambda title, message, **kwargs: prompts.append(message) or True,
+    )
+    tab.clear_button.invoke()
+    _wait_ui(ui, lambda: not tab.clearing and not tab._scan_busy and source.key not in tab.samples)
+    assert "补库" in prompts[0] and "1 张" in prompts[0]
+    assert not source.file("frame").exists() and other.file("frame").exists()
+    tab.filter_var.set("待确认")
+    tab._render_list()
+    assert tab.tree.get_children() == (other.key,)
+    tab.filter_var.set("全部")
+    tab._render_list()
+    assert visible_buttons() == []
+
+
+def test_card_group_score_order_and_selection(desktop_ui, monkeypatch):
+    ui, root = desktop_ui
+    tab = ui.card_samples_tab
+    _wait_ui(ui, lambda: not tab._scan_busy and not tab._action_busy)
+    monkeypatch.setattr(tab, "refresh", lambda: None)
+    samples = [add_group_sample(root, "score-order", f"sample-{index:03d}") for index in range(6)]
+    for sample, score in zip(samples, (10, None, 75, 75, 50, 90), strict=True):
+        sample.review = {"library_status": "trial", "library_score": score}
+    tab.samples = {sample.key: sample for sample in samples}
+    groups = {
+        samples[0].key: [sample.key for sample in samples[:4]],
+        samples[4].key: [sample.key for sample in samples[4:]],
+    }
+    tab.filter_var.set("全部")
+    tab.group_var.set("全部分组")
+    tab._update_groups(groups)
+    tab._render_list()
+    assert tab.tree.get_children() == tuple(samples[index].key for index in (2, 3, 0, 1, 5, 4))
+    assert all(tab.tree.set(key, "status") == "证据不足" for key in tab.tree.get_children())
+    tab.tree.selection_set(samples[0].key)
+    tab.tree.focus(samples[0].key)
+    tab._select()
+    tab.note_var.set("正在编辑")
+    samples[0].review["library_score"] = 95
+    tab._update_groups(groups)
+    tab._render_list()
+    assert tab.tree.get_children()[0] == samples[0].key
+    assert tab.tree.selection() == (samples[0].key,)
+    assert tab.note_var.get() == "正在编辑"
+
+
+def test_library_summary_shows_one_result_per_card_and_tracks_selection(desktop_ui, monkeypatch):
+    ui, root = desktop_ui
+    tab = ui.card_samples_tab
+    _wait_ui(ui, lambda: not tab._scan_busy and not tab._action_busy)
+    monkeypatch.setattr(tab, "refresh", lambda: None)
+    rows = [
+        ("knight", "trial", 100),
+        ("knight", "included", 60),
+        ("knight", "trial", 99),
+        ("evo_knight", "trial", 30),
+        ("cannon", "trial", 90),
+        ("cannon", "covered", 10),
+        ("evo_knight", "trial", 20),
+    ]
+    passed = {"correct": 1, "wrong": 0, "extra": 1, "other_cards": 1}
+    samples = [add_group_sample(root, "summary-view", f"sample-{index:03d}") for index in range(len(rows))]
+    for sample, (card, status, score) in zip(samples, rows, strict=True):
+        sample.review = {
+            "status": "confirmed",
+            "confirmed_card_id": card,
+            "library_status": status,
+            "library_score": score,
+            "library_selected": status == "included",
+            "validation": passed if status == "included" else {"correct": 0, "wrong": 0, "same_card_samples": 0},
+        }
+    tab.samples = {sample.key: sample for sample in samples}
+    groups = {
+        samples[0].key: [sample.key for sample in samples[:4]],
+        samples[4].key: [sample.key for sample in samples[4:]],
+    }
+    tab._update_groups(groups)
+    tab.group_var.set(next(iter(tab.group_choices)))
+    tab.filter_var.set("补库")
+    tab._render_list()
+    assert set(tab.tree.get_children()) == {samples[index].key for index in (1, 3, 5)}
+    assert tuple(tab.tree.cget("displaycolumns")) == ("card", "status", "score", "validation_reason", "runtime")
+    assert str(tab.group_combo.cget("state")) == "disabled" and tab.group_var.get() == "全部分组"
+    assert tab.tree.set(samples[1].key, "status") == "当前使用"
+    assert tab.tree.set(samples[1].key, "score") == "60.0"
+    assert tab.tree.set(samples[3].key, "score") == "—"
+    assert tab.tree.set(samples[3].key, "validation_reason") == "缺少其他对局的同卡样本"
+    assert tab.tree.set(samples[5].key, "status") == "原库可识别"
+    tab.tree.selection_set(samples[1].key)
+    tab.tree.focus(samples[1].key)
+    tab._select()
+    assert {sample.key for sample in tab._action_samples()} == {sample.key for sample in samples[:3]}
+    assert tab._selected_clear_keys() == {sample.key for sample in samples[:3]}
+    tab.tree.selection_set(samples[3].key)
+    tab.tree.focus(samples[3].key)
+    tab._select()
+    samples[6].review.update(library_status="included", library_selected=True, validation=passed)
+    tab._update_groups(groups)
+    tab._render_list()
+    assert tab.tree.selection() == (samples[6].key,)  # Keep the selected card when its representative changes.
+    assert tab.tree.set(samples[6].key, "status") == "当前使用"
+    assert len(tab.samples) == 7 and all(sample.file("frame").exists() for sample in samples)
+    tab.filter_var.set("全部")
+    tab._render_list()
+    assert len(tab.tree.get_children()) == 7 and str(tab.group_combo.cget("state")) == "readonly"
+
+
+def test_legacy_confirmed_records_retry_from_library_without_confirmed_filter(desktop_ui, tmp_path, monkeypatch):
+    from crX.interface.card_review import CardReviewTab
+
+    monkeypatch.setattr("crX.utils.card_library.base_match", lambda _: ("UNKNOWN", 10000))
+    ui, _root = desktop_ui
+    source = add_group_sample(tmp_path, "legacy-confirmed", "sample-000")
+    save_review(source, "confirmed", "evo_cannon", "历史确认记录")
+    tab = CardReviewTab(ui.notebook, root=tmp_path)
+    try:
+        _wait_ui(ui, lambda: not tab._scan_busy and source.key in tab.samples)
+        assert tuple(tab.filter_combo.cget("values")) == ("待确认", "补库", "全部")
+        tab.filter_var.set("补库")
+        tab._render_list()
+        assert tab.tree.get_children() == (source.key,)
+        assert "重新验证" in tab.tree.set(source.key, "validation_reason")
+        assert str(tab.stage_buttons["promote"].cget("state")) == "normal"
+        tab.stage_buttons["promote"].invoke()
+        _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy)
+        assert tab.samples[source.key].status == "trial"
+        assert tab.samples[source.key].review["note"] == "历史确认记录"
+        tab.stage_buttons["revoke"].invoke()
+        _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy)
+        assert tab.samples[source.key].status == "confirmed"
+        tab.refresh()
+        _wait_ui(ui, lambda: not tab._scan_busy)
+        assert tab.samples[source.key].status == "confirmed"  # Refresh must not undo an explicit revocation.
+        tab.stage_buttons["promote"].invoke()
+        _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy)
+        assert tab.samples[source.key].status == "trial"
+    finally:
+        tab.destroy()
+
+
+def test_summary_clear_selected_card_warns_and_keeps_unselected_card(desktop_ui, tmp_path, monkeypatch):
+    from crX.interface.card_review import CardReviewTab
+    from crX.utils import card_library as library
+
+    ui, _root = desktop_ui
+    rows = [add_group_sample(tmp_path, "chosen-clear", f"sample-{index:03d}") for index in range(3)]
+    for sample, card in zip(rows, ("knight", "knight", "evo_knight"), strict=True):
+        save_review(sample, "confirmed", card)
+    passed = {"correct": 1, "wrong": 0, "extra": 1, "other_cards": 1}
+    entries = [
+        {
+            "id": f"{index + 1:016x}",
+            "card_id": card,
+            "sources": [sample.key],
+            "fingerprint": library.sample_fingerprint(sample).tolist(),
+            "status": "trial" if index == 1 else "active",
+            "auto_selected": index != 1,
+            "validation": passed,
+            "score": 50 if index == 1 else 70,
+        }
+        for index, (sample, card) in enumerate(zip(rows, ("knight", "knight", "evo_knight"), strict=True))
+    ]
+    library._write_library(tmp_path, entries)
+    monkeypatch.setattr(library, "refresh_ranked_library", lambda _root: None)
+    prompts = []
+    approve = False
+
+    def confirm(_title, message, **_kwargs):
+        prompts.append(message)
+        return approve
+
+    monkeypatch.setattr("crX.interface.card_review.messagebox.askyesno", confirm)
+    tab = CardReviewTab(ui.notebook, root=tmp_path)
+    try:
+        _wait_ui(ui, lambda: not tab._scan_busy and rows[2].key in tab.samples)
+        tab.filter_var.set("补库")
+        tab._render_list()
+        assert len(tab.tree.get_children()) == 2
+        tab.tree.selection_set(rows[0].key)
+        tab.tree.focus(rows[0].key)
+        tab._select()
+        assert str(tab.clear_button.cget("state")) == "normal"  # Current use is not silently exempted.
+        before = library.library_path(tmp_path).read_bytes()
+        tab.clear_button.invoke()
+        assert "1 种卡牌，共 2 张样本" in prompts[0]
+        assert "后台候选" in prompts[0] and "正在使用" in prompts[0]
+        assert library.library_path(tmp_path).read_bytes() == before
+        approve = True
+        tab.clear_button.invoke()
+        _wait_ui(ui, lambda: not tab.clearing and not tab._scan_busy and rows[0].key not in tab.samples)
+        assert set(tab.samples) == {rows[2].key}
+        assert not rows[0].file("frame").exists() and not rows[1].file("frame").exists()
+        assert rows[2].file("frame").exists()
+        assert library.read_library(tmp_path) == [entries[2]]
+    finally:
+        tab.destroy()

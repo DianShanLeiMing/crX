@@ -65,6 +65,9 @@ class CardSampleCollector:
         self.stats = dict.fromkeys(("queued", "saved", "duplicates", "dropped", "errors"), 0)
         self._queue: queue.Queue = queue.Queue(maxsize=8)
         self._stop = threading.Event()
+        self._match_lock = threading.Lock()
+        self._match_pending: dict[str, dict[str, int]] = {}
+        self._next_match_flush = 0.0
         self._seen: list[tuple[str, int]] = []
         self._records: list[dict[str, Any]] = []
         self._groups: list[_SampleGroup] | None = None
@@ -77,6 +80,36 @@ class CardSampleCollector:
             return False
         self.last_observation = now
         return True
+
+    def observe_library_match(self, recognition: dict) -> None:
+        """Accumulate similarity telemetry, without claiming the predicted card is correct."""
+        source = recognition.get("source", "")
+        if not source.startswith(("local_trial:", "local_active:")) or self._stop.is_set():
+            return
+        identifier = source.split(":", 1)[1]
+        candidates = recognition.get("candidates", [])
+        if len(identifier) != 16 or any(char not in "0123456789abcdef" for char in identifier) or not candidates:
+            return
+        distance = candidates[0].get("distance")
+        margin = recognition.get("candidate_margin")
+        if type(distance) is not int or type(margin) is not int or not 0 <= distance <= 10000:
+            return
+        with self._match_lock:
+            if identifier not in self._match_pending and len(self._match_pending) >= 256:
+                return
+            record = self._match_pending.setdefault(identifier, {"matches": 0, "distance_total": 0, "margin_total": 0})
+            if record["matches"] < 100000:
+                record["matches"] += 1
+                record["distance_total"] += distance
+                record["margin_total"] += max(0, min(10000, margin))
+
+    def _flush_match_stats(self):
+        from crX.utils.card_library import merge_match_stats
+
+        with self._match_lock:
+            pending, self._match_pending = self._match_pending, {}
+        if pending:
+            merge_match_stats(self.root, pending)
 
     def offer(self, frame, slot: int | None, metadata: dict) -> bool:
         if self._stop.is_set() or frame is None or frame.shape != (*GAME_SCREEN_SIZE[::-1], 3):
@@ -132,6 +165,12 @@ class CardSampleCollector:
     def _run(self) -> None:
         used_bytes = None
         while not self._stop.is_set() or not self._queue.empty():
+            if time.monotonic() >= self._next_match_flush:
+                self._next_match_flush = time.monotonic() + 5
+                try:
+                    self._flush_match_stats()
+                except (OSError, ValueError, TypeError):
+                    LOG.warning("运行匹配统计未能保存，继续对战", exc_info=True)
             try:
                 frame, record = self._queue.get(timeout=0.1)
             except queue.Empty:
@@ -148,6 +187,10 @@ class CardSampleCollector:
                     LOG.warning("卡牌诊断样本保存失败，继续执行对战", exc_info=True)
             finally:
                 self._queue.task_done()
+        try:
+            self._flush_match_stats()
+        except (OSError, ValueError, TypeError):
+            LOG.warning("运行匹配统计未能保存，继续对战", exc_info=True)
         if self._records:
             try:
                 self._write_report()
