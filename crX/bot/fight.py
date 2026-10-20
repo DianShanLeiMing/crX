@@ -279,9 +279,9 @@ def wait_for_elixir(
                 last_lost_detection_log_second = lost_detection_second
             if battle_detection_lost_count >= 4:
                 logger.change_status(
-                    status="连续多次未检测到战斗画面，按对战结束处理",
+                    status="连续多次未检测到战斗画面，尚未确认结算，请求恢复",
                 )
-                return "no battle"
+                return "restart"
 
             time.sleep(0.5)
             continue
@@ -541,13 +541,12 @@ def _fight_loop(
                 f"对战中暂未检测到战斗画面（第 {battle_detection_lost_count} 次），继续等待",
             )
 
-            # If we've lost detection several times in a row, assume the battle
-            # ended even if we couldn't confirm it (prevents infinite loops if UI changes).
+            # Unknown frames are a detection failure, not proof that the fight completed.
             if battle_detection_lost_count >= 4:
                 logger.change_status(
-                    "连续多次未检测到战斗画面，按对战结束处理",
+                    "连续多次未检测到战斗画面，尚未确认结算，请求恢复",
                 )
-                break
+                return False
 
             time.sleep(1)
             continue
@@ -633,9 +632,9 @@ def _random_fight_loop(
 
             if battle_detection_lost_count >= 4:
                 logger.change_status(
-                    "连续多次未检测到战斗画面，按对战结束处理",
+                    "连续多次未检测到战斗画面，尚未确认结算，请求恢复",
                 )
-                break
+                return False
 
             time.sleep(1)
             continue

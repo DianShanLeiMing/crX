@@ -211,6 +211,30 @@ def test_main_menu_fallback_requires_all_fixed_anchors():
     assert not is_clash_main_menu_image((main * 0.5).astype(np.uint8))
 
 
+def test_daily_bonus_main_ignores_button_subtitle_but_requires_all_anchors():
+    main = image("main-daily-bonus-360-native.png")
+    assert is_clash_main_menu_image(main)
+    main[508:532, 135:225] = 0  # Reward copy changes independently of the battle title.
+    assert is_clash_main_menu_image(main)
+    for left, top, right, bottom in ((115, 460, 245, 540), (318, 45, 352, 91), (150, 575, 210, 640)):
+        incomplete = main.copy()
+        incomplete[top:bottom, left:right] = 0
+        assert not is_clash_main_menu_image(incomplete)
+    assert not is_clash_main_menu_image((main * 0.5).astype(np.uint8))
+
+
+def test_startup_wait_accepts_daily_bonus_main_without_clicking(clock, monkeypatch):
+    screen = RewardSequence(
+        clock, [(np.zeros((640, 360, 3), dtype=np.uint8), 11), (image("main-daily-bonus-360-native.png"), None)]
+    )
+    logger = Logger()
+    messages = []
+    monkeypatch.setattr(logger, "change_status", messages.append)
+    assert nav.wait_for_clash_main_menu(screen, logger, timeout=15)
+    assert screen.clicks == []
+    assert messages == ["正在等待游戏主界面（已等待 0/15 秒）", "正在等待游戏主界面（已等待 10/15 秒）"]
+
+
 def test_new_reward_backdrops_require_foreground_artwork():
     chest = image("failure-chest-rainbow.png")
     chest[233:425, 77:284] = chest[233, 77]

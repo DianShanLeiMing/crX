@@ -80,7 +80,15 @@ def test_native_hand_availability_identities_and_full_elixir():
     assert not any(image_has_elixir(screen.image, amount) for amount in range(1, 11))
 
 
-@pytest.mark.parametrize("filename", ["hand-360-cooldown-native.png", "hand-360-glow-native.png"])
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "hand-360-cooldown-native.png",
+        "hand-360-glow-native.png",
+        "hand-360-evo-glow-native.png",
+        "hand-360-evo-right-glow-native.png",
+    ],
+)
 def test_hand_cooldown_and_card_glow_do_not_end_the_battle(filename):
     screen = Screen(filename)
     assert check_if_in_battle(screen)

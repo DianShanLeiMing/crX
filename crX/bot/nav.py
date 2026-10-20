@@ -142,12 +142,18 @@ def wait_for_clash_main_menu(emulator, logger: Logger, deadspace_click=True, tim
     of the known voyage popup rather than random clicks on unknown pages.
     """
     wait_timeout = CLASH_MAIN_WAIT_TIMEOUT if timeout is None else timeout
-    deadline = time.monotonic() + wait_timeout
+    started = time.monotonic()
+    deadline = started + wait_timeout
+    last_progress = -10
     image = None
     while time.monotonic() < deadline:
         image = emulator.screenshot()
         if is_clash_main_menu_image(image):
             return True
+        elapsed = int(time.monotonic() - started)
+        if elapsed - last_progress >= 10:
+            logger.change_status(f"正在等待游戏主界面（已等待 {elapsed}/{wait_timeout:g} 秒）")
+            last_progress = elapsed
         if is_trophy_reward_image(image):
             handle_trophy_reward_menu(emulator, logger)
             time.sleep(2)

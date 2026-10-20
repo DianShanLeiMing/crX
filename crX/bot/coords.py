@@ -40,15 +40,16 @@ HAND_CARD_TOP_LEFTS = ((85, 536), (152, 536), (219, 536), (286, 536))
 HAND_CARD_SIZE = (54, 66)
 HAND_DIAGNOSTIC_REGION = (70, 525, 355, 617)
 HAND_AVAILABLE_TOP_LEFTS = ((103, 589), (169, 590), (236, 590), (304, 589))
-# Static panel edges stay unchanged when individual hand cards glow or become unaffordable.
+# Outer panel edges are outside both first- and last-slot evolution glows.
+# Do not sample the card-side border at x=350 below the top bar: glow spills onto it.
 BATTLE_HAND_BORDER_SAMPLES = (
     (70, 519, (251, 166, 62)),
     (350, 519, (251, 166, 61)),
     (70, 525, (219, 132, 12)),
-    (350, 525, (218, 131, 12)),
-    (75, 590, (179, 99, 8)),
-    (350, 590, (170, 90, 8)),
-    (80, 612, (154, 80, 7)),
+    (355, 525, (219, 132, 12)),
+    (65, 550, (190, 104, 9)),
+    (359, 590, (170, 93, 9)),
+    (68, 612, (154, 80, 7)),
     (347, 626, (78, 17, 2)),
 )
 EMOTE_BUTTON_COORD = (35, 543)
