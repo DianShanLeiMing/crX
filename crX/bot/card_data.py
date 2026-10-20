@@ -278,7 +278,9 @@ PLAY_COORDS = {
         "left": [(101, 187)],
         "right": [(253, 187)],
     },
-    "large_spell": {"left": [(146, 198), (144, 196)], "right": [(214, 198), (213, 195)]},
+    # Area spells: enemy Princess Tower, offset slightly inward and toward the river.
+    # Calibrated on native 360x640 captures; tower centers are approximately (86,130)/(274,130).
+    "large_spell": {"left": [(102, 146)], "right": [(258, 146)]},
     # Spells: small reactive (Zap, Void, Clone, Rage, Goblin Curse, …).
     "reactive_spell": {
         "left": [(101, 187)],

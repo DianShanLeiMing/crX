@@ -4,7 +4,7 @@ The bot picks a **play group** for each detected card, then taps a random point 
 
 ## Reference map
 
-Runtime geometry is now **360×640 / 160 DPI**. The historical overlay below uses 419×633; multiply x by 360/419 and y by 640/633 to compare its points with the current `PLAY_COORDS` table.
+Runtime geometry is now **360×640 / 160 DPI**. The historical overlay below uses 419×633; multiply x by 360/419 and y by 640/633 to compare its points with the migrated `PLAY_COORDS` table. The `large_spell` points were subsequently recalibrated on native captures as described below and no longer follow that overlay.
 
 ![Placement zones overlay](placement-zones-overlay.png)
 
@@ -25,11 +25,21 @@ Runtime geometry is now **360×640 / 160 DPI**. The historical overlay below use
 | `siege_building` | Mortar / X-Bow |
 | `center_spell` | Center behind river |
 | `lane_spell` | Standard spell lane |
+| `large_spell` | Enemy Princess Tower, slightly inward and toward the river |
 | `reactive_spell` | Reactive spells (Zap, Void, Clone, Rage, Vines, …) |
 | `spirit` | Spirits (your side; coords match `defense_building` for now) |
 | `rocket`, `tornado`, `goblin_barrel`, `graveyard`, `miner`, `goblin_drill` | Card-specific |
 
 Full card → group list lives in `CARD_GROUPS` in `crX/bot/card_data.py` (184 ids including pre-fingerprint evo/hero variants). Spirit Empress' air/ground recognition aliases resolve to the shared `spirit_empress` profile. Tower Troops are not deployable hand cards and have no placement profile.
+
+## 2026-10-20 范围法术落点校准
+
+按用户指定的“覆盖敌方公主塔，偏场地中心下方一点”，将 `large_spell` 改为左路 `(102,146)`、
+右路 `(258,146)`。参照已采集的 360×640 原生对战画面，敌方塔中心约为 `(86,130)` / `(274,130)`；
+新落点相对塔中心向内、向河道各偏移约 16 像素，替代原先偏移较大的 `(145,197)` / `(214,197)` 附近。
+
+该组包含万箭齐发、地震法术、冰冻法术、雷电法术、毒药法术。继续使用固定落点与现有左右路选择，
+不追踪敌军。坐标依据原生截图校准，尚未实测此次调整后的法术施放效果。
 
 ## 2026-10-19 新增卡牌落点
 
