@@ -330,6 +330,8 @@ def detect_post_battle_reward(image) -> Literal["lucky_chest", "event_reward"] |
     orange, purple, blue = backdrop(8, 35), backdrop(125, 165), backdrop(90, 120)
     # The four-star chest uses a rainbow gradient instead of a uniform backdrop.
     # Require both the warm top / teal floor and the actual chest artwork.
+    # A compact native question-panel reference tolerates the chest's vertical
+    # bobbing and larger artwork without relaxing the backdrop or match threshold.
     top = _region(image, POST_BATTLE_REWARD_TOP_REGION).mean(axis=(0, 1))
     floor = _region(image, POST_BATTLE_REWARD_FLOOR_REGION).mean(axis=(0, 1))
     rainbow = top[2] > top[0] + 50 and top[2] > top[1] + 50 and floor[0] > floor[2] + 50 and floor[1] > floor[2] + 50

@@ -67,7 +67,7 @@ def test_attached_reward_stages(number):
 
 def test_non_reward_screens_and_plain_backgrounds_are_not_clickable():
     for path in FIXTURES.glob("*.png"):
-        if not path.name.startswith("post-battle-attached-") and path.name not in (
+        if not path.name.startswith(("post-battle-attached-", "failure-chest-native-")) and path.name not in (
             "failure-chest-rainbow.png",
             "failure-reward-coins.png",
         ):
@@ -191,6 +191,60 @@ def test_matchmaking_refuses_unknown_screens_without_taps(clock):
 def test_failure_samples_are_recognized_rewards(filename, expected):
     assert detect_post_battle_reward(image(filename)) == expected
     assert not is_clash_main_menu_image(image(filename))
+
+
+@pytest.mark.parametrize("number", range(1, 5))
+def test_native_four_star_chest_failure_frames_are_recognized(number):
+    frame = image(f"failure-chest-native-{number:02}.png")
+    assert frame.shape == (640, 360, 3)
+    assert detect_post_battle_reward(frame) == "lucky_chest"
+    assert not is_clash_main_menu_image(frame)
+
+
+@pytest.mark.parametrize("number", range(1, 5))
+def test_native_chest_anchor_requires_backdrop_and_foreground(number):
+    frame = image(f"failure-chest-native-{number:02}.png")
+    for left, top, right, bottom in ((0, 0, 360, 71), (0, 556, 360, 627), (77, 233, 284, 425)):
+        incomplete = frame.copy()
+        incomplete[top:bottom, left:right] = 0
+        assert detect_post_battle_reward(incomplete) is None
+    assert detect_post_battle_reward((frame * 0.5).astype(np.uint8)) is None
+
+
+def test_native_four_star_chest_reward_chain_finishes_one_match(clock, monkeypatch):
+    scenes = [(image("battle-win-native-0.png"), None)]
+    scenes += [(image(f"failure-chest-native-{number:02}.png"), None) for number in range(1, 5)]
+    scenes += [(image("failure-reward-coins.png"), None), (image("failure-main-recovered.png"), None)]
+    screen = RewardSequence(clock, scenes)
+    logger, context = Logger(), states.RuntimeContext()
+    monkeypatch.setattr(fight, "read_battle_outcome", lambda *_: "win")
+    monkeypatch.setattr(fight, "is_recording", lambda: False)
+    assert states.state_tree(screen, logger, "end_fight", {}, context) == "shop_daily"
+    assert [index for index, _, _ in screen.clicks] == list(range(6))
+    assert context.completed_fights == logger.stats["completed_fights"] == logger.stats["wins"] == 1
+    assert clock[0] - screen.entered >= nav.POST_BATTLE_MAIN_STABLE_S
+
+
+@pytest.mark.parametrize("number", range(1, 5))
+def test_restart_wait_drains_native_four_star_chest_without_recounting(clock, number):
+    screen = RewardSequence(
+        clock, [(image(f"failure-chest-native-{number:02}.png"), None), (image("failure-main-recovered.png"), None)]
+    )
+    logger = Logger()
+    assert nav.wait_for_clash_main_menu(screen, logger, timeout=10)
+    assert len(screen.clicks) == 1
+    assert logger.stats["completed_fights"] == logger.stats["wins"] == logger.stats["losses"] == 0
+
+
+def test_native_four_star_chest_that_does_not_advance_is_still_bounded(clock):
+    frame = image("failure-chest-native-01.png")
+    screen = RewardSequence(clock, [(frame, None)])
+    logger = Logger()
+    assert not nav.get_to_main_after_fight(screen, logger)
+    assert len(screen.clicks) == nav.POST_BATTLE_MAX_ACTIONS
+    assert logger.failure_frame is not None
+    assert logger.failure_frame["details"]["stage"] == "lucky_chest"
+    assert logger.failure_frame["details"]["reason"] == "战后奖励操作达到上限"
 
 
 @pytest.mark.parametrize("filename", ["failure-main-currency.png", "failure-main-recovered.png"])
