@@ -29,6 +29,31 @@ from crX.utils.open_folder import open_folder
 MODE_LABELS = {"practice": "练习", "1v1": "1v1", "2v2": "2v2"}
 
 
+def search_card_choices(choices: dict[str, str], query: str) -> list[str]:
+    """Match Chinese names or English IDs without requiring adjacent characters."""
+
+    def normalize(value):
+        return "".join(char for char in value.casefold() if char.isalnum())
+
+    tokens = [token for part in query.split() if (token := normalize(part))]
+    if not tokens or query in choices:
+        return sorted(choices)
+    matches = []
+    for label, card_id in choices.items():
+        text = normalize(label)
+        if not all(len(token) <= len(text) and _is_subsequence(token, text) for token in tokens):
+            continue
+        exact = "".join(tokens) in {normalize(label.split(" (", 1)[0]), normalize(card_id)}
+        rank = 0 if exact else 1 if all(token in text for token in tokens) else 2
+        matches.append((rank, label))
+    return [label for _, label in sorted(matches)]
+
+
+def _is_subsequence(query: str, text: str) -> bool:
+    remaining = iter(text)
+    return all(char in remaining for char in query)
+
+
 class CardReviewTab(ttk.Frame):
     def __init__(self, parent, *, root=None, count_callback=None, clear_busy_callback=None):
         super().__init__(parent, padding=12)
@@ -130,8 +155,25 @@ class CardReviewTab(ttk.Frame):
         self.card_var = tk.StringVar()
         self.card_combo = ttk.Combobox(edit, textvariable=self.card_var, values=sorted(self.card_choices), width=32)
         self.card_combo.pack(side="left", padx=8)
-        self.card_combo.bind("<KeyRelease>", self._search_cards)
-        ttk.Label(edit, text="区分觉醒 / 精英版本").pack(side="left")
+        self.card_combo.configure(postcommand=lambda: self._search_cards(opening=True))
+        self.card_var.trace_add("write", self._search_cards)
+        self.card_combo.bind("<Return>", self._choose_single_card)
+        self.card_combo.bind("<Down>", lambda _: self._move_card_suggestion(1))
+        self.card_combo.bind("<Up>", lambda _: self._move_card_suggestion(-1))
+        self.card_combo.bind("<Escape>", self._hide_card_suggestions)
+        self.card_combo.bind("<FocusOut>", lambda _: self._later(60, self._check_card_search_focus))
+        self._card_popup_after = None
+        self.card_suggestions = ttk.Treeview(self, show="tree", selectmode="browse", takefocus=False, height=6)
+        self.card_suggestions.bind("<ButtonRelease-1>", self._pick_card_suggestion)
+        self.card_suggestions.bind("<Return>", self._pick_card_suggestion)
+        self.card_suggestions.bind("<Escape>", self._hide_card_suggestions)
+        self.card_suggestions.bind("<FocusOut>", lambda _: self._later(60, self._check_card_search_focus))
+        self._search_toplevel = self.winfo_toplevel()
+        self._search_click_binding = self._search_toplevel.bind("<Button-1>", self._card_search_outside_click, add="+")
+        self._search_move_binding = self._search_toplevel.bind("<Configure>", self._card_search_parent_moved, add="+")
+        ttk.Label(edit, text="输入中文 / 英文关键词自动展开；↑↓ 选择，回车确认\n请区分普通 / 觉醒 / 精英版本").pack(
+            side="left"
+        )
         notes = ttk.Frame(self)
         notes.grid(row=5, column=0, sticky="ew", pady=2)
         ttk.Label(notes, text="处理备注").pack(side="left")
@@ -177,10 +219,13 @@ class CardReviewTab(ttk.Frame):
 
         identifier = self.after(delay, run)
         self._after_ids.add(identifier)
+        return identifier
 
     def _on_destroy(self, event):
         if event.widget is self:
             self._closed = True
+            self._search_toplevel.unbind("<Button-1>", self._search_click_binding)
+            self._search_toplevel.unbind("<Configure>", self._search_move_binding)
             for identifier in self._after_ids:
                 self.after_cancel(identifier)
             self._after_ids.clear()
@@ -451,9 +496,102 @@ class CardReviewTab(ttk.Frame):
         self._images["frame"] = ImageTk.PhotoImage(preview, master=self)
         self.frame_image.configure(image=self._images["frame"], text="")
 
-    def _search_cards(self, _event=None):
-        query = self.card_var.get().strip().lower()
-        self.card_combo.configure(values=[label for label in sorted(self.card_choices) if query in label.lower()])
+    def _search_cards(self, *_trace_args, opening=False):
+        if self._closed:
+            return
+        query = self.card_var.get().strip()
+        # A native dropdown selection writes this variable before it finishes closing.
+        # Rebuild the full list only when opening again, not during that selection.
+        if query in self.card_choices and not opening:
+            self._hide_card_suggestions()
+            return
+        self.card_combo.configure(values=search_card_choices(self.card_choices, query))
+        self._hide_card_suggestions()
+        if query and not opening and self._card_search_focus() is self.card_combo:
+            self._card_popup_after = self._later(80, self._show_card_suggestions)
+
+    def _hide_card_suggestions(self, _event=None):
+        if self._card_popup_after is not None:
+            self.after_cancel(self._card_popup_after)
+            self._after_ids.discard(self._card_popup_after)
+            self._card_popup_after = None
+        self.card_suggestions.place_forget()
+        return "break"
+
+    def _show_card_suggestions(self):
+        self._card_popup_after = None
+        if self._card_search_focus() is not self.card_combo:
+            return
+        matches = self.card_combo.cget("values")
+        if not matches:
+            return
+        self.card_suggestions.delete(*self.card_suggestions.get_children())
+        for index, label in enumerate(matches):
+            self.card_suggestions.insert("", "end", iid=str(index), text=label)
+        self.card_suggestions.configure(height=min(6, len(matches)))
+        self.card_suggestions.update_idletasks()
+        x = self.card_combo.winfo_rootx() - self.winfo_rootx()
+        top = self.card_combo.winfo_rooty() - self.winfo_rooty()
+        y = top + self.card_combo.winfo_height()
+        height = self.card_suggestions.winfo_reqheight()
+        if y + height > self.winfo_height():
+            y = max(0, top - height)
+        self.card_suggestions.place(x=x, y=y, width=self.card_combo.winfo_width(), height=height)
+        self.card_suggestions.lift()
+
+    def _move_card_suggestion(self, direction):
+        if not self.card_suggestions.winfo_ismapped():
+            return None  # Keep the native full dropdown available when no search is open.
+        rows = self.card_suggestions.get_children()
+        selected = self.card_suggestions.selection()
+        index = rows.index(selected[0]) + direction if selected else 0 if direction > 0 else len(rows) - 1
+        key = rows[max(0, min(index, len(rows) - 1))]
+        self.card_suggestions.selection_set(key)
+        self.card_suggestions.see(key)
+        return "break"
+
+    def _pick_card_suggestion(self, event=None):
+        if event is not None and event.type == tk.EventType.ButtonRelease:
+            if not self.card_suggestions.identify_row(event.y):
+                return "break"
+        selected = self.card_suggestions.selection()
+        if selected:
+            self.card_var.set(self.card_suggestions.item(selected[0], "text"))
+            self._hide_card_suggestions()
+            self.card_combo.focus_set()
+            self.card_combo.icursor(tk.END)
+        return "break"
+
+    def _card_search_focus(self):
+        try:
+            return self.focus_get()
+        except KeyError:
+            # Native combobox popdowns are Tcl widgets without Python widget objects.
+            return None
+
+    def _check_card_search_focus(self):
+        if self._card_search_focus() not in (self.card_combo, self.card_suggestions):
+            self._hide_card_suggestions()
+
+    def _card_search_outside_click(self, event):
+        if event.widget not in (self.card_combo, self.card_suggestions):
+            self._hide_card_suggestions()
+
+    def _card_search_parent_moved(self, event):
+        if event.widget is self._search_toplevel:
+            self._hide_card_suggestions()
+
+    def _choose_single_card(self, _event=None):
+        if self.card_suggestions.winfo_ismapped() and self.card_suggestions.selection():
+            return self._pick_card_suggestion()
+        query = self.card_var.get().strip()
+        exact_ids = [label for label, card_id in self.card_choices.items() if card_id.casefold() == query.casefold()]
+        matches = exact_ids or search_card_choices(self.card_choices, query)
+        if len(matches) == 1:
+            self.card_var.set(matches[0])
+            self._hide_card_suggestions()
+            self.card_combo.icursor(tk.END)
+        return "break"
 
     def _set_action_state(self):
         self.set_running(self._running)
