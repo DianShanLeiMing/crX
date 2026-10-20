@@ -273,7 +273,7 @@ PLAY_COORDS = {
         "left": [(100, 162)],
         "right": [(259, 162)],
     },
-    # Spells: standard lane target (Fireball, Poison, Log, …).
+    # Spells: standard lane target (Fireball, Log, …).
     "lane_spell": {
         "left": [(101, 187)],
         "right": [(253, 187)],
@@ -281,6 +281,8 @@ PLAY_COORDS = {
     # Area spells: enemy Princess Tower, offset slightly inward and toward the river.
     # Calibrated on native 360x640 captures; tower centers are approximately (86,130)/(274,130).
     "large_spell": {"left": [(102, 146)], "right": [(258, 146)]},
+    # Poison: closer to the tower center, retaining an 8 px inward/river offset.
+    "poison": {"left": [(94, 138)], "right": [(266, 138)]},
     # Spells: small reactive (Zap, Void, Clone, Rage, Goblin Curse, …).
     "reactive_spell": {
         "left": [(101, 187)],
@@ -418,8 +420,8 @@ CARD_GROUPS: dict[str, list[str]] = {
         "arrows",
         "freeze",
         "lightning",
-        "poison",
-    ],  # 地震法术、万箭齐发、冰冻法术、雷电法术、毒药法术
+    ],  # 地震法术、万箭齐发、冰冻法术、雷电法术
+    "poison": ["poison"],  # 毒药法术: 独立校准为更靠近敌方公主塔中心
     "spirit": [
         "electro_spirit",  # 雷电精灵
         "fire_spirit",  # 烈焰精灵

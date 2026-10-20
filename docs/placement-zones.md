@@ -28,7 +28,7 @@ Runtime geometry is now **360×640 / 160 DPI**. The historical overlay below use
 | `large_spell` | Enemy Princess Tower, slightly inward and toward the river |
 | `reactive_spell` | Reactive spells (Zap, Void, Clone, Rage, Vines, …) |
 | `spirit` | Spirits (your side; coords match `defense_building` for now) |
-| `rocket`, `tornado`, `goblin_barrel`, `graveyard`, `miner`, `goblin_drill` | Card-specific |
+| `poison`, `rocket`, `tornado`, `goblin_barrel`, `graveyard`, `miner`, `goblin_drill` | Card-specific |
 
 Full card → group list lives in `CARD_GROUPS` in `crX/bot/card_data.py` (184 ids including pre-fingerprint evo/hero variants). Spirit Empress' air/ground recognition aliases resolve to the shared `spirit_empress` profile. Tower Troops are not deployable hand cards and have no placement profile.
 
@@ -40,6 +40,11 @@ Full card → group list lives in `CARD_GROUPS` in `crX/bot/card_data.py` (184 i
 
 该组包含万箭齐发、地震法术、冰冻法术、雷电法术、毒药法术。继续使用固定落点与现有左右路选择，
 不追踪敌军。坐标依据原生截图校准，尚未实测此次调整后的法术施放效果。
+
+同日根据后续毒药实战截图，将毒药从 `large_spell` 单独分出为 `poison`：左路 `(94,138)`、
+右路 `(266,138)`，相对原落点分别向左/右移 8 像素、向上移 8 像素，保留向场地中心及河道各约
+8 像素的偏移。其他范围法术继续使用 `(102,146)` / `(258,146)`。本次仅修改源码，未重启正在运行
+的程序；新毒药落点在下次启动工作进程后生效，尚未实测此次微调。
 
 ## 2026-10-19 新增卡牌落点
 
