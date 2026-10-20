@@ -50,7 +50,7 @@ def test_native_daily_free_offer(name):
     frame = image(name)
     coord = locate_free_shop_offer_icon(Screen(frame))
     assert check_if_on_shop(Screen(frame))
-    assert coord is not None and 35 < coord[0] < 105 and 430 < coord[1] < 540
+    assert coord is not None and 30 < coord[0] < 90 and 435 < coord[1] < 546
     assert find_collected_shop_offer(frame) is None
 
 
@@ -65,7 +65,7 @@ def test_other_screens_are_not_claimable(name):
 def test_daily_heading_and_undimmed_label_are_both_required():
     original = image("shop-daily-free-zh")
     no_heading = original.copy()
-    no_heading[210:240, 150:270] = 0
+    no_heading[212:243, 129:232] = 0
     assert locate_free_shop_offer_icon(Screen(no_heading)) is None
     dimmed = (original.astype(float) * 0.35).astype(np.uint8)
     assert find_daily_shop_heading(dimmed) is not None
@@ -73,7 +73,7 @@ def test_daily_heading_and_undimmed_label_are_both_required():
 
 
 def test_only_free_dialog_can_be_confirmed():
-    assert find_free_shop_confirmation(image("shop-free-dialog-zh")) == (209, 400)
+    assert find_free_shop_confirmation(image("shop-free-dialog-zh")) == (180, 404)
     assert find_shop_offer_dialog_close(image("shop-paid-dialog-zh")) is not None
     for name in ("shop-paid-dialog-zh", "shop-daily-free-zh", "shop-daily-collected-zh", "training-start-zh"):
         assert find_free_shop_confirmation(image(name)) is None
@@ -129,10 +129,10 @@ class ShopDevice:
         elif point == BOTTOM_NAV_MAIN_TAB_FROM_SHOP_COORD:
             if not self.return_fails:
                 self.page = "main"
-        elif self.page == "free" and point == (58, 452):
+        elif self.page == "free" and point == (50, 457):
             self.page = "dialog"
         elif self.page == "dialog":
-            if point == (209, 400):
+            if point == (180, 404):
                 assert not self.paid, "A paid purchase must never be confirmed"
                 self.page = "free" if self.claim_fails else "collected_low"
             else:
@@ -189,26 +189,26 @@ def test_full_claim_then_recheck_does_not_count_twice(replay):
     device = ShopDevice()
     assert shop.shop_daily_state(device, replay)
     assert device.page == "main" and replay.collections == 1
-    assert device.clicks.count((209, 400)) == 1
+    assert device.clicks.count((180, 404)) == 1
     assert device.swipes == [SHOP_CATALOG_SWIPE, SHOP_DAILY_ALIGN_SWIPE, SHOP_DAILY_ALIGN_SWIPE]
     device.collected = True
     assert shop.shop_daily_state(device, replay)
     assert device.page == "main" and replay.collections == 1
-    assert device.clicks.count((209, 400)) == 1
+    assert device.clicks.count((180, 404)) == 1
 
 
 def test_paid_dialog_is_closed_without_purchase_or_count(replay):
     device = ShopDevice(paid=True)
     assert not shop.shop_daily_state(device, replay)
     assert device.page == "main" and replay.collections == 0
-    assert (209, 400) not in device.clicks
+    assert (180, 404) not in device.clicks
 
 
 def test_unverified_claim_is_not_success(replay):
     device = ShopDevice(claim_fails=True)
     assert not shop.shop_daily_state(device, replay)
     assert device.page == "main" and replay.collections == 0
-    assert device.clicks.count((209, 400)) == 1
+    assert device.clicks.count((180, 404)) == 1
 
 
 def test_missing_daily_section_is_bounded_and_not_success(replay):
@@ -244,7 +244,7 @@ def test_unrecognized_daily_status_is_not_treated_as_already_collected(replay):
     device.frames["free"][430:470, 30:110] = 0
     assert not shop.shop_daily_state(device, replay)
     assert device.page == "main" and replay.collections == 0
-    assert (58, 452) not in device.clicks
+    assert (50, 457) not in device.clicks
 
 
 @pytest.mark.parametrize("claim_fails", [False, True])

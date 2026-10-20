@@ -2,6 +2,7 @@ import random
 import time
 from collections import Counter
 
+import cv2
 import numpy
 
 from crX.bot.card_data import (
@@ -12,13 +13,22 @@ from crX.bot.card_data import (
     get_card_display_name,
 )
 from crX.bot.card_samples import active_card_samples
-from crX.bot.coords import CHAMPION_ABILITY_DISMISS_COORD, GAME_SCREEN_SIZE, HAND_CARD_SIZE, HAND_CARD_TOP_LEFTS
+from crX.bot.coords import (
+    CARD_FINGERPRINT_SIZE,
+    CHAMPION_ABILITY_DISMISS_COORD,
+    GAME_SCREEN_SIZE,
+    HAND_AVAILABLE_TOP_LEFTS,
+    HAND_CARD_SIZE,
+    HAND_CARD_TOP_LEFTS,
+    LEGACY_HAND_CARD_TOP_LEFTS,
+    LEGACY_SCREEN_SIZE,
+)
 from crX.bot.state_detect import image_has_elixir
 from crX.utils.card_library import runtime_entries
 
 toplefts = HAND_CARD_TOP_LEFTS
 
-TOTAL_WIDTH, TOTAL_HEIGHT = HAND_CARD_SIZE
+TOTAL_WIDTH, TOTAL_HEIGHT = CARD_FINGERPRINT_SIZE
 HALF_WIDTH = int(TOTAL_WIDTH / 2)
 HALF_HEIGHT = int(TOTAL_HEIGHT / 2)
 
@@ -169,11 +179,18 @@ def get_all_pixel_data(emulator, chosen_card_index):
 
 
 def extract_card_fingerprint(image, chosen_card_index):
-    if image is None or image.shape != (*GAME_SCREEN_SIZE[::-1], 3):
-        raise ValueError("卡牌指纹需要 419×633 BGR 原生画面")
+    if image is None or image.shape not in ((*GAME_SCREEN_SIZE[::-1], 3), (*LEGACY_SCREEN_SIZE[::-1], 3)):
+        raise ValueError("卡牌指纹需要 360×640 BGR 画面, 历史样本兼容 419×633")
     if not 0 <= chosen_card_index < len(toplefts):
         raise ValueError("手牌位置必须为 0–3")
-    topleft = toplefts[chosen_card_index]
+    legacy = image.shape[:2] == LEGACY_SCREEN_SIZE[::-1]
+    left, top = (LEGACY_HAND_CARD_TOP_LEFTS if legacy else toplefts)[chosen_card_index]
+    width, height = CARD_FINGERPRINT_SIZE if legacy else HAND_CARD_SIZE
+    card = image[top : top + height, left : left + width]
+    # Keep the 4x16, 891-pixel-per-quadrant schema used by bundled and local libraries.
+    # Only the extracted card artwork is normalized; screenshots and device taps stay native.
+    card = cv2.resize(card, CARD_FINGERPRINT_SIZE, interpolation=cv2.INTER_NEAREST_EXACT)
+    topleft = (0, 0)
 
     corners = [
         ((topleft[0], topleft[0] + HALF_WIDTH), (topleft[1], topleft[1] + HALF_HEIGHT)),
@@ -191,18 +208,11 @@ def extract_card_fingerprint(image, chosen_card_index):
         ),
     ]
 
-    return [get_corner_pixels(*corner, image) for corner in corners]
+    return [get_corner_pixels(*corner, card) for corner in corners]
 
 
 purple_color = numpy.array([255, 43, 227])
-card_toplefts = numpy.array(
-    [
-        [133, 582],
-        [199, 583],
-        [266, 583],
-        [334, 582],
-    ],
-)
+card_toplefts = numpy.array(HAND_AVAILABLE_TOP_LEFTS)
 
 # Pre-calculate x_coords and y_coords for each card
 card_coords = [
@@ -219,7 +229,7 @@ battle_iar: numpy.ndarray[tuple[int, ...], numpy.dtype[numpy.uint8]] | None = No
 
 def is_hero_champion_ability_visible(emulator) -> bool:
     iar = emulator.screenshot()
-    pixels = numpy.array([iar[462][324], iar[453][334], iar[462][336]])
+    pixels = numpy.array([iar[467][278], iar[458][287], iar[467][289]])
     colors = numpy.array(
         [
             [215, 28, 223],
@@ -354,16 +364,16 @@ def calculate_play_coords(card_grouping: str, side_preference: str, elapsed_time
     if card_grouping == "No group":
         if elapsed_time < 12:  # Less than 5 seconds
             if side_preference == "left":
-                return (random.randint(60, 206), random.randint(441, 456))
-            return (random.randint(210, 351), random.randint(441, 456))
+                return (random.randint(52, 177), random.randint(446, 461))
+            return (random.randint(180, 302), random.randint(446, 461))
         if elapsed_time < 80:  # Less than 2 minutes
             if side_preference == "left":
-                return (random.randint(60, 206), random.randint(360, 456))
-            return (random.randint(210, 351), random.randint(360, 456))
+                return (random.randint(52, 177), random.randint(364, 461))
+            return (random.randint(180, 302), random.randint(364, 461))
         # 2 minutes or more
         if side_preference == "left":
-            return (random.randint(60, 206), random.randint(281, 456))
-        return (random.randint(210, 351), random.randint(281, 456))
+            return (random.randint(52, 177), random.randint(284, 461))
+        return (random.randint(180, 302), random.randint(284, 461))
 
     if PLAY_COORDS.get(card_grouping):
         group_datum = PLAY_COORDS[card_grouping]
@@ -383,7 +393,7 @@ def create_default_bridge_iar(emulator):
     bridge_iar = emulator.screenshot()
 
 
-bridge_pixel = [[100, 200], [275, 200]]
+bridge_pixel = [[86, 202], [236, 202]]
 
 
 def switch_side():
@@ -391,11 +401,13 @@ def switch_side():
     assert bridge_iar is not None, "bridge_iar must be set before calling switch_side()"
     bridge_color_offset = []
     for i, bridge in enumerate(bridge_pixel):
-        all_coords = [(y, x) for x in range(bridge[0], bridge[0] + 40) for y in range(bridge[1], bridge[1] + 175)]
+        all_coords = [(y, x) for x in range(bridge[0], bridge[0] + 34) for y in range(bridge[1], bridge[1] + 177)]
         pixel_coords = numpy.array(all_coords)
         iar_pixels = battle_iar[pixel_coords[:, 0], pixel_coords[:, 1]]
         bridge_iar_pixels = bridge_iar[pixel_coords[:, 0], pixel_coords[:, 1]]
-        bridge_color_offset.append(numpy.linalg.norm(iar_pixels - bridge_iar_pixels))
+        # Normalize the smaller sampled area so existing activity thresholds keep their meaning.
+        offset = numpy.linalg.norm(iar_pixels - bridge_iar_pixels)
+        bridge_color_offset.append(offset * numpy.sqrt((40 * 175) / (34 * 177)))
 
     if bridge_color_offset[0] > bridge_color_offset[1]:
         return bridge_color_offset[0], "left"

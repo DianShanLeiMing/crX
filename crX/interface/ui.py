@@ -281,7 +281,7 @@ class CrXUI(ttk.Window):
             else "请先启动模拟器并开启 ADB 调试。只有一个在线设备时，可留空自动选择。\n"
             "有多个在线设备或需主动连接时，请填写目标设备的序列号或地址。"
         )
-        self.device_help_var.set(help_text + "\n启动游戏前，程序会将所选设备设为 419×633 分辨率、160 DPI。")
+        self.device_help_var.set(help_text + "\n启动游戏前，程序会将所选设备设为 360×640 分辨率（9:16）、160 DPI。")
 
     def _create_stats(self):
         self.stats_splitter = tk.PanedWindow(

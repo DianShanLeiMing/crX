@@ -29,11 +29,11 @@ class ResultScreen:
     def click(self, x, y):
         self.clicks.append((x, y))
         if self.filename == "training-result-zh.png":
-            assert 166 < x < 254 and 558 < y < 593
+            assert 143 < x < 218 and 564 < y < 600
         elif self.filename.startswith(("battle-loss-native-", "battle-win-native-")):
-            assert 167 < x < 252 and 538 < y < 577
+            assert 143 < x < 217 and 544 < y < 583
         else:
-            assert 215 < x < 320 and 550 < y < 605
+            assert 185 < x < 275 and 556 < y < 612
         self.on_main = True
 
 
@@ -75,7 +75,7 @@ def test_winner_label_without_result_button_is_not_a_result():
 
 def test_labels_on_both_sides_are_unknown():
     screen = ResultScreen("battle-loss-zh.png")
-    screen.image[215:295, 125:290] = screen.image[35:115, 125:290].copy()
+    screen.image[217:298, 107:249] = screen.image[35:116, 107:249].copy()
     assert find_battle_outcome(screen) is None
 
 

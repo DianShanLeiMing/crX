@@ -4,11 +4,13 @@ import re
 import subprocess
 import time
 
+from crX.bot.coords import GAME_SCREEN_DPI, GAME_SCREEN_SIZE
 from crX.emulators.adb_base import AdbBasedController, resolve_adb, validate_device_serial
 from crX.emulators.base import CLASH_ROYALE_PACKAGE, EmulatorNotReadyError
 from crX.utils.platform import Platform
 
-SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_DENSITY = 419, 633, 160
+SCREEN_WIDTH, SCREEN_HEIGHT = GAME_SCREEN_SIZE
+SCREEN_DENSITY = GAME_SCREEN_DPI
 
 
 class AdbController(AdbBasedController):
@@ -50,7 +52,7 @@ class AdbController(AdbBasedController):
     def verify_screen(self):
         # Actual capture geometry is authoritative, not the window dimensions.
         if self.screenshot().shape != (SCREEN_HEIGHT, SCREEN_WIDTH, 3):
-            raise EmulatorNotReadyError("截图必须为 419x633 BGR 图像，请调整模拟器显示设置")
+            raise EmulatorNotReadyError("截图必须为 360x640 BGR 图像，请调整模拟器显示设置")
         density = self.adb(["shell", "wm", "density"])
         values = re.findall(r"(?:Physical|Override) density:\s*(\d+)", density.stdout or "")
         if density.returncode or not values or int(values[-1]) != SCREEN_DENSITY:

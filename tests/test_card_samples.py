@@ -113,7 +113,7 @@ def test_exact_frame_copied_before_background_write(tmp_path):
     saved = cv2.imread(str(collector.directory / record["files"]["frame"]))
     assert np.array_equal(saved, original)
     crop = cv2.imread(str(collector.directory / record["files"]["card"]))
-    assert np.array_equal(crop, original[529:595, 115:169])
+    assert np.array_equal(crop, original[536:602, 85:139])
     assert (collector.directory / "index.html").is_file()
 
 
@@ -175,7 +175,7 @@ def test_queue_full_and_close_are_bounded(tmp_path, monkeypatch):
 def test_real_observation_uses_one_frame_and_leaves_decision_unchanged(tmp_path, monkeypatch):
     frame = hand()
     # An affordable slot with a dark, invalid card image must be sampled as UNKNOWN.
-    frame[529:582, 115:169] = 0
+    frame[536:589, 85:139] = 0
     available_before = []
 
     class Device:
@@ -218,7 +218,7 @@ def test_empty_hand_sampling_requires_repeated_high_elixir(tmp_path, monkeypatch
 
 def test_selected_unknown_is_saved_even_when_periodic_observation_is_throttled(tmp_path, monkeypatch):
     frame = hand()
-    frame[529:582, 115:169] = 0
+    frame[536:589, 85:139] = 0
 
     class Device:
         calls = 0
@@ -294,7 +294,7 @@ def test_wrong_geometry_is_not_interpreted_or_saved(tmp_path):
     collector = samples.CardSampleCollector("Classic 1v1", tmp_path)
     try:
         assert not collector.offer(np.zeros((1600, 900, 3), dtype=np.uint8), 0, {"reason": "unknown"})
-        with pytest.raises(ValueError, match="419"):
+        with pytest.raises(ValueError, match="360"):
             cd.extract_card_fingerprint(np.zeros((1600, 900, 3), dtype=np.uint8), 0)
     finally:
         assert collector.close()

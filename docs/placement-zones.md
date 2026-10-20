@@ -4,6 +4,8 @@ The bot picks a **play group** for each detected card, then taps a random point 
 
 ## Reference map
 
+Runtime geometry is now **360×640 / 160 DPI**. The historical overlay below uses 419×633; multiply x by 360/419 and y by 640/633 to compare its points with the current `PLAY_COORDS` table.
+
 ![Placement zones overlay](placement-zones-overlay.png)
 
 - **Your side** is the **bottom** of the image; **enemy** is the top.
@@ -44,7 +46,7 @@ Full card → group list lives in `CARD_GROUPS` in `crX/bot/card_data.py` (184 i
 | 精英版闪电法师 `hero_electro_wizard` | `back_support` | 保留控制支援定位, 技能可眩晕附近目标; 沿用本体后排落点。[10 月公告][october] |
 | 精英版寒冰法师 `hero_ice_wizard` | `back_support` | 保留减速支援并通过技能冻结区域内敌军, 沿用本体后排落点。[9 月公告][september] |
 
-`bridge_line` 左路 `(115, 332)`、右路 `(295, 336)`。
+`bridge_line` 已按 360×640 迁移为左路 `(99, 336)`、右路 `(253, 340)`。
 `back_support` 沿用坐标表中每路 4 个点, 按既有逻辑随机选点。
 左右路仍由桥附近画面变化决定; 本次不增加敌军定位、精确反击投放或技能触发策略。
 这些落点只在正确识别卡牌后使用, 不代表已经补齐原生手牌指纹。

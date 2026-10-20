@@ -52,20 +52,20 @@ def test_crown_bar_alone_is_not_enough_without_main_menu():
 
 def test_unsupported_screen_geometry_is_not_a_finished_reward():
     screen = Screen("rewards-finished-zh.png")
-    screen.image = screen.image[:100, :100]
+    screen.image = screen.image[:101, :86]
     assert not check_if_battle_rewards_finished(screen)
 
 
 def test_empty_bar_without_crown_does_not_stop():
     screen = Screen("rewards-finished-zh.png")
-    screen.image[385:443, 194:230] = 0
+    screen.image[389:448, 167:198] = 0
     assert not check_if_battle_rewards_finished(screen)
 
 
 def test_crown_without_empty_bar_does_not_stop():
     screen = Screen("rewards-pending-zh.png")
     crown = Screen("rewards-finished-zh.png").image
-    screen.image[385:443, 194:230] = crown[385:443, 194:230]
+    screen.image[389:448, 167:198] = crown[389:448, 167:198]
     assert not check_if_battle_rewards_finished(screen)
 
 

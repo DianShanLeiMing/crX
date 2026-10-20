@@ -11,5 +11,5 @@ Drop reference PNGs into `reference_images/<descriptive_folder>/` and call `find
 ## Gotchas
 
 - Matching is **grayscale** — color-only differences are invisible to it; use the bot layer's pixel/color checks for those.
-- No resolution scaling: templates must be captured at the same ~419×633 emulator resolution (see root `AGENTS.md`).
+- Runtime screenshots use 360×640 / 160 DPI. Prefer native captures; migrated proportional references and unchanged-size fixed-DPI artwork are alternatives, not arbitrary-resolution support.
 - Reference images load via `utils.image_handler` which accepts `.png` only and rejects all-white/all-black images.

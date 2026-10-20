@@ -4,15 +4,14 @@ Writes one self-contained folder per fight (the "pack" format consumed by the
 royalestrat ``user_data`` importer):
 
     recordings/<slug>/
-      capture.mkv            # lossless FFV1 video, 419x633, BGR, 3 fps  (only if dimension/color-exact)
+      capture.mkv            # lossless FFV1 video, 360x640, BGR, 3 fps  (only if dimension/color-exact)
        --- or, when cv2's FFV1 crops odd dims / subsamples chroma (the common case): ---
-      frames/000000.png ...  # lossless PNG, 419x633, BGR, 3 fps         (fallback)
+      frames/000000.png ...  # lossless PNG, 360x640, BGR, 3 fps         (fallback)
       plays.jsonl            # one JSON line per deploy: {frame_index, card_index (hand slot 0-3), x, y, elapsed_s}
       manifest.json
 
-The frame size 419x633 is odd on both axes; cv2.VideoWriter's FFV1 defaults to a
-yuv420p pixel format that needs even dims and subsamples chroma, so it would crop
-to 418x632 and corrupt color. _ffv1_available() probes for this and falls back to
+Even with the 360x640 frame size, a backend can subsample chroma or otherwise
+change pixels. _ffv1_available() probes for this and falls back to
 PNG (lossless, exact dims, exact BGR) whenever FFV1 is not pixel-faithful.
 
 Channel order is load-bearing: ``emulator.screenshot()`` is BGR and we keep it
@@ -37,11 +36,12 @@ from typing import Any
 import cv2
 import numpy as np
 
+from crX.bot.coords import GAME_SCREEN_SIZE
 from crX.utils.platform import get_recordings_dir
 
 # Fixed capture geometry (absolute emulator resolution). VideoWriter wants (w, h);
-# screenshots are (h, w, c) == (633, 419, 3).
-FRAME_W, FRAME_H = 419, 633
+# screenshots are (h, w, c) == (640, 360, 3).
+FRAME_W, FRAME_H = GAME_SCREEN_SIZE
 DEFAULT_FPS = 3.0
 # Skip starting a new recording once the recordings drive is over 90% full
 # (free space below this fraction of total). Never deletes anything -- it just
@@ -185,8 +185,7 @@ class FightPackRecorder:
         """One-time codec probe: accept FFV1 only if it is dimension- and color-exact.
 
         cv2.VideoWriter's FFV1 defaults to a yuv420p pixel format, which requires
-        even dimensions (it silently crops our odd 419x633 to 418x632) and subsamples
-        chroma (corrupting the exact BGR that side detection relies on). A naive
+        even dimensions and can subsample chroma (corrupting the exact BGR that side detection relies on). A naive
         "can I decode a frame" probe misses both. So we round-trip a red/blue striped
         frame and reject FFV1 unless the readback is the right shape AND color-faithful;
         the caller then falls back to lossless PNG frames, which have neither constraint.

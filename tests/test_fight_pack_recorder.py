@@ -19,10 +19,10 @@ from crX.utils import platform as pf
 
 
 class _FakeEmu:
-    """Returns a valid (633, 419, 3) BGR frame on every screenshot()."""
+    """Returns a valid (640, 360, 3) BGR frame on every screenshot()."""
 
     def screenshot(self) -> np.ndarray:
-        return np.zeros((633, 419, 3), dtype=np.uint8)
+        return np.zeros((640, 360, 3), dtype=np.uint8)
 
 
 def _read_manifest(pack_dir: str) -> dict:
@@ -170,7 +170,7 @@ def test_pack_is_spec_valid(tmp_path, monkeypatch):
     # uuid is the importer's dedup key: 32-char lowercase hex, stable across re-exports.
     assert isinstance(manifest["uuid"], str) and len(manifest["uuid"]) == 32
     assert int(manifest["uuid"], 16) >= 0  # valid hex
-    assert manifest["resolution"] == [419, 633]
+    assert manifest["resolution"] == [360, 640]
     assert manifest["fight_mode"] == "1v1_trophy"
     assert manifest["outcome"] == "win"
     assert manifest["pcb_version"] == "vTEST"

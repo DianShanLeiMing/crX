@@ -14,7 +14,7 @@ import numpy as np
 from PIL import Image
 
 from crX.bot.card_data import CARD_NAMES_ZH
-from crX.bot.coords import HAND_CARD_SIZE
+from crX.bot.coords import CARD_FINGERPRINT_SIZE, GAME_SCREEN_SIZE, HAND_CARD_SIZE, LEGACY_SCREEN_SIZE
 
 STATUS_LABELS = {
     "pending": "待确认",
@@ -230,7 +230,7 @@ def _group_features(sample: ReviewSample) -> tuple[int, np.ndarray] | None:
 
 def image_group_features(image: Image.Image) -> tuple[int, np.ndarray] | None:
     """Use the same conservative appearance comparison during capture and review."""
-    if image.size != HAND_CARD_SIZE:
+    if image.size not in (HAND_CARD_SIZE, CARD_FINGERPRINT_SIZE):
         return None
     pixels = np.asarray(image.convert("RGB").resize((18, 22)), dtype=np.int16)
     gray = np.asarray(image.convert("L").resize((9, 8)))
@@ -281,7 +281,7 @@ def scan_grouped_samples(root: Path) -> tuple[list[ReviewSample], int, dict[str,
 
 def load_previews(sample: ReviewSample) -> dict:
     images = {}
-    for kind, bounds in (("card", (120, 148)), ("hand", (470, 72)), ("frame", (419, 633))):
+    for kind, bounds in (("card", (120, 148)), ("hand", (470, 72)), ("frame", GAME_SCREEN_SIZE)):
         try:
             with Image.open(sample.file(kind)) as image:
                 if image.width > 1000 or image.height > 1000:
@@ -308,8 +308,8 @@ def export_candidate(sample: ReviewSample) -> Path:
     if type(slot) is not int or not 0 <= slot < 4 or sample.record.get("available") is not True:
         raise ValueError("只有确认可用的单张手牌样本才能导出指纹；此样本可保留用于诊断")
     frame = cv2.imread(str(sample.file("frame")))
-    if frame is None or frame.shape != (633, 419, 3):
-        raise ValueError("原始截图缺失或尺寸无效，需要 419×633 的战斗截图")
+    if frame is None or frame.shape not in ((*GAME_SCREEN_SIZE[::-1], 3), (*LEGACY_SCREEN_SIZE[::-1], 3)):
+        raise ValueError("原始截图缺失或尺寸无效，需要 360×640 画面或 419×633 历史样本")
     fingerprint = extract_card_fingerprint(frame, slot)
     path = sample_file(sample.directory, f"{sample.name}-candidate.json")
     atomic_json(

@@ -15,6 +15,7 @@ import cv2
 import numpy as np
 
 from crX.bot.card_data import CARD_NAMES_ZH
+from crX.bot.coords import GAME_SCREEN_SIZE, LEGACY_SCREEN_SIZE
 from crX.utils.card_review import atomic_json, read_json, sample_file
 
 MAX_PER_CARD = 8
@@ -185,8 +186,8 @@ def sample_fingerprint(sample) -> np.ndarray:
     if path.stat().st_size > 4 * 1024 * 1024:
         raise ValueError("原始截图过大")
     frame = cv2.imread(str(path))
-    if frame is None or frame.shape != (633, 419, 3):
-        raise ValueError("原始截图需要为 419×633")
+    if frame is None or frame.shape not in ((*GAME_SCREEN_SIZE[::-1], 3), (*LEGACY_SCREEN_SIZE[::-1], 3)):
+        raise ValueError("原始截图需要为 360×640 或 419×633 历史样本")
     return np.array([[corner[color] for color in COLORS_KEYS] for corner in extract_card_fingerprint(frame, slot)])
 
 

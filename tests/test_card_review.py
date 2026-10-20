@@ -45,8 +45,8 @@ def add_group_sample(root, session, name, *, slot=0, pixels=None, available=True
     directory.mkdir(parents=True, exist_ok=True)
     frame = cv2.imread(str(Path(__file__).parent / "fixtures/card-evo-cannon-native-zh.png"))
     if pixels is None:
-        pixels = frame[529:595, 115:169]
-    for kind, image in (("card", pixels), ("frame", frame), ("hand", frame[529:595])):
+        pixels = frame[536:602, 85:139]
+    for kind, image in (("card", pixels), ("frame", frame), ("hand", frame[536:602])):
         cv2.imwrite(str(directory / f"{name}-{kind}.png"), image)
     record = {
         "reason": "unknown",

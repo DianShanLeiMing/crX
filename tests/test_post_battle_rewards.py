@@ -52,7 +52,7 @@ class RewardSequence:
         if detect_post_battle_reward(self.last_frame):
             assert (x, y) == POST_BATTLE_REWARD_CONTINUE_COORD
         else:
-            assert 160 < x < 350 and 530 < y < 620
+            assert 137 < x < 301 and 536 < y < 627
         _, delay = self.scenes[self.index]
         if delay is None and self.index + 1 < len(self.scenes):
             self.index += 1
@@ -73,16 +73,16 @@ def test_non_reward_screens_and_plain_backgrounds_are_not_clickable():
         ):
             assert detect_post_battle_reward(cv2.imread(str(path))) is None, path.name
     for color in ((20, 140, 235), (160, 15, 110), (100, 60, 30)):
-        assert detect_post_battle_reward(np.full((633, 419, 3), color, dtype=np.uint8)) is None
+        assert detect_post_battle_reward(np.full((640, 360, 3), color, dtype=np.uint8)) is None
     assert detect_post_battle_reward(None) is None
     assert detect_post_battle_reward(np.zeros((200, 100, 3), dtype=np.uint8)) is None
 
 
 def test_single_visible_star_still_requires_the_chest_object():
     chest = image("post-battle-attached-02.png")
-    chest[135:195, 150:225] = chest[135, 150]
+    chest[136:197, 129:193] = chest[136, 129]
     assert detect_post_battle_reward(chest) == "lucky_chest"
-    chest[180:450, 100:320] = chest[180, 100]
+    chest[182:455, 86:275] = chest[182, 86]
     assert detect_post_battle_reward(chest) is None
 
 
@@ -202,7 +202,7 @@ def test_failure_main_menus_ignore_currency_glints(filename):
 
 
 def test_main_menu_fallback_requires_all_fixed_anchors():
-    for region in ((150, 455, 275, 530), (370, 45, 410, 90), (150, 575, 275, 633)):
+    for region in ((129, 460, 236, 536), (318, 45, 352, 91), (129, 581, 236, 640)):
         main = image("failure-main-currency.png")
         left, top, right, bottom = region
         main[top:bottom, left:right] = 0
@@ -213,7 +213,7 @@ def test_main_menu_fallback_requires_all_fixed_anchors():
 
 def test_new_reward_backdrops_require_foreground_artwork():
     chest = image("failure-chest-rainbow.png")
-    chest[230:420, 90:330] = chest[230, 90]
+    chest[233:425, 77:284] = chest[233, 77]
     assert detect_post_battle_reward(chest) is None
     coins = image("failure-reward-coins.png")
     coins[140:390, 130:290] = coins[140, 130]
@@ -246,7 +246,7 @@ def test_startup_wait_can_drain_recognized_rewards(clock):
 
 
 def test_startup_unknown_timeout_remembers_exact_frame_without_clicks(clock, monkeypatch):
-    unknown = np.zeros((633, 419, 3), dtype=np.uint8)
+    unknown = np.zeros((640, 360, 3), dtype=np.uint8)
     screen = RewardSequence(clock, [(unknown, 2.0), (image("failure-main-recovered.png"), None)])
     monkeypatch.setattr(nav, "check_if_on_clan_voyage", lambda _: False)
     logger = Logger()

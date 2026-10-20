@@ -9,7 +9,7 @@ This is a screen-recognition state machine, not a game API client.
 - `bot/states.py` owns job order, RuntimeContext and bounded recovery progress.
 - Supported adapters: MuMu on Windows, generic ADB on available desktop platforms.
 - New I/O uses list arguments, shell=False, validated targets, bounded timeouts.
-- Coordinates are fixed to 419x633 / 160 DPI; screenshots and card fingerprints are BGR.
+- Runtime coordinates and screenshots use 360x640 (9:16) / 160 DPI, in BGR. Historical 419x633 card samples are read-only compatible; card fingerprints keep the 54x66 artwork schema.
 - Named screen coordinates belong in `bot/coords.py` (card placement profiles in `bot/card_data.py`).
 - Pure find helpers belong in `bot/find.py`; pixel predicates in `bot/state_detect.py`.
 - Verify screen state before clicks; reuse `bot/nav.py` for navigation.

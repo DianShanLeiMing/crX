@@ -60,7 +60,7 @@ def find_post_battle_button_in_image(iar):
     """Same-frame result button lookup for the post-battle navigation loop."""
     if iar is None or iar.shape != (*GAME_SCREEN_SIZE[::-1], 3):
         return None
-    pixels = [iar[545][178], iar[547][239], iar[553][214], iar[554][201]]
+    pixels = [iar[551][153], iar[553][205], iar[559][184], iar[560][173]]
     colors = [[255, 187, 104], [255, 187, 104], [255, 255, 255], [255, 255, 255]]
     pixel_match = True
     for i, p in enumerate(pixels):
@@ -68,7 +68,7 @@ def find_post_battle_button_in_image(iar):
             pixel_match = False
             break
     if pixel_match:
-        return (200, 550)
+        return (172, 556)
     return find_image(iar, "post_battle_button", tolerance=0.9, subcrop=BATTLE_RESULT_BUTTON_REGION)
 
 
@@ -93,9 +93,9 @@ def locate_free_shop_offer_icon(emulator) -> tuple[int, int] | None:
     if region is None:
         return None
     coord = find_image(image, "shop_daily_free", tolerance=0.94, subcrop=region)
-    if coord is None or not _is_bright_green(image, coord, (62, 26)):
+    if coord is None or not _is_bright_green(image, coord, (53, 26)):
         return None
-    return coord[0] + 20, coord[1] + 12
+    return coord[0] + 17, coord[1] + 12
 
 
 def _shop_image_is_valid(image) -> bool:
@@ -138,7 +138,7 @@ def find_shop_offer_dialog_close(image) -> tuple[int, int] | None:
     if not _shop_image_is_valid(image):
         return None
     coord = find_image(image, "shop_offer_dialog_close", tolerance=0.92, subcrop=SHOP_DIALOG_CLOSE_REGION)
-    return (coord[0] + 9, coord[1] + 10) if coord is not None else None
+    return (coord[0] + 8, coord[1] + 10) if coord is not None else None
 
 
 def find_free_shop_confirmation(image) -> tuple[int, int] | None:
@@ -146,9 +146,9 @@ def find_free_shop_confirmation(image) -> tuple[int, int] | None:
     if find_shop_offer_dialog_close(image) is None:
         return None
     coord = find_image(image, "shop_free_confirmation", tolerance=0.94, subcrop=SHOP_FREE_CONFIRM_REGION)
-    if coord is None or not _is_bright_green(image, coord, (71, 29)):
+    if coord is None or not _is_bright_green(image, coord, (61, 29)):
         return None
-    return coord[0] + 35, coord[1] + 14
+    return coord[0] + 31, coord[1] + 14
 
 
 def find_shop_recommendations(image) -> tuple[int, int] | None:

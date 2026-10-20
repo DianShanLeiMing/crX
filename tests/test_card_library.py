@@ -142,13 +142,14 @@ def test_capture_limits_similar_samples_across_fights(tmp_path):
     import cv2
 
     from crX.bot.card_samples import CardSampleCollector
-    from crX.bot.coords import HAND_CARD_TOP_LEFTS
+    from crX.bot.coords import HAND_CARD_SIZE, HAND_CARD_TOP_LEFTS
 
     sample = add_group_sample(tmp_path, "old", "sample-000", slot=0)
     frame = cv2.imread(str(sample.file("frame")))
     left, top = HAND_CARD_TOP_LEFTS[0]
     collector = CardSampleCollector("1v1", tmp_path)
-    record = {"slot": 0, "available": True, "crop": [left, top, left + 54, top + 66]}
+    width, height = HAND_CARD_SIZE
+    record = {"slot": 0, "available": True, "crop": [left, top, left + width, top + height]}
     try:
         assert collector._keep_representative(frame, record)
         assert collector._keep_representative(frame, record)

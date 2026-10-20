@@ -22,6 +22,7 @@ from crX.bot.nav import (
     switch_deck_page,
 )
 from crX.bot.state_detect import (
+    check_if_on_card_page,
     check_if_on_clash_main_menu,
     check_if_on_classic_1v1_deck_page,
     check_if_on_classic_2v2_deck_page,
@@ -121,7 +122,7 @@ def find_and_click_deck(emulator, logger: Logger, deck_number: int, deck_count: 
             logger.change_status(f"未找到卡组 #{deck_to_check}，已跳过。")
             continue
 
-        emulator.click(deck_coords[0] + 15, deck_coords[1] + 15)
+        emulator.click(deck_coords[0] + DECK_TAB_CLICK_OFFSET[0], deck_coords[1] + DECK_TAB_CLICK_OFFSET[1])
         time.sleep(1)
 
         if is_deck_full(emulator):
@@ -183,7 +184,8 @@ def randomize_deck(emulator, logger: Logger, deck_number: int = 2) -> bool:
         return False
 
     on_known_deck_page = (
-        check_if_on_trophy_road_deck_page(emulator)
+        check_if_on_card_page(emulator)
+        or check_if_on_trophy_road_deck_page(emulator)
         or check_if_on_classic_2v2_deck_page(emulator)
         or check_if_on_classic_1v1_deck_page(emulator)
     )
