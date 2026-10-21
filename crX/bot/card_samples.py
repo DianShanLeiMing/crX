@@ -25,7 +25,7 @@ LOG = logging.getLogger(__name__)
 MAX_ROOT_BYTES = 128 * 1024 * 1024
 MAX_SAMPLES_PER_FIGHT = 32
 OBSERVATION_INTERVAL_S = 1.0
-MAX_SIMILAR_SAMPLES = 3
+MAX_SIMILAR_SAMPLES = 1
 MAX_SAMPLE_GROUPS = 512
 
 
@@ -229,7 +229,12 @@ class CardSampleCollector:
 
     def _keep_representative(self, frame, record) -> bool:
         """Cross-fight filtering runs on the disk worker, never on the gameplay thread."""
-        from crX.utils.card_review import _group_features, image_group_features, scan_grouped_samples
+        from crX.utils.card_review import (
+            _group_features,
+            image_group_features,
+            scan_grouped_samples,
+            similar_card_images,
+        )
 
         if type(record.get("slot")) is not int or record.get("available") is not True:
             return True
@@ -247,7 +252,7 @@ class CardSampleCollector:
             return False
         hash_value, pixels = features
         for group in self._groups:
-            if (hash_value ^ group.hash_value).bit_count() <= 6 and np.abs(pixels - group.pixels).mean() <= 12:
+            if similar_card_images(features, (group.hash_value, group.pixels)):
                 group.count += 1
                 return group.count <= MAX_SIMILAR_SAMPLES
         if len(self._groups) < MAX_SAMPLE_GROUPS:

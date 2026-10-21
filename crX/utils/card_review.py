@@ -33,6 +33,8 @@ REASON_LABELS = {
     "trial_match": "试用指纹命中",
 }
 SAMPLE_NAME = re.compile(r"sample-\d{3,}")
+GROUP_HASH_DISTANCE = 8
+GROUP_PIXEL_DIFFERENCE = 12
 
 
 def sample_file(directory: Path, filename: str) -> Path:
@@ -297,6 +299,14 @@ def image_group_features(image: Image.Image) -> tuple[int, np.ndarray] | None:
     return int.from_bytes(np.packbits(bits).tobytes()), pixels
 
 
+def similar_card_images(first: tuple[int, np.ndarray], second: tuple[int, np.ndarray]) -> bool:
+    """Tolerate small animation changes while requiring close full-card colors."""
+    return bool(
+        (first[0] ^ second[0]).bit_count() <= GROUP_HASH_DISTANCE
+        and np.abs(first[1] - second[1]).mean() <= GROUP_PIXEL_DIFFERENCE
+    )
+
+
 @dataclass
 class _GroupReference:
     key: str
@@ -313,13 +323,10 @@ def group_similar_samples(samples: list[ReviewSample]) -> dict[str, list[str]]:
         features = _group_features(sample)
         matched = None
         if features is not None:
-            hash_value, pixels = features
             for reference in representatives:
                 if reference.card_id and sample.card_id and reference.card_id != sample.card_id:
                     continue
-                if (hash_value ^ reference.hash_value).bit_count() <= 6 and np.abs(
-                    pixels - reference.pixels
-                ).mean() <= 12:
+                if similar_card_images(features, (reference.hash_value, reference.pixels)):
                     matched = reference
                     break
         if matched is None:

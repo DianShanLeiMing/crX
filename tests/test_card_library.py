@@ -147,8 +147,8 @@ def test_capture_limits_similar_samples_across_fights(tmp_path):
     width, height = HAND_CARD_SIZE
     record = {"slot": 0, "available": True, "crop": [left, top, left + width, top + height]}
     try:
-        assert collector._keep_representative(frame, record)
-        assert collector._keep_representative(frame, record)
+        assert not collector._keep_representative(frame, record)
+        assert not collector._keep_representative(frame, record)
         assert not collector._keep_representative(frame, record)
     finally:
         collector.close()

@@ -295,6 +295,21 @@ def test_visual_groups_cross_sessions_slots_and_candidates(tmp_path):
     assert len(samples) == 3 and errors == 0 and sorted(map(len, scanned_groups.values())) == [1, 2]
 
 
+def test_native_animation_frames_share_group_without_combining_other_art(tmp_path):
+    fixtures = Path(__file__).parent / "fixtures"
+    first = add_group_sample(
+        tmp_path, "first", "sample-000", pixels=cv2.imread(str(fixtures / "card-sample-animation-01.png"))
+    )
+    animated = add_group_sample(
+        tmp_path, "second", "sample-000", slot=3, pixels=cv2.imread(str(fixtures / "card-sample-animation-02.png"))
+    )
+    other = add_group_sample(tmp_path, "second", "sample-001")
+    animated.record["candidates"] = [{"card_id": "knight", "distance": 2396}]
+    groups = group_similar_samples([first, animated, other])
+    assert list(groups.values()) == [[first.key, animated.key], [other.key]]
+    assert not first.card_id and not animated.card_id
+
+
 @pytest.mark.parametrize("kind", ["diagnostic", "unavailable", "missing", "corrupt", "wrong_size"])
 def test_unsuitable_crops_stay_separate(tmp_path, kind):
     first = add_group_sample(tmp_path, "session", "sample-000")

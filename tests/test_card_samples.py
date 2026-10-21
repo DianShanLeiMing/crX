@@ -128,6 +128,34 @@ def test_duplicates_and_per_fight_limit(tmp_path):
     assert collector.stats["duplicates"] == 1 and collector.stats["dropped"] == 1
 
 
+def test_cross_fight_animation_dedup_keeps_one_without_rewriting_old_sample(tmp_path):
+    from crX.bot.coords import HAND_CARD_SIZE, HAND_CARD_TOP_LEFTS
+
+    fixtures = Path(__file__).parent / "fixtures"
+
+    def native_frame(filename, slot):
+        frame = hand()
+        left, top = HAND_CARD_TOP_LEFTS[slot]
+        width, height = HAND_CARD_SIZE
+        frame[top : top + height, left : left + width] = cv2.imread(str(fixtures / filename))
+        return frame
+
+    first = samples.CardSampleCollector("1v1", tmp_path)
+    assert first.offer(native_frame("card-sample-animation-01.png", 0), 0, {"reason": "unknown", "available": True})
+    assert first.close() and first.stats["saved"] == 1
+    original = {path: path.read_bytes() for path in first.directory.iterdir()}
+    second = samples.CardSampleCollector("2v2", tmp_path)
+    assert second.offer(native_frame("card-sample-animation-02.png", 3), 3, {"reason": "low_margin", "available": True})
+    assert second.close()
+    assert second.stats["duplicates"] == 1 and second.stats["saved"] == 0
+    assert not second.directory.exists()
+    assert all(path.read_bytes() == content for path, content in original.items())
+    different = samples.CardSampleCollector("1v1", tmp_path)
+    frame = cv2.imread(str(fixtures / "card-evo-cannon-native-zh.png"))
+    assert different.offer(frame, 0, {"reason": "unknown", "available": True})
+    assert different.close() and different.stats["saved"] == 1
+
+
 def test_disk_budget_keeps_old_files_and_skips_new_sample(tmp_path):
     old = tmp_path / "keep.txt"
     old.write_text("keep", encoding="utf-8")
