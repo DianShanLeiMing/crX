@@ -1,5 +1,6 @@
 """Attached reward sequence and delayed overlays must drain before another match."""
 
+from itertools import pairwise
 from pathlib import Path
 
 import cv2
@@ -7,8 +8,18 @@ import numpy as np
 import pytest
 
 from crX.bot import fight, nav, states
-from crX.bot.coords import POST_BATTLE_REWARD_CONTINUE_COORD, START_FIGHT_BUTTON_COORD
-from crX.bot.state_detect import detect_post_battle_reward, is_clash_main_menu_image
+from crX.bot.coords import (
+    POST_BATTLE_PUZZLE_CROWN_REGION,
+    POST_BATTLE_PUZZLE_FRAME_REGION,
+    POST_BATTLE_PUZZLE_OPEN_REGION,
+    POST_BATTLE_PUZZLE_TITLE_REGION,
+    POST_BATTLE_PUZZLE_UNLOCKED_REGION,
+    POST_BATTLE_REWARD_CONTINUE_COORD,
+    POST_BATTLE_REWARD_FLOOR_REGION,
+    POST_BATTLE_REWARD_TOP_REGION,
+    START_FIGHT_BUTTON_COORD,
+)
+from crX.bot.state_detect import detect_post_battle_reward, is_clash_main_menu_image, is_generic_post_battle_reward
 from crX.utils.logger import Logger
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -67,9 +78,13 @@ def test_attached_reward_stages(number):
 
 def test_non_reward_screens_and_plain_backgrounds_are_not_clickable():
     for path in FIXTURES.glob("*.png"):
-        if not path.name.startswith(("post-battle-attached-", "failure-chest-native-")) and path.name not in (
+        if not path.name.startswith(
+            ("post-battle-attached-", "failure-chest-native-", "failure-puzzle-native-", "failure-puzzle-open-native-")
+        ) and path.name not in (
             "failure-chest-rainbow.png",
             "failure-reward-coins.png",
+            "reward-coins-native-01.png",
+            "reward-coins-native-02.png",
         ):
             assert detect_post_battle_reward(cv2.imread(str(path))) is None, path.name
     for color in ((20, 140, 235), (160, 15, 110), (100, 60, 30)):
@@ -191,6 +206,380 @@ def test_matchmaking_refuses_unknown_screens_without_taps(clock):
 def test_failure_samples_are_recognized_rewards(filename, expected):
     assert detect_post_battle_reward(image(filename)) == expected
     assert not is_clash_main_menu_image(image(filename))
+
+
+@pytest.mark.parametrize("number", (1, 2))
+def test_native_coin_bag_is_recognized_independently_of_amount(number):
+    frame = image(f"reward-coins-native-{number:02}.png")
+    assert detect_post_battle_reward(frame) == "event_reward"
+    assert not is_clash_main_menu_image(frame)
+    frame[345:385, 105:255] = 0
+    assert detect_post_battle_reward(frame) == "event_reward"
+
+
+@pytest.mark.parametrize("number", (1, 2))
+def test_native_coin_bag_requires_object_and_full_reward_backdrop(number):
+    frame = image(f"reward-coins-native-{number:02}.png")
+    for left, top, right, bottom in (
+        (135, 270, 225, 347),
+        POST_BATTLE_REWARD_TOP_REGION,
+        (4, 61, 56, 556),
+        (304, 61, 356, 556),
+    ):
+        incomplete = frame.copy()
+        incomplete[top:bottom, left:right] = 0
+        assert detect_post_battle_reward(incomplete) is None
+    assert detect_post_battle_reward((frame * 0.5).astype(np.uint8)) is None
+
+
+def test_native_coin_reward_completes_a_single_battle(clock, monkeypatch):
+    screen = RewardSequence(
+        clock,
+        [
+            (image("battle-win-native-0.png"), None),
+            (image("reward-coins-native-01.png"), None),
+            (image("failure-main-recovered.png"), None),
+        ],
+    )
+    logger, context = Logger(), states.RuntimeContext()
+    monkeypatch.setattr(fight, "read_battle_outcome", lambda *_: "win")
+    monkeypatch.setattr(fight, "is_recording", lambda: False)
+    assert states.state_tree(screen, logger, "end_fight", {}, context) == "shop_daily"
+    assert [index for index, _, _ in screen.clicks] == [0, 1]
+    assert context.completed_fights == logger.stats["completed_fights"] == logger.stats["wins"] == 1
+
+
+@pytest.mark.parametrize("entry", ("startup", "before_match"))
+def test_pending_native_coin_reward_is_drained_without_recounting(clock, entry):
+    screen = RewardSequence(
+        clock, [(image("reward-coins-native-02.png"), None), (image("failure-main-recovered.png"), None)]
+    )
+    logger = Logger()
+    if entry == "startup":
+        assert nav.wait_for_clash_main_menu(screen, logger, timeout=10)
+    else:
+        assert nav.finish_pending_battle_rewards(screen, logger)
+    assert len(screen.clicks) == 1
+    assert logger.stats["completed_fights"] == logger.stats["wins"] == logger.stats["losses"] == 0
+
+
+@pytest.mark.parametrize("number", (1, 2, 3, 4))
+def test_native_silver_puzzle_open_is_a_reward(number):
+    frame = image(f"failure-puzzle-open-native-{number:02}.png")
+    assert detect_post_battle_reward(frame) == "event_reward"
+    assert not is_clash_main_menu_image(frame)
+
+
+@pytest.mark.parametrize("number", (1, 2, 3, 4))
+def test_native_silver_puzzle_requires_both_anchors_and_backdrop(number):
+    frame = image(f"failure-puzzle-open-native-{number:02}.png")
+    for left, top, right, bottom in (
+        POST_BATTLE_PUZZLE_CROWN_REGION,
+        POST_BATTLE_PUZZLE_OPEN_REGION,
+        POST_BATTLE_REWARD_TOP_REGION,
+        POST_BATTLE_REWARD_FLOOR_REGION,
+    ):
+        incomplete = frame.copy()
+        incomplete[top:bottom, left:right] = 0
+        assert detect_post_battle_reward(incomplete) is None
+    assert detect_post_battle_reward((frame * 0.5).astype(np.uint8)) is None
+
+
+@pytest.mark.parametrize("number", (1, 2, 3))
+def test_native_revealed_puzzle_is_a_reward(number):
+    frame = image(f"failure-puzzle-native-{number:02}.png")
+    assert detect_post_battle_reward(frame) == "event_reward"
+    assert not is_clash_main_menu_image(frame)
+    # The individual piece and collection progress are not navigation anchors.
+    frame[285:350, 145:210] = 0
+    frame[424:445, 170:215] = 0
+    assert detect_post_battle_reward(frame) == "event_reward"
+
+
+@pytest.mark.parametrize("number", (1, 2, 3))
+def test_native_puzzle_requires_labels_frame_and_backdrop(number):
+    frame = image(f"failure-puzzle-native-{number:02}.png")
+    for left, top, right, bottom in (
+        POST_BATTLE_PUZZLE_TITLE_REGION,
+        POST_BATTLE_PUZZLE_UNLOCKED_REGION,
+        POST_BATTLE_PUZZLE_FRAME_REGION,
+        POST_BATTLE_REWARD_TOP_REGION,
+        POST_BATTLE_REWARD_FLOOR_REGION,
+    ):
+        incomplete = frame.copy()
+        incomplete[top:bottom, left:right] = 0
+        assert detect_post_battle_reward(incomplete) is None
+    assert detect_post_battle_reward((frame * 0.5).astype(np.uint8)) is None
+
+
+def test_chest_puzzle_and_main_chain_counts_once(clock, monkeypatch):
+    screen = RewardSequence(
+        clock,
+        [
+            (image("battle-win-native-0.png"), None),
+            (image("failure-chest-native-01.png"), None),
+            (image("post-battle-attached-09.png"), None),
+            (image("failure-puzzle-open-native-01.png"), None),
+            (image("failure-puzzle-native-03.png"), None),
+            (image("failure-puzzle-native-01.png"), None),
+            (image("failure-main-recovered.png"), None),
+        ],
+    )
+    logger, context = Logger(), states.RuntimeContext()
+    monkeypatch.setattr(fight, "read_battle_outcome", lambda *_: "win")
+    monkeypatch.setattr(fight, "is_recording", lambda: False)
+    assert states.state_tree(screen, logger, "end_fight", {}, context) == "shop_daily"
+    assert [index for index, _, _ in screen.clicks] == [0, 1, 2, 3, 4, 5]
+    assert context.completed_fights == logger.stats["completed_fights"] == logger.stats["wins"] == 1
+
+
+@pytest.mark.parametrize("entry", ("startup", "before_match"))
+@pytest.mark.parametrize(
+    "filename", ("failure-puzzle-native-02.png", "failure-puzzle-open-native-02.png", "failure-puzzle-native-03.png")
+)
+def test_pending_puzzle_is_drained_without_recounting(clock, entry, filename):
+    screen = RewardSequence(clock, [(image(filename), None), (image("failure-main-recovered.png"), None)])
+    logger = Logger()
+    if entry == "startup":
+        assert nav.wait_for_clash_main_menu(screen, logger, timeout=10)
+    else:
+        assert nav.finish_pending_battle_rewards(screen, logger)
+    assert len(screen.clicks) == 1
+    assert logger.stats["completed_fights"] == logger.stats["wins"] == logger.stats["losses"] == 0
+
+
+@pytest.mark.parametrize("filename", ("failure-puzzle-native-01.png", "failure-puzzle-open-native-01.png"))
+def test_unresponsive_puzzle_still_has_an_action_limit(clock, filename):
+    screen = RewardSequence(clock, [(image(filename), None)])
+    logger = Logger()
+    assert not nav.get_to_main_after_fight(screen, logger)
+    assert len(screen.clicks) == nav.POST_BATTLE_MAX_ACTIONS
+    assert logger.failure_frame is not None
+    assert logger.failure_frame["details"]["reason"] == "战后奖励操作达到上限"
+
+
+def test_hidden_open_prompt_can_use_generic_reward_progression(clock):
+    screen = RewardSequence(
+        clock,
+        [
+            (image("puzzle-open-prompt-hidden.png"), None),
+            (image("failure-puzzle-native-03.png"), None),
+            (image("failure-main-recovered.png"), None),
+        ],
+    )
+    assert nav.get_to_main_after_fight(screen, Logger())
+    assert [index for index, _, _ in screen.clicks] == [0, 1]
+
+
+def unclassified_reward():
+    frame = image("failure-puzzle-native-03.png")
+    for left, top, right, bottom in (POST_BATTLE_PUZZLE_TITLE_REGION, POST_BATTLE_PUZZLE_UNLOCKED_REGION):
+        frame[top:bottom, left:right] = 0
+    assert detect_post_battle_reward(frame) is None
+    assert is_generic_post_battle_reward(frame)
+    return frame
+
+
+GENERIC_REWARD_FIXTURES = tuple(
+    sorted(
+        path.name
+        for path in FIXTURES.glob("*.png")
+        if path.name.startswith(("post-battle-attached-", "failure-chest-", "failure-puzzle-", "reward-coins-native-"))
+        or path.name in ("failure-reward-coins.png", "puzzle-open-prompt-hidden.png")
+    )
+)
+
+
+@pytest.mark.parametrize("filename", GENERIC_REWARD_FIXTURES)
+def test_generic_recognition_covers_reward_backdrops_without_templates(filename, monkeypatch):
+    from crX.bot import state_detect
+
+    monkeypatch.setattr(
+        state_detect, "find_image", lambda *_a, **_kw: pytest.fail("Generic detection needs no template")
+    )
+    assert is_generic_post_battle_reward(image(filename))
+
+
+def test_generic_recognition_rejects_all_non_reward_fixtures_and_empty_screens():
+    for path in FIXTURES.glob("*.png"):
+        if path.name not in GENERIC_REWARD_FIXTURES:
+            assert not is_generic_post_battle_reward(cv2.imread(str(path))), path.name
+    for color in ((20, 140, 235), (160, 15, 110), (100, 60, 30)):
+        assert not is_generic_post_battle_reward(np.full((640, 360, 3), color, dtype=np.uint8))
+    assert not is_generic_post_battle_reward(None)
+    assert not is_generic_post_battle_reward(np.zeros((200, 100, 3), dtype=np.uint8))
+
+
+@pytest.mark.parametrize("filename", GENERIC_REWARD_FIXTURES)
+def test_generic_recognition_rejects_dimmed_reward_pages(filename):
+    assert not is_generic_post_battle_reward((image(filename) * 0.5).astype(np.uint8))
+
+
+def test_generic_reward_requires_all_backdrop_regions_and_an_object():
+    from crX.bot.coords import POST_BATTLE_REWARD_EDGE_REGIONS, POST_BATTLE_REWARD_OBJECT_REGION
+
+    frame = unclassified_reward()
+    for left, top, right, bottom in (
+        POST_BATTLE_REWARD_TOP_REGION,
+        POST_BATTLE_REWARD_FLOOR_REGION,
+        *POST_BATTLE_REWARD_EDGE_REGIONS,
+        POST_BATTLE_REWARD_OBJECT_REGION,
+    ):
+        incomplete = frame.copy()
+        incomplete[top:bottom, left:right] = 0
+        assert not is_generic_post_battle_reward(incomplete)
+    main = image("failure-main-recovered.png")
+    frame[556:640] = main[556:640]  # Visible navigation must block the generic route.
+    assert not is_generic_post_battle_reward(frame)
+
+
+def test_generic_reward_advances_once_after_confirmation_then_verifies_main(clock, monkeypatch):
+    frame = unclassified_reward()
+    screen = RewardSequence(clock, [(frame, None), (image("failure-main-recovered.png"), None)])
+    logger = Logger()
+    events = []
+    monkeypatch.setattr(logger, "change_status", lambda message: events.append((clock[0], message)))
+    assert nav.get_to_main_after_fight(screen, logger)
+    assert len(screen.clicks) == 1
+    assert screen.clicks[0][1:] == POST_BATTLE_REWARD_CONTINUE_COORD
+    action_time = next(t for t, message in events if "执行通用推进" in message)
+    assert action_time >= nav.POST_BATTLE_GENERIC_CONFIRM_S
+    assert clock[0] - screen.entered >= nav.POST_BATTLE_MAIN_STABLE_S
+
+
+def test_generic_reward_chain_completes_only_one_battle(clock, monkeypatch):
+    screen = RewardSequence(
+        clock,
+        [
+            (image("battle-win-native-0.png"), None),
+            (unclassified_reward(), None),
+            (image("failure-main-recovered.png"), None),
+        ],
+    )
+    logger, context = Logger(), states.RuntimeContext()
+    monkeypatch.setattr(fight, "read_battle_outcome", lambda *_: "win")
+    monkeypatch.setattr(fight, "is_recording", lambda: False)
+    assert states.state_tree(screen, logger, "end_fight", {}, context) == "shop_daily"
+    assert [i for i, _, _ in screen.clicks] == [0, 1]
+    assert context.completed_fights == logger.stats["completed_fights"] == logger.stats["wins"] == 1
+
+
+def test_obscured_main_menu_cannot_be_treated_as_a_generic_reward():
+    for region in ((115, 460, 245, 540), (318, 45, 352, 91), (150, 575, 210, 640)):
+        main = image("main-daily-bonus-360-native.png")
+        left, top, right, bottom = region
+        main[top:bottom, left:right] = 0
+        assert not is_clash_main_menu_image(main)
+        assert not is_generic_post_battle_reward(main)
+
+
+def test_transient_generic_reward_does_not_trigger_a_tap(clock):
+    screen = RewardSequence(clock, [(unclassified_reward(), 0.5), (image("failure-main-recovered.png"), None)])
+    assert nav.get_to_main_after_fight(screen, Logger())
+    assert screen.clicks == []
+
+
+def test_generic_confirmation_restarts_after_an_unknown_frame(clock, monkeypatch):
+    screen = RewardSequence(
+        clock,
+        [
+            (unclassified_reward(), 0.5),
+            (np.zeros((640, 360, 3), dtype=np.uint8), 0.5),
+            (unclassified_reward(), None),
+            (image("failure-main-recovered.png"), None),
+        ],
+    )
+    logger = Logger()
+    events = []
+    monkeypatch.setattr(logger, "change_status", lambda message: events.append((clock[0], message)))
+    assert nav.get_to_main_after_fight(screen, logger)
+    assert [i for i, _, _ in screen.clicks] == [2]
+    assert next(t for t, message in events if "执行通用推进" in message) >= 2
+
+
+def test_generic_reward_clicks_are_spaced_and_limited_with_exact_failure_frame(clock, monkeypatch):
+    frame = unclassified_reward()
+    screen = RewardSequence(clock, [(frame, None)])
+    logger = Logger()
+    click_times = []
+    original_click = screen.click
+
+    def click(x, y):
+        click_times.append(clock[0])
+        original_click(x, y)
+
+    monkeypatch.setattr(screen, "click", click)
+    assert not nav.get_to_main_after_fight(screen, logger)
+    assert len(click_times) == 5
+    assert all(b - a >= 1.5 for a, b in pairwise(click_times))
+    assert logger.failure_frame is not None
+    assert logger.failure_frame["details"]["reason"] == "战后奖励通用推进达到上限"
+    assert logger.failure_frame["details"]["generic_actions"] == logger.failure_frame["details"]["actions"] == 5
+    assert np.array_equal(logger.failure_frame["image"], frame)
+
+
+def test_generic_budget_is_shared_across_pages_and_precise_recognition(clock):
+    generic = unclassified_reward()
+    scenes = [(generic, None)] * 3
+    scenes += [(image("reward-coins-native-01.png"), None)]
+    scenes += [(generic, None)] * 3
+    screen = RewardSequence(clock, scenes)
+    logger = Logger()
+    assert not nav.get_to_main_after_fight(screen, logger)
+    assert [i for i, _, _ in screen.clicks] == [0, 1, 2, 3, 4, 5]
+    assert logger.failure_frame is not None
+    assert logger.failure_frame["details"]["generic_actions"] == 5
+
+
+def test_fifth_generic_click_can_still_finish_on_main(clock):
+    screen = RewardSequence(clock, [(unclassified_reward(), None)] * 5 + [(image("failure-main-recovered.png"), None)])
+    assert nav.get_to_main_after_fight(screen, Logger())
+    assert len(screen.clicks) == 5
+
+
+def test_generic_clicks_also_count_toward_total_action_limit(clock, monkeypatch):
+    monkeypatch.setattr(nav, "POST_BATTLE_MAX_ACTIONS", 3)
+    screen = RewardSequence(clock, [(unclassified_reward(), None)])
+    logger = Logger()
+    assert not nav.get_to_main_after_fight(screen, logger)
+    assert len(screen.clicks) == 3
+    assert logger.failure_frame is not None
+    assert logger.failure_frame["details"]["reason"] == "战后奖励操作达到上限"
+
+
+@pytest.mark.parametrize("entry", ("startup", "before_match"))
+def test_generic_reward_entry_paths_do_not_count_another_match(clock, entry):
+    screen = RewardSequence(clock, [(unclassified_reward(), None), (image("failure-main-recovered.png"), None)])
+    logger = Logger()
+    if entry == "startup":
+        assert nav.wait_for_clash_main_menu(screen, logger, timeout=10)
+    else:
+        assert nav.finish_pending_battle_rewards(screen, logger)
+    assert len(screen.clicks) == 1
+    assert logger.stats["completed_fights"] == logger.stats["wins"] == logger.stats["losses"] == 0
+
+
+def test_main_menu_takes_priority_over_both_reward_routes(clock, monkeypatch):
+    screen = RewardSequence(clock, [(image("failure-main-recovered.png"), None)])
+    monkeypatch.setattr(nav, "detect_post_battle_reward", lambda *_: "event_reward")
+    monkeypatch.setattr(nav, "is_generic_post_battle_reward", lambda *_: True)
+    assert nav.get_to_main_after_fight(screen, Logger())
+    assert screen.clicks == []
+
+
+@pytest.mark.parametrize("filename", ("shop-paid-dialog-zh.png", "training-battle-zh.png", "loading-native-360.png"))
+@pytest.mark.parametrize("entry", ("post_battle", "startup", "before_match"))
+def test_unrecognized_non_reward_pages_never_use_generic_clicks(clock, monkeypatch, filename, entry):
+    screen = RewardSequence(clock, [(image(filename), None)])
+    logger = Logger()
+    monkeypatch.setattr(nav, "check_if_on_clan_voyage", lambda _: False)
+    if entry == "post_battle":
+        assert not nav.get_to_main_after_fight(screen, logger, timeout=3, allow_result_button=False)
+    elif entry == "startup":
+        assert not nav.wait_for_clash_main_menu(screen, logger, timeout=3)
+    else:
+        assert not nav.finish_pending_battle_rewards(screen, logger)
+    assert screen.clicks == []
 
 
 @pytest.mark.parametrize("number", range(1, 5))

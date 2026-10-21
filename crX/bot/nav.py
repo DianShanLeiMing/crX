@@ -47,6 +47,7 @@ from crX.bot.state_detect import (
     check_if_on_shop,
     detect_post_battle_reward,
     is_clash_main_menu_image,
+    is_generic_post_battle_reward,
     is_reward_choice_image,
     is_trophy_reward_image,
 )
@@ -59,6 +60,9 @@ CLASH_MAIN_WAIT_TIMEOUT = 240
 POST_BATTLE_TIMEOUT_S = 120
 POST_BATTLE_MAIN_STABLE_S = 3.0
 POST_BATTLE_MAX_ACTIONS = 40
+POST_BATTLE_GENERIC_MAX_ACTIONS = 5
+POST_BATTLE_GENERIC_CONFIRM_S = 1.0
+POST_BATTLE_GENERIC_CLICK_INTERVAL_S = 1.5
 
 
 def wait_for_battle_start(emulator, logger, timeout: int = 120) -> bool:
@@ -158,7 +162,7 @@ def wait_for_clash_main_menu(emulator, logger: Logger, deadspace_click=True, tim
             handle_trophy_reward_menu(emulator, logger)
             time.sleep(2)
             continue
-        if detect_post_battle_reward(image) is not None:
+        if detect_post_battle_reward(image) is not None or is_generic_post_battle_reward(image):
             return get_to_main_after_fight(
                 emulator, logger, timeout=max(0, deadline - time.monotonic()), allow_result_button=False
             )
@@ -460,34 +464,24 @@ def get_to_main_after_fight(
 ):
     """Drain recognized rewards, then verify an uninterrupted, settled main menu.
 
-    Every action is chosen from a fresh frame. Unknown scenes only wait; the
-    caller's existing recovery policy handles the bounded failure.
+    Every action is chosen from a fresh frame. Unclassified reward presentations
+    have a separate bounded click budget; other unknown scenes only wait.
     """
     deadline = time.monotonic() + timeout
     main_since = None
     captured_outcome = False
     result_clicks = 0
     actions = 0
+    generic_actions = 0
+    generic_since = None
+    generic_limit_reached = False
     last_stage = None
     image = None
     logger.change_status("对战结束，正在返回主界面……")
     while time.monotonic() < deadline:
         image = emulator.screenshot()
-        reward = detect_post_battle_reward(image)
-        if reward is not None:
-            main_since = None
-            if actions >= POST_BATTLE_MAX_ACTIONS:
-                break
-            labels = {"lucky_chest": "正在开启战后奖励宝箱", "event_reward": "正在领取战后奖励"}
-            if reward != last_stage:
-                logger.change_status(labels[reward])
-            logger.log(f"战后奖励推进：{reward}，第 {actions + 1} 次操作")
-            emulator.click(*POST_BATTLE_REWARD_CONTINUE_COORD)
-            actions += 1
-            last_stage = reward
-            time.sleep(1)
-            continue
         if is_clash_main_menu_image(image):
+            generic_since = None
             if main_since is None:
                 main_since = time.monotonic()
                 logger.change_status("检测到主界面，正在确认奖励弹窗已结束")
@@ -500,12 +494,26 @@ def get_to_main_after_fight(
         main_since = None
         if actions >= POST_BATTLE_MAX_ACTIONS:
             break
+        reward = detect_post_battle_reward(image)
+        if reward is not None:
+            generic_since = None
+            labels = {"lucky_chest": "正在开启战后奖励宝箱", "event_reward": "正在领取战后奖励"}
+            if reward != last_stage:
+                logger.change_status(labels[reward])
+            logger.log(f"战后奖励推进：{reward}，第 {actions + 1} 次操作")
+            emulator.click(*POST_BATTLE_REWARD_CONTINUE_COORD)
+            actions += 1
+            last_stage = reward
+            time.sleep(1)
+            continue
         if is_trophy_reward_image(image):
+            generic_since = None
             handle_trophy_reward_menu(emulator, logger, printmode=True)
             actions += 1
             last_stage = "trophy_reward"
             continue
         if is_reward_choice_image(image):
+            generic_since = None
             handle_reward_choice(emulator, logger)
             actions += 2
             last_stage = "reward_choice"
@@ -513,6 +521,7 @@ def get_to_main_after_fight(
         if allow_result_button and result_clicks < 5:
             button_coord = find_post_battle_button_in_image(image)
             if button_coord is not None:
+                generic_since = None
                 if not captured_outcome and on_result_screen is not None:
                     on_result_screen()
                 captured_outcome = True
@@ -523,20 +532,47 @@ def get_to_main_after_fight(
                 last_stage = "result"
                 time.sleep(1)
                 continue
+        if is_generic_post_battle_reward(image):
+            if generic_since is None:
+                generic_since = time.monotonic()
+                logger.change_status("检测到奖励展示场景，正在确认画面")
+            if time.monotonic() - generic_since < POST_BATTLE_GENERIC_CONFIRM_S:
+                last_stage = "generic_confirm"
+                time.sleep(0.5)
+                continue
+            last_stage = "generic_reward"
+            if generic_actions >= POST_BATTLE_GENERIC_MAX_ACTIONS:
+                generic_limit_reached = True
+                break
+            generic_actions += 1
+            logger.change_status(
+                f"奖励类型未知，执行通用推进，第 {generic_actions}/{POST_BATTLE_GENERIC_MAX_ACTIONS} 次"
+            )
+            emulator.click(*POST_BATTLE_REWARD_CONTINUE_COORD)
+            actions += 1
+            time.sleep(POST_BATTLE_GENERIC_CLICK_INTERVAL_S)
+            continue
+        generic_since = None
         if last_stage != "unknown":
             logger.change_status("正在等待战后奖励或加载动画，不点击未知页面")
         last_stage = "unknown"
         time.sleep(0.5)
-    reason = "战后奖励操作达到上限" if actions >= POST_BATTLE_MAX_ACTIONS else "战后返回主界面超时"
+    if generic_limit_reached:
+        reason = "战后奖励通用推进达到上限"
+    else:
+        reason = "战后奖励操作达到上限" if actions >= POST_BATTLE_MAX_ACTIONS else "战后返回主界面超时"
     remember_failure_frame(
         logger,
         image,
         reason=reason,
         stage=last_stage,
         actions=actions,
+        generic_actions=generic_actions,
         timeout_s=timeout,
     )
-    logger.change_status(f"战后返回主界面失败：未确认稳定主界面（最后阶段 {last_stage}，已操作 {actions} 次）")
+    logger.change_status(
+        f"{reason}：未确认稳定主界面（最后阶段 {last_stage}，已操作 {actions} 次，通用推进 {generic_actions} 次）"
+    )
     return False
 
 
@@ -546,7 +582,7 @@ def finish_pending_battle_rewards(emulator, logger) -> bool:
     if is_clash_main_menu_image(image):
         return True
     if detect_post_battle_reward(image) is None and not (
-        is_trophy_reward_image(image) or is_reward_choice_image(image)
+        is_generic_post_battle_reward(image) or is_trophy_reward_image(image) or is_reward_choice_image(image)
     ):
         return False
     if logger is None:

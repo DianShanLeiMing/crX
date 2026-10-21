@@ -29,6 +29,11 @@ from crX.bot.coords import (
     MAIN_BURGER_BUTTON_REGION,
     MAIN_NATIVE_YELLOW_POINTS,
     POST_BATTLE_COIN_REWARD_REGION,
+    POST_BATTLE_PUZZLE_CROWN_REGION,
+    POST_BATTLE_PUZZLE_FRAME_REGION,
+    POST_BATTLE_PUZZLE_OPEN_REGION,
+    POST_BATTLE_PUZZLE_TITLE_REGION,
+    POST_BATTLE_PUZZLE_UNLOCKED_REGION,
     POST_BATTLE_RAINBOW_CHEST_REGION,
     POST_BATTLE_REWARD_EDGE_REGIONS,
     POST_BATTLE_REWARD_FLOOR_REGION,
@@ -309,11 +314,59 @@ def _region(image, region):
     return image[top:bottom, left:right]
 
 
+def is_generic_post_battle_reward(image) -> bool:
+    """Recognize a reward presentation without identifying its text or contents.
+
+    Require known backdrop colors across all four outer regions, little outer
+    UI detail, and a substantial illuminated object distinct from the backdrop.
+    Navigation supplies the flow scope, temporal confirmation and click budget.
+    """
+    if image is None or image.shape != (*GAME_SCREEN_SIZE[::-1], 3):
+        return False
+    hue, saturation, value = cv2.cvtColor(image, cv2.COLOR_BGR2HSV).transpose(2, 0, 1)
+    warm = ((hue <= 40) | (hue >= 170)) & (saturation > 60) & (value > 60)
+    cool = (hue >= 85) & (hue <= 170) & (saturation > 50) & (value > 45)
+    teal = (hue >= 40) & (hue < 95) & (saturation > 50) & (value > 70)
+    pastel = (saturation < 160) & (value > 140) & (value < 240)
+    backdrop = warm | cool | teal | pastel
+    edges = cv2.Canny(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY), 70, 140) > 0
+    # Resource counters, side controls and bottom navigation have much more
+    # edge detail than reward backdrops. The floor may contain a tiled pattern.
+    for region, max_detail in (
+        (POST_BATTLE_REWARD_TOP_REGION, 0.02),
+        *((region, 0.02) for region in POST_BATTLE_REWARD_EDGE_REGIONS),
+        (POST_BATTLE_REWARD_FLOOR_REGION, 0.08),
+    ):
+        if _region(backdrop, region).mean() < 0.94 or _region(edges, region).mean() > max_detail:
+            return False
+
+    # Estimate the gradient behind the object from the left/right margins on
+    # each row. Rays, titles and tiny glints alone must not count as an object.
+    left, top, right, bottom = POST_BATTLE_REWARD_OBJECT_REGION
+    left_region, right_region = POST_BATTLE_REWARD_EDGE_REGIONS
+    left_colors = image[top:bottom, left_region[0] : left_region[2]].mean(axis=1)
+    right_colors = image[top:bottom, right_region[0] : right_region[2]].mean(axis=1)
+    left_center = (left_region[0] + left_region[2]) / 2
+    right_center = (right_region[0] + right_region[2]) / 2
+    weights = (numpy.arange(left, right) - left_center) / (right_center - left_center)
+    background = (
+        left_colors[:, None, :] * (1 - weights[None, :, None]) + right_colors[:, None, :] * weights[None, :, None]
+    )
+    contrast = numpy.abs(_region(image, POST_BATTLE_REWARD_OBJECT_REGION).astype(float) - background).max(axis=2)
+    foreground = ((contrast > 45) & (_region(value, POST_BATTLE_REWARD_OBJECT_REGION) > 160)).astype(numpy.uint8)
+    foreground = cv2.morphologyEx(foreground, cv2.MORPH_CLOSE, numpy.ones((3, 3), dtype=numpy.uint8))
+    _, _, components, _ = cv2.connectedComponentsWithStats(foreground)
+    return any(
+        width >= 25 and height >= 35 and 600 <= area < foreground.size * 0.7
+        for _, _, width, height, area in components[1:]
+    )
+
+
 def detect_post_battle_reward(image) -> Literal["lucky_chest", "event_reward"] | None:
     """Require a full reward backdrop AND its foreground; color alone is insufficient.
 
-    HSV ranges describe the orange/purple lucky chest and blue framed event
-    reward. Attached enlarged images are calibration examples, not templates.
+    HSV ranges describe chest and event backdrops. Puzzle gradients additionally
+    require native artwork/text anchors. Enlarged attachments are not templates.
     """
     if image is None or image.shape != (*GAME_SCREEN_SIZE[::-1], 3):
         return None
@@ -326,6 +379,42 @@ def detect_post_battle_reward(image) -> Literal["lucky_chest", "event_reward"] |
         uniform_top = _region(mask, POST_BATTLE_REWARD_TOP_REGION).mean() > 0.94
         uniform_sides = all(_region(mask, region).mean() > 0.94 for region in POST_BATTLE_REWARD_EDGE_REGIONS)
         return mask if uniform_top and uniform_sides else None
+
+    # Silver-framed puzzle packs use a dark blue/purple gradient. Both the
+    # central crown panel and the explicit open prompt must be present.
+    dark_puzzle = (hue >= 90) & (hue <= 150) & (saturation > 80) & (value > 50) & (value < 160)
+    dark_puzzle_backdrop = (
+        _region(dark_puzzle, POST_BATTLE_REWARD_TOP_REGION).mean() > 0.94
+        and _region(dark_puzzle, POST_BATTLE_REWARD_FLOOR_REGION).mean() > 0.94
+    )
+    if (
+        dark_puzzle_backdrop
+        and find_image(image, "post_battle_puzzle_crown", tolerance=0.93, subcrop=POST_BATTLE_PUZZLE_CROWN_REGION)
+        is not None
+        and find_image(image, "post_battle_puzzle_open", tolerance=0.93, subcrop=POST_BATTLE_PUZZLE_OPEN_REGION)
+        is not None
+    ):
+        return "event_reward"
+
+    # Revealed puzzle pieces have a pastel or dark gradient rather than solid blue
+    # backdrop. Require both fixed labels and the wooden frame, not the piece
+    # artwork or progress count, which change independently of the screen type.
+    pastel = (saturation < 150) & (value > 150) & (value < 240)
+    dark_blue = (hue >= 90) & (hue <= 120) & (saturation > 120) & (value > 40) & (value < 120)
+    gold = (hue >= 5) & (hue <= 35) & vivid
+    pastel_puzzle_backdrop = (
+        _region(pastel, POST_BATTLE_REWARD_TOP_REGION).mean() > 0.94
+        and _region(dark_blue, POST_BATTLE_REWARD_FLOOR_REGION).mean() > 0.94
+    )
+    if (
+        (pastel_puzzle_backdrop or dark_puzzle_backdrop)
+        and _region(gold, POST_BATTLE_PUZZLE_FRAME_REGION).mean() > 0.06
+        and find_image(image, "post_battle_puzzle_title", tolerance=0.93, subcrop=POST_BATTLE_PUZZLE_TITLE_REGION)
+        is not None
+        and find_image(image, "post_battle_puzzle_unlocked", tolerance=0.93, subcrop=POST_BATTLE_PUZZLE_UNLOCKED_REGION)
+        is not None
+    ):
+        return "event_reward"
 
     orange, purple, blue = backdrop(8, 35), backdrop(125, 165), backdrop(90, 120)
     # The four-star chest uses a rainbow gradient instead of a uniform backdrop.
@@ -357,12 +446,15 @@ def detect_post_battle_reward(image) -> Literal["lucky_chest", "event_reward"] |
         if aligned and foreground > 0.12:
             return "lucky_chest"
     if blue is not None:
+        # Native bag artwork is an amount-independent anchor; full legacy
+        # references also contain the title/count and have different geometry.
+        # Correlation ignores brightness, so also require visible gold coins.
         if (
-            find_image(image, "post_battle_coin_reward", tolerance=0.93, subcrop=POST_BATTLE_COIN_REWARD_REGION)
+            _region(gold & (value > 180), POST_BATTLE_COIN_REWARD_REGION).mean() > 0.02
+            and find_image(image, "post_battle_coin_reward", tolerance=0.93, subcrop=POST_BATTLE_COIN_REWARD_REGION)
             is not None
         ):
             return "event_reward"
-        gold = (hue >= 5) & (hue <= 35) & vivid
         # Both closed mystery frames and revealed pieces have visible wooden/gold borders.
         has_frame = _region(gold, POST_BATTLE_REWARD_OBJECT_REGION).mean() > 0.06
         foreground = 1 - _region(blue, POST_BATTLE_REWARD_OBJECT_REGION).mean()
