@@ -23,108 +23,84 @@ from crX.utils.card_review import (
 
 
 @pytest.mark.parametrize(
-    ("status", "validation", "matches", "selected", "expected"),
+    ("status", "matches", "expected"),
     [
-        ("pending", {}, 0, False, ("未验证 · 待确认", "无匹配记录", "未使用")),
-        ("confirmed", {}, 0, False, ("未加入验证", "无匹配记录", "未使用")),
-        ("trial", {}, 0, False, ("证据不足", "无匹配记录", "未使用")),
-        ("trial", {}, 12, False, ("证据不足", "匹配 12 次 · 未核验", "未使用")),
-        (
-            "trial",
-            {"correct": 1, "other_cards": 1, "extra": 0, "wrong": 0},
-            0,
-            False,
-            ("无新增覆盖", "无匹配记录", "未使用"),
-        ),
-        (
-            "trial",
-            {"correct": 1, "wrong": 0, "extra": 1, "other_cards": 1},
-            0,
-            False,
-            ("离线验证通过", "无匹配记录", "未使用"),
-        ),
-        (
-            "included",
-            {"correct": 1, "wrong": 0, "extra": 1, "other_cards": 1},
-            0,
-            True,
-            ("离线验证通过", "无匹配记录", "当前使用"),
-        ),
-        (
-            "included",
-            {"correct": 1, "wrong": 0, "extra": 1, "other_cards": 1},
-            8,
-            True,
-            ("离线验证通过", "匹配 8 次 · 未核验", "当前使用"),
-        ),
-        ("included", {}, 0, False, ("验证记录不足", "无匹配记录", "未使用")),
-        ("trial", {"wrong": 1}, 0, False, ("离线验证未通过", "无匹配记录", "未使用")),
-        ("covered", {}, 0, False, ("原库已覆盖", "无匹配记录", "未使用")),
+        ("pending", 0, ("待确认", "补库尚未命中", "未使用")),
+        ("confirmed", 0, ("未启用", "补库尚未命中", "未使用")),
+        ("included", 0, ("已启用", "补库尚未命中", "当前使用")),
+        ("included", 8, ("已启用", "补库命中 8 次", "当前使用")),
+        ("conflict", 0, ("需复核", "补库尚未命中", "未使用")),
     ],
 )
-def test_progress_never_confuses_runtime_observations_with_verified_correctness(
-    tmp_path, status, validation, matches, selected, expected
-):
+def test_progress_distinguishes_activation_from_match_observations(tmp_path, status, matches, expected):
     sample = make_sample(tmp_path)
     sample.review = {
         "status": status if status in ("pending", "confirmed") else "confirmed",
         "library_status": status,
-        "validation": validation,
         "library_runtime": {"matches": matches},
-        "library_selected": selected,
     }
     assert sample_progress(sample) == expected
 
 
 @pytest.mark.parametrize(
-    ("result", "reason"),
-    [
-        ({}, "尚无离线验证结果"),
-        ({"correct": 0, "wrong": 0, "same_card_samples": 0}, "缺少其他对局的同卡样本"),
-        ({"correct": 0, "wrong": 0, "same_card_samples": 2}, "独立同卡样本未命中"),
-        ({"correct": 1, "wrong": 0, "other_cards": 0, "extra": 1}, "缺少其他卡牌的对照样本"),
-        ({"correct": 1, "wrong": 0, "other_cards": 1, "extra": 0}, "没有增加原库识别覆盖"),
-        ({"correct": 1, "wrong": 1, "other_cards": 1, "extra": 1}, "误认其他卡牌 1 张"),
-    ],
+    ("issue", "reason"), [("conflict", "图像近似"), ("source", "来源已撤销"), ("limit", "单卡8份")]
 )
-def test_validation_explanation_matches_evidence(tmp_path, result, reason):
+def test_activation_explains_only_actionable_issues(tmp_path, issue, reason):
     sample = make_sample(tmp_path)
-    sample.review = {"library_status": "trial", "validation": result}
+    sample.review = {"library_issue": issue, "library_conflicts": ["knight"]}
     assert reason in validation_reason(sample)
 
 
-def test_library_summary_prefers_current_usage_and_keeps_versions_distinct(tmp_path):
+def test_library_summary_aggregates_unique_ids_and_keeps_versions_distinct(tmp_path):
     source = make_sample(tmp_path)
-    passed = {"correct": 1, "wrong": 0, "extra": 1, "other_cards": 1}
     rows = [
-        ("knight", "trial", 100, False),
-        ("knight", "included", 60, True),
-        ("evo_knight", "trial", 80, False),
-        ("furnace", "trial", 90, False),
-        ("furnace", "covered", 10, False),
-        ("cannon", "confirmed", None, False),
+        ("knight", "included", "a", 2),
+        ("knight", "included", "a", 2),
+        ("knight", "included", "b", 3),
+        ("evo_knight", "included", "c", 1),
+        ("cannon", "conflict", "d", 0),
     ]
     samples = [
         replace(
             source,
-            name=f"sample-{index:03d}",
+            name=f"sample-{i:03d}",
             review={
                 "status": "confirmed",
                 "confirmed_card_id": card,
                 "library_status": status,
-                "library_score": score,
-                "library_selected": selected,
-                "validation": passed if selected else {},
+                "library_id": identifier,
+                "library_runtime": {"matches": matches},
             },
         )
-        for index, (card, status, score, selected) in enumerate(rows)
+        for i, (card, status, identifier, matches) in enumerate(rows)
     ]
     by_card = {sample.card_id: sample for sample in library_card_summaries(samples)}
-    assert set(by_card) == {"knight", "evo_knight", "furnace", "cannon"}
-    assert by_card["knight"] is samples[1]  # High scores cannot displace the actual selection.
-    assert by_card["furnace"] is samples[4]  # The original library already covers this card.
-    assert by_card["evo_knight"] is samples[2] and by_card["cannon"] is samples[5]
-    assert len(samples) == 6 and samples[0].review["library_score"] == 100
+    assert set(by_card) == {"knight", "evo_knight", "cannon"}
+    assert by_card["knight"].review["summary_enabled"] == 2
+    assert by_card["knight"].review["summary_matches"] == 5
+    assert by_card["cannon"].review["summary_pending"] == 1
+    assert by_card["knight"].review["summary_pending"] == 0
+    assert "summary_enabled" not in source.review
+
+
+def test_summary_only_attributes_pending_samples_with_a_recognized_card(tmp_path):
+    source = make_sample(tmp_path)
+    enabled = replace(
+        source,
+        review={
+            "status": "confirmed",
+            "confirmed_card_id": "knight",
+            "library_status": "included",
+            "library_id": "one",
+        },
+    )
+    uncertain = replace(source, name="sample-001", record={**source.record, "card_id": "knight"})
+    unknown = replace(
+        source, name="sample-002", record={**source.record, "card_id": "UNKNOWN", "candidates": [{"card_id": "knight"}]}
+    )
+    summary = library_card_summaries([enabled, uncertain, unknown])[0]
+    assert summary.review["summary_pending"] == 1
+    assert uncertain.status == unknown.status == "pending"
 
 
 def make_sample(root, *, slot=0, available=True):

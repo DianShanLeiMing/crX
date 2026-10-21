@@ -1,5 +1,6 @@
 """Desktop-only GUI smoke coverage; no device calls."""
 
+import gc
 import os
 import sys
 import time
@@ -28,6 +29,13 @@ def desktop_ui(tmp_path_factory):
         ui.withdraw()
         yield ui, root
         ui.destroy()
+
+
+@pytest.fixture(autouse=True)
+def collect_tk_garbage(desktop_ui):
+    yield
+    # Reclaim destroyed test widgets on Tk's owning thread, before the next scan.
+    gc.collect()
 
 
 def test_tabs_settings_themes_and_running_state(desktop_ui):
@@ -132,7 +140,7 @@ def test_review_tab_confirm_trial_and_revoke(desktop_ui):
         assert tab.selected is not None
         assert tab.selected.card_id == "evo_cannon"
         assert tab.note_var.get() == "人工核对"
-        assert tab.selected.status in ("trial", "covered")
+        assert tab.selected.status == "included"
         assert not (source.directory / "sample-000-candidate.json").exists()
         tab.stage_buttons["revoke"].invoke()
         _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy)
@@ -181,6 +189,130 @@ def test_failure_review_status_and_running_state(desktop_ui):
         ui.set_button_state("idle")
 
 
+def test_failure_selection_deletion_filter_scope_and_running_guard(desktop_ui, tmp_path, monkeypatch):
+    import threading
+
+    from crX.interface.failure_review import FailureReviewTab
+    from crX.utils.failure_samples import delete_failure_samples, save_failure_review, scan_failures
+
+    ui, _root = desktop_ui
+    pending = make_failure(tmp_path)
+    handled = make_failure(tmp_path)
+    ignored = make_failure(tmp_path)
+    save_failure_review(handled, "handled", "修复完成")
+    save_failure_review(ignored, "ignored", "无需处理")
+    counts = []
+    prior_failure_tab = ui.failure_samples_tab
+    tab = FailureReviewTab(
+        ui.notebook, root=tmp_path, count_callback=counts.append, clear_busy_callback=ui._update_clear_busy
+    )
+    monkeypatch.setattr(ui, "failure_samples_tab", tab)
+    release = threading.Event()
+    prompts = []
+
+    def confirm(title, message, **kwargs):
+        prompts.append(message)
+        return False
+
+    def delayed_delete(root, keys):
+        assert release.wait(4)
+        return delete_failure_samples(root, keys)
+
+    monkeypatch.setattr("crX.interface.failure_review.messagebox.askyesno", confirm)
+    monkeypatch.setattr("crX.interface.failure_review.delete_failure_samples", delayed_delete)
+    try:
+        _wait_ui(ui, lambda: not tab._scan_busy and tab.selected is not None)
+        assert tab.tree.get_children() == (pending["key"],)
+        tab.select_all_button.invoke()
+        assert tab.tree.selection() == (pending["key"],)
+        tab.delete_button.invoke()
+        assert "待处理" in prompts[-1] and "1 条" in prompts[-1]
+        assert len(scan_failures(tmp_path)[0]) == 3  # Cancelling preserves all evidence.
+        tab.filter_var.set("全部")
+        tab._render()
+        tab.tree.event_generate("<Control-a>")
+        tab._select_all()
+        assert len(tab.tree.selection()) == 3
+        tab.clear_selection_button.invoke()
+        tab.refresh()
+        _wait_ui(ui, lambda: not tab._scan_busy)
+        assert not tab.tree.selection() and tab.selected is None
+        assert str(tab.delete_button.cget("state")) == "disabled"
+        keys = {pending["key"], handled["key"]}
+        tab.tree.selection_set(tuple(keys))
+        tab._select()
+        tab.refresh()
+        _wait_ui(ui, lambda: not tab._scan_busy)
+        assert set(tab.tree.selection()) == keys
+        ui.set_button_state("running")
+        assert str(tab.delete_button.cget("state")) == "disabled"
+        tab._delete_selected()
+        assert len(prompts) == 1
+        ui.set_button_state("idle")
+        monkeypatch.setattr(
+            "crX.interface.failure_review.messagebox.askyesno",
+            lambda title, message, **kwargs: prompts.append(message) or True,
+        )
+        tab.delete_button.invoke()
+        assert "2 条" in prompts[-1] and "无法撤销" in prompts[-1]
+        assert tab.clearing and str(ui.main_btn.cget("state")) == "disabled"
+        tab._delete_selected()
+        assert len(prompts) == 2  # Repeated clicks cannot launch another deletion.
+        ui.card_samples_tab.clearing = True
+        release.set()
+        _wait_ui(ui, lambda: not tab._busy and not tab._scan_busy and len(tab.records) == 1)
+        assert set(tab.records) == {ignored["key"]}
+        assert tab.tree.get_children() == (ignored["key"],)
+        assert "已删除 2 条" in tab.message_var.get() and counts[-1] == 0
+        assert str(ui.main_btn.cget("state")) == "disabled"  # Other cleanup still blocks starting.
+        ui.card_samples_tab.clearing = False
+        ui._update_clear_busy()
+        assert str(ui.main_btn.cget("state")) == "normal"
+        tab._select_all()
+        tab.delete_button.invoke()
+        _wait_ui(ui, lambda: not tab._busy and not tab._scan_busy and not tab.records)
+        assert not tab.tree.get_children() and tab.selected is None and tab._preview is None
+    finally:
+        release.set()
+        ui.card_samples_tab.clearing = False
+        ui.set_button_state("idle")
+        ui.failure_samples_tab = prior_failure_tab
+        tab.destroy()
+
+
+def test_failure_deletion_rechecks_running_state_and_recovers_after_io_error(desktop_ui, tmp_path, monkeypatch):
+    from crX.interface.failure_review import FailureReviewTab
+
+    ui, _root = desktop_ui
+    record = make_failure(tmp_path)
+    busy = []
+    tab = FailureReviewTab(ui.notebook, root=tmp_path, clear_busy_callback=busy.append)
+
+    def start_during_confirmation(*args, **kwargs):
+        tab.set_running(True)
+        return True
+
+    def fail_delete(*args):
+        raise OSError("模拟文件被占用")
+
+    try:
+        _wait_ui(ui, lambda: not tab._scan_busy and tab.selected is not None)
+        monkeypatch.setattr("crX.interface.failure_review.messagebox.askyesno", start_during_confirmation)
+        tab.delete_button.invoke()
+        assert not tab._busy and not busy and record["directory"].exists()
+        tab.set_running(False)
+        monkeypatch.setattr("crX.interface.failure_review.messagebox.askyesno", lambda *args, **kwargs: True)
+        monkeypatch.setattr("crX.interface.failure_review.delete_failure_samples", fail_delete)
+        tab.delete_button.invoke()
+        _wait_ui(ui, lambda: not tab._busy and not tab._scan_busy)
+        assert not tab.clearing and busy == [True, False]
+        assert "操作失败" in tab.message_var.get()
+        assert record["directory"].exists() and record["key"] in tab.records
+        assert str(tab.delete_button.cget("state")) == "normal"
+    finally:
+        tab.destroy()
+
+
 def test_card_review_group_multi_selection_refresh_and_bulk_actions(desktop_ui, monkeypatch):
     monkeypatch.setattr("crX.utils.card_library.base_match", lambda _: ("UNKNOWN", 10000))
     ui, root = desktop_ui
@@ -223,17 +355,17 @@ def test_card_review_group_multi_selection_refresh_and_bulk_actions(desktop_ui, 
     _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy and tab.selected is None)
     assert third.key not in {sample.key for sample in scan_samples(root)[0]}
     reviewed = {sample.key: sample for sample in scan_samples(root)[0]}
-    assert all(reviewed[key].status in ("trial", "covered") for key in (first.key, second.key))
+    assert all(reviewed[key].status == "included" for key in (first.key, second.key))
     tab.filter_var.set("补库")
     tab._render_list()
-    trial_keys = [key for key in tab.tree.get_children() if tab.samples[key].status == "trial"]
+    trial_keys = [key for key in tab.tree.get_children() if tab.samples[key].status == "included"]
     assert len(trial_keys) == 1
-    assert all(tab.tree.set(key, "status") == "暂无可用补库" for key in trial_keys)
+    assert all(tab.tree.set(key, "status") == "已启用" for key in trial_keys)
     assert {first.key, second.key}.issubset(tab.samples)  # Hidden candidates remain available.
     labels_before = {key: tab.tree.set(key, "status") for key in trial_keys}
     tab.filter_var.set("全部")
     tab._render_list()
-    assert all(tab.tree.set(key, "status") == "证据不足" for key in trial_keys)
+    assert all(tab.tree.set(key, "status") == "已启用" for key in trial_keys)
     tab.filter_var.set("补库")
     tab._render_list()
     assert {key: tab.tree.set(key, "status") for key in trial_keys} == labels_before
@@ -311,7 +443,7 @@ def test_stage_buttons_and_clearing_preserve_other_stages(desktop_ui, monkeypatc
     tab = ui.card_samples_tab
     assert tuple(tab.filter_combo.cget("values")) == ("待确认", "补库", "全部")
     assert "trial" not in tab.stage_buttons
-    assert {"score", "runtime", "chosen"}.issubset(tab.tree.cget("columns"))
+    assert {"enabled", "runtime", "pending"}.issubset(tab.tree.cget("columns"))
     tab.filter_var.set("待确认")
     tab.group_var.set("全部分组")
     tab.refresh()
@@ -334,21 +466,17 @@ def test_stage_buttons_and_clearing_preserve_other_stages(desktop_ui, monkeypatc
         and tab.selected.key == other.key,
     )
     reviewed = {sample.key: sample for sample in scan_samples(root)[0]}
-    assert reviewed[source.key].status == "trial"
+    assert reviewed[source.key].status == "included"
     assert reviewed[other.key].status == "pending"
     tab.filter_var.set("补库")
     tab._render_list()
-    assert visible_buttons() == ["重新验证", "撤销"]
+    assert visible_buttons() == ["启用", "撤销"]
     assert tab.tree.get_children() == (source.key,)
-    assert tab.tree.set(source.key, "score") == "—"
-    assert tab.tree.set(source.key, "status") == "暂无可用补库"
-    assert tab.tree.set(source.key, "runtime") == "无匹配记录"
-    assert tab.tree.set(source.key, "chosen") == "未使用"
-    assert "缺少其他对局的同卡样本" in tab.tree.set(source.key, "validation_reason")
-    if tab.selected.status == "trial":
-        tab.stage_buttons["promote"].invoke()
-        _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy)
-        assert "未合格项保持未启用" in tab.message_var.get()
+    assert tab.tree.set(source.key, "enabled") == "1"
+    assert tab.tree.set(source.key, "runtime") == "0"
+    assert tab.tree.set(source.key, "pending") == "0"
+    assert tab.tree.set(source.key, "validation_reason") == "已启用；支持多外观"
+    assert "人工确认后已启用" in tab.description_var.get()
     prompts = []
     monkeypatch.setattr(
         "crX.interface.card_review.messagebox.askyesno",
@@ -363,7 +491,7 @@ def test_stage_buttons_and_clearing_preserve_other_stages(desktop_ui, monkeypatc
     assert tab.tree.get_children() == (other.key,)
     tab.filter_var.set("全部")
     tab._render_list()
-    assert visible_buttons() == []
+    assert visible_buttons() == ["更正卡名"]
 
 
 def test_card_group_score_order_and_selection(desktop_ui, monkeypatch):
@@ -383,8 +511,8 @@ def test_card_group_score_order_and_selection(desktop_ui, monkeypatch):
     tab.group_var.set("全部分组")
     tab._update_groups(groups)
     tab._render_list()
-    assert tab.tree.get_children() == tuple(samples[index].key for index in (2, 3, 0, 1, 5, 4))
-    assert all(tab.tree.set(key, "status") == "证据不足" for key in tab.tree.get_children())
+    assert tab.tree.get_children() == tuple(sample.key for sample in samples)
+    assert all(tab.tree.set(key, "status") == "待启用" for key in tab.tree.get_children())
     tab.tree.selection_set(samples[0].key)
     tab.tree.focus(samples[0].key)
     tab._select()
@@ -431,14 +559,11 @@ def test_library_summary_shows_one_result_per_card_and_tracks_selection(desktop_
     tab.group_var.set(next(iter(tab.group_choices)))
     tab.filter_var.set("补库")
     tab._render_list()
-    assert set(tab.tree.get_children()) == {samples[index].key for index in (1, 3, 5)}
-    assert tuple(tab.tree.cget("displaycolumns")) == ("card", "status", "score", "validation_reason", "runtime")
+    assert set(tab.tree.get_children()) == {samples[index].key for index in (1, 3, 4)}
+    assert tuple(tab.tree.cget("displaycolumns")) == ("card", "enabled", "runtime", "pending", "validation_reason")
     assert str(tab.group_combo.cget("state")) == "disabled" and tab.group_var.get() == "全部分组"
-    assert tab.tree.set(samples[1].key, "status") == "当前使用"
-    assert tab.tree.set(samples[1].key, "score") == "60.0"
-    assert tab.tree.set(samples[3].key, "score") == "—"
-    assert tab.tree.set(samples[3].key, "validation_reason") == "缺少其他对局的同卡样本"
-    assert tab.tree.set(samples[5].key, "status") == "原库可识别"
+    assert tab.tree.set(samples[1].key, "status") == "已启用"
+    assert "score" not in tab.tree.cget("columns")
     tab.tree.selection_set(samples[1].key)
     tab.tree.focus(samples[1].key)
     tab._select()
@@ -451,11 +576,54 @@ def test_library_summary_shows_one_result_per_card_and_tracks_selection(desktop_
     tab._update_groups(groups)
     tab._render_list()
     assert tab.tree.selection() == (samples[6].key,)  # Keep the selected card when its representative changes.
-    assert tab.tree.set(samples[6].key, "status") == "当前使用"
+    assert tab.tree.set(samples[6].key, "status") == "已启用"
     assert len(tab.samples) == 7 and all(sample.file("frame").exists() for sample in samples)
     tab.filter_var.set("全部")
     tab._render_list()
     assert len(tab.tree.get_children()) == 7 and str(tab.group_combo.cget("state")) == "readonly"
+
+
+def test_library_summary_fits_small_window_and_wraps_full_description(desktop_ui, tmp_path):
+    import tkinter as tk
+    from tkinter.font import Font
+
+    from crX.interface.card_review import CardReviewTab
+    from crX.utils.card_library import update_library
+
+    ui, _root = desktop_ui
+    sample = add_group_sample(tmp_path, "layout", "sample-000")
+    save_review(sample, "confirmed", "knight", "布局测试")
+    update_library(tmp_path, [sample], "enable")
+    window = tk.Toplevel(ui)
+    tab = CardReviewTab(window, root=tmp_path)
+    tab.pack(fill="both", expand=True)
+    try:
+        _wait_ui(ui, lambda: not tab._scan_busy)
+        tab.filter_var.set("补库")
+        tab._render_list()
+        column_sizes = []
+        for width in (760, 850, 1100):
+            window.geometry(f"{width}x700")
+            ui.update()
+            bbox = tab.tree.bbox(sample.key, "validation_reason")
+            assert bbox and bbox[0] + bbox[2] <= tab.tree.winfo_width()
+            font = Font(root=ui, font=ui.style.lookup("Treeview", "font"))
+            assert font.measure(tab.tree.set(sample.key, "validation_reason")) + 12 <= bbox[2]
+            assert "人工确认后已启用" in tab.description_var.get()
+            assert int(tab.description_label.cget("wraplength")) <= tab.description_label.winfo_width()
+            card_bbox = tab.tree.bbox(sample.key, "card")
+            assert card_bbox
+            column_sizes.append((bbox[2], card_bbox[2]))
+        assert len(set(column_sizes)) == 1  # Keep columns compact when the window grows.
+        tab.description_var.set("很长的完整说明" * 50)
+        window.geometry("760x700")
+        ui.update()
+        assert tab.description_label.winfo_height() > font.metrics("linespace") * 2
+        assert tab.description_label.winfo_x() + tab.description_label.winfo_width() <= tab.winfo_width()
+        tab._clear_selection()
+        assert tab.description_var.get() == "选择样本可查看完整说明。"
+    finally:
+        window.destroy()
 
 
 def test_legacy_confirmed_records_retry_from_library_without_confirmed_filter(desktop_ui, tmp_path, monkeypatch):
@@ -472,11 +640,11 @@ def test_legacy_confirmed_records_retry_from_library_without_confirmed_filter(de
         tab.filter_var.set("补库")
         tab._render_list()
         assert tab.tree.get_children() == (source.key,)
-        assert "重新验证" in tab.tree.set(source.key, "validation_reason")
+        assert "启用" in tab.tree.set(source.key, "validation_reason")
         assert str(tab.stage_buttons["promote"].cget("state")) == "normal"
         tab.stage_buttons["promote"].invoke()
         _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy)
-        assert tab.samples[source.key].status == "trial"
+        assert tab.samples[source.key].status == "included"
         assert tab.samples[source.key].review["note"] == "历史确认记录"
         tab.stage_buttons["revoke"].invoke()
         _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy)
@@ -486,7 +654,7 @@ def test_legacy_confirmed_records_retry_from_library_without_confirmed_filter(de
         assert tab.samples[source.key].status == "confirmed"  # Refresh must not undo an explicit revocation.
         tab.stage_buttons["promote"].invoke()
         _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy)
-        assert tab.samples[source.key].status == "trial"
+        assert tab.samples[source.key].status == "included"
     finally:
         tab.destroy()
 
@@ -514,7 +682,7 @@ def test_summary_clear_selected_card_warns_and_keeps_unselected_card(desktop_ui,
         for index, (sample, card) in enumerate(zip(rows, ("knight", "knight", "evo_knight"), strict=True))
     ]
     library._write_library(tmp_path, entries)
-    monkeypatch.setattr(library, "refresh_ranked_library", lambda _root: None)
+    monkeypatch.setattr(library, "sync_library", lambda _root: None)
     prompts = []
     approve = False
 

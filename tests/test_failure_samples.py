@@ -225,6 +225,7 @@ def test_sampler_exception_cannot_break_worker_recovery(tmp_path, monkeypatch):
 
 
 def make_failure(root):
+    prior_keys = {record["key"] for record in failures.scan_failures(root)[0]}
     logger = Logger()
     failures.remember_failure_frame(
         logger, native_frame(), reason="[功能验证] 模拟战后超时", stage="unknown", actions=5
@@ -232,4 +233,71 @@ def make_failure(root):
     recorder = failures.FailureSampleRecorder(root)
     recorder.offer(None, logger, state="end_fight", attempt=1, session_log_path="validation-session.txt")
     recorder.close()
-    return failures.scan_failures(root)[0][0]
+    return next(record for record in failures.scan_failures(root)[0] if record["key"] not in prior_keys)
+
+
+def test_delete_selected_failures_preserves_other_records_and_logs(tmp_path):
+    root = tmp_path / "failures"
+    first = make_failure(root)
+    failures.save_failure_review(first, "handled", "已处理")
+    second = make_failure(root)
+    untouched = {path.name: path.read_bytes() for path in second["directory"].iterdir()}
+    log = tmp_path / "session.txt"
+    log.write_text("keep log", encoding="utf-8")
+    # Metadata does not grant deletion of arbitrary files.
+    data = first["data"] | {"image_file": str(log), "session_log_path": str(log)}
+    failures.atomic_json(first["directory"] / "failure.json", data)
+    assert failures.delete_failure_samples(root, {first["key"]}) == 1
+    assert not first["directory"].exists()
+    assert {path.name: path.read_bytes() for path in second["directory"].iterdir()} == untouched
+    assert log.read_text(encoding="utf-8") == "keep log"
+    assert failures.delete_failure_samples(root, {first["key"]}) == 0
+    assert failures.delete_failure_samples(root, set()) == 0
+
+
+@pytest.mark.parametrize("key", ["../outside", "..", ".", "", "nested/record"])
+def test_failure_deletion_rejects_invalid_selection_before_any_deletion(tmp_path, key):
+    root = tmp_path / "failures"
+    record = make_failure(root)
+    with pytest.raises(ValueError):
+        failures.delete_failure_samples(root, {record["key"], key})
+    assert record["directory"].is_dir()
+    assert failures.scan_failures(root)[0]
+
+
+def test_failure_deletion_preflights_all_records_and_preserves_extra_files(tmp_path):
+    first = make_failure(tmp_path)
+    second = make_failure(tmp_path)
+    extra = second["directory"] / "keep.txt"
+    extra.write_text("user file", encoding="utf-8")
+    with pytest.raises(ValueError, match="额外文件"):
+        failures.delete_failure_samples(tmp_path, {first["key"], second["key"]})
+    assert first["directory"].is_dir() and second["directory"].is_dir()
+    assert extra.read_text(encoding="utf-8") == "user file"
+
+
+@pytest.mark.parametrize("link_kind", ["file", "directory", "root"])
+def test_failure_deletion_rejects_links(tmp_path, link_kind):
+    root = tmp_path / "failures"
+    record = make_failure(root)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("keep", encoding="utf-8")
+    target = root
+    keys = {record["key"]}
+    try:
+        if link_kind == "file":
+            picture = record["directory"] / "frame.png"
+            picture.unlink()
+            picture.symlink_to(outside)
+        elif link_kind == "directory":
+            (root / "linked").symlink_to(record["directory"], target_is_directory=True)
+            keys = {"linked"}
+        else:
+            target = tmp_path / "linked-root"
+            target.symlink_to(root, target_is_directory=True)
+    except OSError:
+        pytest.skip("Creating symlinks requires Windows developer mode or permission")
+    with pytest.raises(ValueError, match="链接"):
+        failures.delete_failure_samples(target, keys)
+    assert record["directory"].is_dir()
+    assert outside.read_text(encoding="utf-8") == "keep"

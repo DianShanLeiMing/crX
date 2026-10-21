@@ -215,3 +215,48 @@ def save_failure_review(record, status, note):
         sample_file(record["directory"], "review.json"),
         {"status": status, "note": note.strip()[:4000], "reviewed_at": time.time()},
     )
+
+
+def delete_failure_samples(root: Path, keys: set[str]) -> int:
+    """Delete an explicit selection, preflighting every target without recursion."""
+    if not keys or not root.exists():
+        return 0
+    if len(keys) > MAX_FAILURE_SAMPLES:
+        raise ValueError(f"一次最多删除 {MAX_FAILURE_SAMPLES} 条异常样本")
+    if root.is_symlink() or root.is_junction():
+        raise ValueError("异常样本根目录不能是链接")
+    base = root.resolve(strict=True)
+    plans = []
+    allowed = {"frame.png", "failure.json", "review.json"}
+
+    def check_directory(directory):
+        if directory.is_symlink() or directory.is_junction() or directory.resolve().parent != base:
+            raise ValueError("异常样本目录超出允许范围或包含链接")
+
+    for key in sorted(keys):
+        if not key or Path(key).name != key or key in {".", ".."}:
+            raise ValueError("异常样本编号无效")
+        directory = root / key
+        check_directory(directory)
+        if not directory.exists():
+            continue
+        files = list(directory.iterdir())
+        if any(path.name not in allowed for path in files):
+            raise ValueError("异常样本中存在额外文件，请先检查目录，已取消删除")
+        for path in files:
+            if path.is_symlink() or path.is_junction() or not path.is_file():
+                raise ValueError("异常样本包含链接或异常文件，已取消删除")
+            sample_file(directory, path.name)
+        data = read_json(sample_file(directory, "failure.json"))
+        if not isinstance(data.get("reason"), str) or not isinstance(data.get("state"), str):
+            raise ValueError("异常样本诊断信息无效，已取消删除")
+        plans.append((directory, files))
+    for directory, files in plans:
+        for path in files:
+            check_directory(directory)
+            if path.is_symlink() or path.is_junction() or path.resolve().parent != directory.resolve():
+                raise ValueError("异常样本文件已变化，已停止删除")
+            path.unlink(missing_ok=True)
+        check_directory(directory)
+        directory.rmdir()
+    return len(plans)

@@ -7,7 +7,7 @@ import os
 import re
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -17,11 +17,12 @@ from crX.bot.card_data import CARD_NAMES_ZH
 from crX.bot.coords import CARD_FINGERPRINT_SIZE, GAME_SCREEN_SIZE, HAND_CARD_SIZE, LEGACY_SCREEN_SIZE
 
 STATUS_LABELS = {
-    "pending": "未验证 · 待确认",
-    "confirmed": "未加入验证",
-    "trial": "证据不足",
-    "included": "验证记录不足",
-    "covered": "原库已覆盖",
+    "pending": "待确认",
+    "confirmed": "未启用",
+    "trial": "待启用",
+    "included": "已启用",
+    "covered": "待启用",
+    "conflict": "需复核",
     "ignored": "已忽略",
 }
 REASON_LABELS = {
@@ -75,7 +76,7 @@ class ReviewSample:
 
     @property
     def status(self) -> str:
-        if self.review.get("library_status") in ("trial", "included", "covered"):
+        if self.review.get("library_status") in ("trial", "included", "covered", "conflict"):
             return self.review["library_status"]
         status = self.review.get("status")
         if status in ("pending", "confirmed", "ignored"):
@@ -92,86 +93,60 @@ class ReviewSample:
         return sample_file(self.directory, self.record["files"][kind])
 
 
-def validation_passed(validation: dict) -> bool:
-    """One qualification rule for ranking, runtime loading and presentation."""
-    return (
-        all(
-            type(validation.get(field)) is int and validation[field] > 0
-            for field in ("correct", "extra", "other_cards")
-        )
-        and type(validation.get("wrong")) is int
-        and validation["wrong"] == 0
-    )
-
-
 def validation_reason(sample: ReviewSample) -> str:
-    """Explain the available evidence without treating predictions as ground truth."""
-    result = sample.review.get("validation", {})
-    if type(result.get("wrong")) is int and result["wrong"] > 0:
-        return f"误认其他卡牌 {result['wrong']} 张，已停止使用"
-    if sample.status == "covered":
-        return "原库已能识别，无需重复补库"
+    """Explain activation or human-label conflicts, without offline score claims."""
+    issue = sample.review.get("library_issue", "")
+    if issue == "conflict":
+        names = "、".join(CARD_NAMES_ZH.get(card, card) for card in sample.review.get("library_conflicts", []))
+        return f"与已确认卡名 {names} 的图像近似，请在全部列表更正卡名"
+    if issue == "limit":
+        return "达到单卡8份上限，请整理后启用"
+    if issue == "source":
+        return "来源已撤销或更正，请检查人工标注"
     if sample.status == "pending":
-        return "请先确认准确卡名及版本"
-    if sample.status == "confirmed":
-        return "已撤销或停用，可点击重新验证" if sample.review.get("library_id") else "尚未加入候选，可点击重新验证"
-    if not result:
-        return "尚无离线验证结果，暂不启用"
-    if validation_passed(result):
-        return f"独立同卡命中 {result['correct']} 张，新增覆盖 {result['extra']} 张，误认 0 张"
-    if not result.get("correct"):
-        return (
-            "缺少其他对局的同卡样本" if result.get("same_card_samples") == 0 else "独立同卡样本未命中，需补充可识别样本"
-        )
-    if not result.get("other_cards"):
-        return "缺少其他卡牌的对照样本"
-    return "没有增加原库识别覆盖"
+        return "确认准确卡名及版本后自动启用"
+    if sample.status == "included":
+        return "人工确认后已启用；同卡不同外观共同参与识别"
+    return "已停用，可点击启用" if sample.review.get("library_id") else "可点击启用加入补库"
 
 
 def sample_progress(sample: ReviewSample) -> tuple[str, str, str]:
-    """Describe independent validation, runtime observations and selection separately."""
-    status = sample.status
-    validation = sample.review.get("validation", {})
-    passed = validation_passed(validation)
-    wrong = type(validation.get("wrong")) is int and validation["wrong"] > 0
-    verification = STATUS_LABELS[status]
-    if wrong and sample.review.get("library_id"):
-        verification = "离线验证未通过"
-    elif status in ("trial", "included"):
-        if wrong:
-            verification = "离线验证未通过"
-        elif passed:
-            verification = "离线验证通过"
-        elif validation.get("correct") and validation.get("other_cards") and not validation.get("extra"):
-            verification = "无新增覆盖"
+    """A match is an observation, never evidence that the prediction was correct."""
     matches = sample.review.get("library_runtime", {}).get("matches", 0)
-    runtime = f"匹配 {matches} 次 · 未核验" if type(matches) is int and matches > 0 else "无匹配记录"
-    if status == "included" and sample.review.get("library_selected") is True and passed:
-        selection = "当前使用"
-    else:
-        selection = "未使用"
-    return verification, runtime, selection
+    runtime = f"补库命中 {matches} 次" if type(matches) is int and matches > 0 else "补库尚未命中"
+    enabled = sample.status == "included"
+    return STATUS_LABELS[sample.status], runtime, "当前使用" if enabled else "未使用"
 
 
 def library_card_summaries(samples: list[ReviewSample]) -> list[ReviewSample]:
-    """Choose one display row per card/version without changing stored candidates."""
+    """Aggregate fingerprints by card/version, counting each library ID once."""
     by_card: dict[str, list[ReviewSample]] = {}
     for sample in samples:
-        if sample.card_id in CARD_NAMES_ZH and sample.status in ("confirmed", "trial", "included", "covered"):
+        if sample.card_id in CARD_NAMES_ZH and sample.status not in ("pending", "ignored"):
             by_card.setdefault(sample.card_id, []).append(sample)
-    return [
-        min(
-            candidates,
-            key=lambda sample: (
-                sample_progress(sample)[2] != "当前使用",
-                sample.status != "covered",
-                sample.review.get("library_score") is None,
-                -(sample.review.get("library_score") or 0),
-                sample.key,
-            ),
+    summaries = []
+    for card, candidates in by_card.items():
+        representative = min(candidates, key=lambda sample: (sample.status != "included", sample.key))
+        entries = {sample.review["library_id"]: sample for sample in candidates if sample.review.get("library_id")}
+        enabled = sum(sample.status == "included" for sample in entries.values())
+        matches = sum(sample.review.get("library_runtime", {}).get("matches", 0) for sample in entries.values())
+        pending = sum(
+            (sample.status == "conflict" and sample.card_id == card)
+            or (sample.status == "pending" and sample.record.get("card_id") == card)
+            for sample in samples
         )
-        for candidates in by_card.values()
-    ]
+        summaries.append(
+            replace(
+                representative,
+                review={
+                    **representative.review,
+                    "summary_enabled": enabled,
+                    "summary_matches": matches,
+                    "summary_pending": pending,
+                },
+            )
+        )
+    return summaries
 
 
 def scan_samples(root: Path) -> tuple[list[ReviewSample], int]:
@@ -239,19 +214,18 @@ def scan_samples(root: Path) -> tuple[list[ReviewSample], int]:
     library_sources = {(source, entry["card_id"]): entry for entry in entries for source in entry["sources"]}
     for sample in samples:
         entry = library_sources.get((sample.key, sample.card_id))
-        if entry and sample.status in ("confirmed", "included"):
+        if entry and sample.status not in ("pending", "ignored"):
             sample.review = {
                 **sample.review,
                 "library_status": {
                     "trial": "trial",
                     "active": "included",
                     "covered": "covered",
-                    "disabled": "confirmed",
+                    "disabled": "conflict" if entry.get("disabled_reason") == "conflict" else "confirmed",
                 }[entry["status"]],
                 "library_id": entry["id"],
-                "validation": entry.get("validation", {}),
-                "library_score": entry.get("score"),
-                "library_selected": entry.get("auto_selected", False),
+                "library_issue": entry.get("disabled_reason", ""),
+                "library_conflicts": entry.get("conflicts", []),
                 "library_runtime": entry.get("runtime", {}),
             }
     return samples, errors
@@ -293,10 +267,10 @@ def save_reviews(samples: list[ReviewSample], status: str, card_id: str = "", no
                 f"已保存 {saved}/{total} 张；{path.parent.name} 保存失败：{error}。请刷新后重试未保存条目。"
             ) from error
         saved += len(names)
-    from crX.utils.card_library import recheck_library
+    from crX.utils.card_library import sync_library
 
     for root in {sample.directory.parent for sample in samples}:
-        recheck_library(root)
+        sync_library(root)
     return saved
 
 
@@ -359,12 +333,12 @@ def group_similar_samples(samples: list[ReviewSample]) -> dict[str, list[str]]:
     return groups
 
 
-def scan_grouped_samples(root: Path, *, rank_library=False) -> tuple[list[ReviewSample], int, dict[str, list[str]]]:
-    from crX.utils.card_library import refresh_ranked_library
+def scan_grouped_samples(root: Path, *, refresh_library=False) -> tuple[list[ReviewSample], int, dict[str, list[str]]]:
+    from crX.utils.card_library import sync_library
 
     try:
-        if rank_library:
-            refresh_ranked_library(root)
+        if refresh_library:
+            sync_library(root)
     except (OSError, ValueError, TypeError):
         # Keep manual review usable when a local library/report needs repair.
         samples, errors = scan_samples(root)

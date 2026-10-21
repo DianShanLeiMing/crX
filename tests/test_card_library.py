@@ -33,96 +33,87 @@ def samples(tmp_path, monkeypatch):
     return add
 
 
-def test_trial_promotion_and_individual_rollback(tmp_path, samples):
+def test_confirmation_enables_multiple_appearances_and_individual_rollback(tmp_path, samples):
     first = samples("source")
     second = samples("source", shift=200, name="sample-001")
-    library.update_library(tmp_path, [first, second], "trial")
-    assert [entry["status"] for entry in library.read_library(tmp_path)] == ["trial", "trial"]
-    assert {sample.status for sample in scan_samples(tmp_path)[0]} == {"trial"}
-    library.update_library(tmp_path, [first], "validate")
-    assert library.read_library(tmp_path)[0]["status"] == "trial"  # training frame is not validation
-    samples("positive")
-    samples("other-positive", shift=200)
-    samples("negative", card="cannon", channel=3)
-    message = library.update_library(tmp_path, [first, second], "validate")
-    assert "验证通过并保留 2" in message
+    library.update_library(tmp_path, [first, second], "enable")
     assert [entry["status"] for entry in library.read_library(tmp_path)] == ["active", "active"]
+    assert {sample.status for sample in scan_samples(tmp_path)[0]} == {"included"}
     library.update_library(tmp_path, [first], "revoke")
+    library.sync_library(tmp_path)
     assert [entry["status"] for entry in library.read_library(tmp_path)] == ["disabled", "active"]
-    states = {sample.key: sample.status for sample in scan_samples(tmp_path)[0]}
-    assert states[first.key] == "confirmed" and states[second.key] == "included"
+    library.update_library(tmp_path, [first], "enable")
+    assert all(entry["status"] == "active" for entry in library.read_library(tmp_path))
 
 
-def test_new_wrong_card_label_automatically_disables_only_matching_candidate(tmp_path, samples):
+def test_new_conflicting_human_label_blocks_only_matching_appearance(tmp_path, samples):
     first = samples("source")
     other = samples("source", channel=4, name="sample-001")
-    library.update_library(tmp_path, [first, other], "trial")
+    library.update_library(tmp_path, [first, other], "enable")
     samples("feedback", card="cannon")
-    assert [entry["status"] for entry in library.read_library(tmp_path)] == ["disabled", "trial"]
-    assert library.read_library(tmp_path)[0]["validation"]["wrong"] == 1
+    entries = library.read_library(tmp_path)
+    assert [e["status"] for e in entries] == ["disabled", "active"]
+    assert entries[0]["conflicts"] == ["cannon"]
+    library.sync_library(tmp_path)  # Conflicts must not disappear on the next scan.
+    assert library.read_library(tmp_path)[0]["status"] == "disabled"
 
 
 def test_relabel_or_ignore_training_source_disables_candidate(tmp_path, samples):
     source = samples("source")
-    library.update_library(tmp_path, [source], "trial")
+    library.update_library(tmp_path, [source], "enable")
     save_review(source, "ignored")
     assert library.read_library(tmp_path)[0]["status"] == "disabled"
     assert scan_samples(tmp_path)[0][0].status == "ignored"
 
 
-def test_near_duplicates_merge_and_keep_other_session_as_validation(tmp_path, samples):
+def test_near_duplicates_merge_without_requiring_other_fights(tmp_path, samples):
     first = samples("source")
     duplicate = samples("independent", shift=5)
-    samples("negative", card="cannon", channel=4)
-    library.update_library(tmp_path, [first, duplicate], "trial")
+    library.update_library(tmp_path, [first, duplicate], "enable")
     entries = library.read_library(tmp_path)
     assert len(entries) == 1 and len(entries[0]["sources"]) == 2
-    library.update_library(tmp_path, [first], "validate")
-    assert library.read_library(tmp_path)[0]["status"] == "active"
+    assert entries[0]["status"] == "active"
+    save_review(first, "ignored")
+    assert library.read_library(tmp_path)[0]["status"] == "active"  # Another confirmed source remains.
 
 
-def test_candidates_without_extra_coverage_are_not_all_retained(tmp_path, samples):
+def test_distinct_appearances_are_retained_without_extra_coverage(tmp_path, samples):
     first = samples("source")
     second = samples("source", shift=50, name="sample-001")
-    samples("positive", shift=10)
-    samples("negative", card="cannon", channel=3)
-    library.update_library(tmp_path, [first, second], "trial")
-    library.update_library(tmp_path, [first, second], "validate")
-    assert [entry["status"] for entry in library.read_library(tmp_path)] == ["active", "covered"]
+    library.update_library(tmp_path, [first, second], "enable")
+    assert [entry["status"] for entry in library.read_library(tmp_path)] == ["active", "active"]
 
 
-def test_base_library_covered_sample_needs_no_trial(tmp_path, samples, monkeypatch):
+def test_original_library_coverage_does_not_block_manual_reference(tmp_path, samples, monkeypatch):
     first = samples("source")
     monkeypatch.setattr(library, "base_match", lambda _: ("knight", 20))
-    library.update_library(tmp_path, [first], "trial")
-    assert library.read_library(tmp_path)[0]["status"] == "covered"
-    assert scan_samples(tmp_path)[0][0].status == "covered"
+    library.update_library(tmp_path, [first], "enable")
+    assert library.read_library(tmp_path)[0]["status"] == "active"
+    assert scan_samples(tmp_path)[0][0].status == "included"
 
 
-def test_trial_limit_leaves_extra_samples_confirmed(tmp_path, samples):
-    selected = [samples("source", channel=index, name=f"sample-{index:03d}") for index in range(7)]
-    result = library.update_library(tmp_path, selected, "trial")
-    assert len(library.read_library(tmp_path)) == 5
-    assert "达到单卡上限 2" in result
-    assert sum(sample.status == "confirmed" for sample in scan_samples(tmp_path)[0]) == 2
+def test_eight_appearance_limit_leaves_extra_samples_confirmed(tmp_path, samples):
+    selected = [samples("source", channel=index, name=f"sample-{index:03d}") for index in range(9)]
+    result = library.update_library(tmp_path, selected, "enable")
+    assert len(library.read_library(tmp_path)) == 8
+    assert "达到单卡8份上限" in result
+    assert sum(sample.status == "confirmed" for sample in scan_samples(tmp_path)[0]) == 1
 
 
-def test_runtime_reads_local_library_and_reload_after_revoke(tmp_path, samples, monkeypatch):
+def test_runtime_immediately_reads_all_confirmed_appearances_and_reloads_after_revoke(tmp_path, samples, monkeypatch):
     first = samples("source")
-    library.update_library(tmp_path, [first], "trial")
+    second = samples("source", channel=4, name="sample-001")
+    library.update_library(tmp_path, [first, second], "enable")
     monkeypatch.setattr("crX.bot.card_samples.get_card_samples_dir", lambda: tmp_path)
     monkeypatch.setattr(library, "_cache", (None, 0, []))
-    collected = [dict(zip(card_detection.COLORS_KEYS, row, strict=True)) for row in fingerprint().tolist()]
-    assert library.runtime_entries() == []  # An unverified candidate must not enter gameplay.
-    samples("positive")
-    samples("negative", card="cannon", channel=3)
-    library.refresh_ranked_library(tmp_path)
-    monkeypatch.setattr(library, "_cache", (None, 0, []))
-    result = card_detection.recognize_card_fingerprint(collected)
-    assert result["card_id"] == "knight" and result["source"].startswith("local_active:")
+    assert len(library.runtime_entries()) == 2
+    for channel in (0, 4):
+        collected = [dict(zip(card_detection.COLORS_KEYS, row, strict=True)) for row in fingerprint(channel).tolist()]
+        result = card_detection.recognize_card_fingerprint(collected)
+        assert result["card_id"] == "knight" and result["source"].startswith("local_active:")
     library.update_library(tmp_path, [first], "revoke")
     monkeypatch.setattr(library, "_cache", (None, 0, []))
-    assert not card_detection.recognize_card_fingerprint(collected)["source"].startswith("local_")
+    assert len(library.runtime_entries()) == 1
 
 
 def test_invalid_library_falls_back_to_base_and_cannot_be_overwritten(tmp_path, monkeypatch):
@@ -178,7 +169,7 @@ def test_clear_samples_retains_formal_library_after_future_reviews(tmp_path, sam
     assert not scan_samples(tmp_path)[0]
     entries = library.read_library(tmp_path)
     assert entries[0]["status"] == "active" and entries[0]["sources_cleared"]
-    assert entries[1]["status"] == "disabled"
+    assert entries[1]["status"] == "active" and entries[1]["sources_cleared"]
     assert (unrelated / "keep.txt").read_text(encoding="utf-8") == "keep"
     samples("future", card="cannon", channel=3)
     assert library.read_library(tmp_path)[0]["status"] == "active"

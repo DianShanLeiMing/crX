@@ -8,6 +8,7 @@ import tkinter as tk
 from collections import Counter
 from datetime import datetime
 from queue import Empty, Queue
+from tkinter import messagebox
 
 import ttkbootstrap as ttk
 from PIL import ImageTk
@@ -15,6 +16,7 @@ from ttkbootstrap.widgets.scrolled import ScrolledFrame
 
 from crX.utils.failure_samples import (
     STATUS_LABELS,
+    delete_failure_samples,
     get_failure_samples_dir,
     load_failure_preview,
     save_failure_review,
@@ -36,10 +38,12 @@ STEP_LABELS = {
 
 
 class FailureReviewTab(ttk.Frame):
-    def __init__(self, parent, *, root=None, count_callback=None):
+    def __init__(self, parent, *, root=None, count_callback=None, clear_busy_callback=None):
         super().__init__(parent, padding=12)
         self.root = root if root is not None else get_failure_samples_dir()
         self.count_callback = count_callback
+        self.clear_busy_callback = clear_busy_callback
+        self._running = self.clearing = self._selection_cleared = False
         self.records = {}
         self.selected = None
         self._results = Queue()
@@ -54,20 +58,42 @@ class FailureReviewTab(ttk.Frame):
         ttk.Label(self, textvariable=self.summary_var).grid(row=0, column=0, sticky="w")
         toolbar = ttk.Frame(self)
         toolbar.grid(row=1, column=0, sticky="ew", pady=8)
+        filters = ttk.Frame(toolbar)
+        filters.pack(fill="x")
         self.filter_var = tk.StringVar(value="待处理")
         combo = ttk.Combobox(
-            toolbar, textvariable=self.filter_var, values=[*STATUS_LABELS.values(), "全部"], state="readonly", width=12
+            filters, textvariable=self.filter_var, values=[*STATUS_LABELS.values(), "全部"], state="readonly", width=12
         )
         combo.pack(side="left")
         combo.bind("<<ComboboxSelected>>", lambda _: self._render())
-        ttk.Button(toolbar, text="刷新", command=self.refresh).pack(side="left", padx=8)
-        ttk.Button(toolbar, text="打开样本目录", command=self._open_folder).pack(side="left")
+        ttk.Button(filters, text="刷新", command=self.refresh).pack(side="left", padx=8)
+        ttk.Button(filters, text="打开样本目录", command=self._open_folder).pack(side="left")
+        selection_tools = ttk.Frame(toolbar)
+        selection_tools.pack(fill="x", pady=(4, 0))
+        self.select_all_button = ttk.Button(selection_tools, text="全选当前列表", command=self._select_all)
+        self.select_all_button.pack(side="left", padx=(0, 8))
+        self.clear_selection_button = ttk.Button(selection_tools, text="取消选择", command=self._clear_selection)
+        self.clear_selection_button.pack(side="left", padx=(0, 8))
+        self.delete_button = ttk.Button(
+            selection_tools,
+            text="删除选中",
+            command=self._delete_selected,
+            bootstyle="danger-outline",
+            state="disabled",
+        )
+        self.delete_button.pack(side="left")
         self.review_panes = ttk.Panedwindow(self, orient="vertical")
         self.review_panes.grid(row=2, column=0, rowspan=2, sticky="nsew", pady=(0, 10))
         table = ttk.Frame(self.review_panes)
         self.review_panes.add(table, weight=1)
+        self.selection_var = tk.StringVar(value="已选 0 条；Ctrl / Shift 多选，全选只作用于当前列表。")
+        selection_label = ttk.Label(table, textvariable=self.selection_var, wraplength=600)
+        selection_label.pack(fill="x", pady=(0, 4))
+        selection_label.bind("<Configure>", lambda event: selection_label.configure(wraplength=max(1, event.width)))
+        rows = ttk.Frame(table)
+        rows.pack(fill="both", expand=True)
         self.tree = ttk.Treeview(
-            table, columns=("time", "step", "reason", "status"), show="headings", height=3, selectmode="browse"
+            rows, columns=("time", "step", "reason", "status"), show="headings", height=3, selectmode="extended"
         )
         for column, title, width in (
             ("time", "时间", 145),
@@ -77,11 +103,12 @@ class FailureReviewTab(ttk.Frame):
         ):
             self.tree.heading(column, text=title)
             self.tree.column(column, width=width, minwidth=65)
-        scroll = ttk.Scrollbar(table, command=self.tree.yview)
+        scroll = ttk.Scrollbar(rows, command=self.tree.yview)
         self.tree.configure(yscrollcommand=scroll.set)
         self.tree.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
         self.tree.bind("<<TreeviewSelect>>", self._select)
+        self.tree.bind("<Control-a>", self._select_all)
         self.details = ttk.Notebook(self.review_panes)
         self.review_panes.add(self.details, weight=2)
         picture = ttk.Frame(self.details)
@@ -187,11 +214,20 @@ class FailureReviewTab(ttk.Frame):
                 if error is None:
                     self.message_var.set("人工处理状态已保存；原始截图与失败信息保留。")
                     self.refresh()
+            elif kind == "delete":
+                self._busy = self.clearing = False
+                if self.clear_busy_callback:
+                    self.clear_busy_callback(False)
+                self._set_buttons()
+                if error is None:
+                    self.message_var.set(f"已删除 {result} 条异常样本及其截图、诊断信息和处理标记；运行日志保留。")
+                self.refresh()
             if error:
                 self.message_var.set(f"操作失败：{error}")
         self._later(100, self._poll)
 
     def _render(self):
+        selection = self.tree.selection()
         visible = [
             record
             for record in self.records.values()
@@ -213,25 +249,30 @@ class FailureReviewTab(ttk.Frame):
                 self.tree.item(record["key"], values=values)
             else:
                 self.tree.insert("", "end", iid=record["key"], values=values)
-        if old_key in keys:
-            self.selected = self.records[old_key]
-            self.tree.selection_set(old_key)
-        elif keys:
-            self.tree.selection_set(keys[0])
-            self._select()
-        else:
-            self.selected = None
-            self._version += 1
-            self._preview = self._photo = None
-            self.image_label.configure(image="", text="暂无此类异常样本")
-            self.info_var.set("")
-        self._set_buttons()
+        remaining = tuple(key for key in selection if key in keys)
+        if not remaining and keys and not self._selection_cleared:
+            remaining = (keys[0],)
+        self.tree.selection_set(remaining)
+        if remaining:
+            self.tree.focus(old_key if old_key in remaining else remaining[0])
+        self._select()
 
     def _select(self, _event=None):
         selected = self.tree.selection()
+        self._set_buttons()
         if not selected or selected[0] not in self.records:
+            self.selected = None
+            self._version += 1
+            self._preview = self._photo = None
+            self.image_label.configure(
+                image="", text="选择记录查看截图" if self.tree.get_children() else "暂无此类异常样本"
+            )
+            self.info_var.set("")
+            self._set_buttons()
             return
-        record = self.records[selected[0]]
+        self._selection_cleared = False
+        key = self.tree.focus() if self.tree.focus() in selected else selected[0]
+        record = self.records[key]
         if self.selected and self.selected["key"] == record["key"]:
             return
         self.selected = record
@@ -260,9 +301,59 @@ class FailureReviewTab(ttk.Frame):
         self.image_label.configure(image=self._photo, text="")
 
     def _set_buttons(self):
+        count = len(self.tree.selection())
+        self.selection_var.set(f"已选 {count} 条；Ctrl / Shift 多选，全选只作用于当前列表；状态标记请单选。")
         for button in self.buttons:
-            button.configure(state="normal" if self.selected and not self._busy else "disabled")
+            button.configure(state="normal" if count == 1 and not self._busy else "disabled")
         self.zoom_button.configure(state="normal" if self._preview is not None else "disabled")
+        self.select_all_button.configure(state="normal" if self.tree.get_children() and not self._busy else "disabled")
+        self.clear_selection_button.configure(state="normal" if count and not self._busy else "disabled")
+        self.delete_button.configure(state="normal" if count and not self._busy and not self._running else "disabled")
+
+    def set_running(self, running):
+        self._running = running
+        self._set_buttons()
+
+    def _select_all(self, _event=None):
+        if not self._busy:
+            keys = self.tree.get_children()
+            self.tree.selection_set(keys)
+            if keys and self.tree.focus() not in keys:
+                self.tree.focus(keys[0])
+            self._select()
+        return "break"
+
+    def _clear_selection(self):
+        if not self._busy:
+            self._selection_cleared = True
+            self.tree.selection_remove(*self.tree.selection())
+            self._select()
+
+    def _delete_selected(self):
+        if self._running or self._busy:
+            return
+        keys = set(self.tree.selection()).intersection(self.tree.get_children(), self.records)
+        if not keys:
+            return
+        if not messagebox.askyesno(
+            "删除选中异常样本",
+            f"确定删除“{self.filter_var.get()}”列表中选中的 {len(keys)} 条异常样本？\n"
+            "将删除这些记录的截图、诊断信息和处理标记；未选中记录及运行日志保留。此操作无法撤销。",
+            parent=self,
+            default=messagebox.NO,
+        ):
+            return
+        if self._running or self._busy:
+            return
+        self._revision += 1
+        self._version += 1
+        self._busy = self.clearing = True
+        self._set_buttons()
+        if self.clear_busy_callback:
+            self.clear_busy_callback(True)
+        self.message_var.set(f"正在删除选中的 {len(keys)} 条异常样本……")
+        root = self.root
+        self._background("delete", lambda: delete_failure_samples(root, keys))
 
     def _zoom(self):
         if self._preview is None:
@@ -286,7 +377,7 @@ class FailureReviewTab(ttk.Frame):
         label.bind("<Configure>", resize)
 
     def _save(self, status):
-        if not self.selected or self._busy:
+        if not self.selected or len(self.tree.selection()) != 1 or self._busy:
             return
         record = self.selected
         self._busy = True

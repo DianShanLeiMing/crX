@@ -1,204 +1,175 @@
-"""Automatic selection uses independent human labels; runtime predictions are telemetry only."""
+"""Confirmation activates references; runtime predictions remain observations only."""
 
 import json
 
+from crX.bot import card_detection
 from crX.bot.card_samples import CardSampleCollector
 from crX.utils import card_library as library
-from crX.utils.card_review import scan_grouped_samples, scan_samples
+from crX.utils.card_review import save_review, scan_grouped_samples, scan_samples
 from tests import test_card_library as library_fixtures
+from tests.test_card_review import add_group_sample
 
 samples = library_fixtures.samples
 
 
-def test_scanning_scores_and_selects_one_best_candidate_with_independent_labels(tmp_path, samples):
-    first = samples("source")
-    second = samples("source", shift=100, name="sample-001")
-    library.update_library(tmp_path, [first, second], "trial")
-    samples("positive-a", shift=10)
-    samples("positive-b", shift=20)
-    samples("negative", card="cannon", channel=3)
-    records, errors, _ = scan_grouped_samples(tmp_path, rank_library=True)
-    assert not errors
+def test_legacy_trial_and_covered_entries_migrate_without_independent_evidence(tmp_path, samples, monkeypatch):
+    a = samples("source")
+    b = samples("source", channel=4, name="sample-001")
+    c = samples("source", channel=8, name="sample-002")
+    library.update_library(tmp_path, [a, b, c], "enable")
     entries = library.read_library(tmp_path)
-    selected = [entry for entry in entries if entry.get("auto_selected")]
-    assert len(selected) == 1 and selected[0]["status"] == "active"
-    assert selected[0]["sources"] == [first.key]
-    assert selected[0]["score"] > entries[1]["score"]
-    shown = next(sample for sample in records if sample.key == first.key)
-    assert shown.review["library_selected"] and shown.review["library_score"] == selected[0]["score"]
-
-
-def test_runtime_score_never_promotes_without_independent_validation(tmp_path, samples):
-    source = samples("source")
-    library.update_library(tmp_path, [source], "trial")
-    entry = library.read_library(tmp_path)[0]
-    library.merge_match_stats(tmp_path, {entry["id"]: {"matches": 100, "distance_total": 0, "margin_total": 50000}})
-    library.refresh_ranked_library(tmp_path)
-    entry = library.read_library(tmp_path)[0]
-    assert entry["runtime"]["matches"] == 100 and entry["score"] == 20
-    assert entry["status"] == "trial" and not entry["auto_selected"]
-    assert len(scan_samples(tmp_path)[0]) == 1  # Runtime observations do not create human labels.
-
-
-def test_runtime_rejects_high_score_unverified_and_unselected_entries(tmp_path, samples, monkeypatch):
-    source = samples("source")
-    library.update_library(tmp_path, [source], "trial")
-    entry = library.read_library(tmp_path)[0]
-    monkeypatch.setattr("crX.bot.card_samples.get_card_samples_dir", lambda: tmp_path)
-    for status, selected, validation in (
-        ("trial", False, {}),
-        ("active", True, {}),
-        ("active", True, {"correct": 1, "extra": 1, "other_cards": 1, "wrong": 1}),
-        ("active", False, {"correct": 1, "extra": 1, "other_cards": 1, "wrong": 0}),
-    ):
-        library._write_library(
-            tmp_path, [{**entry, "status": status, "auto_selected": selected, "score": 100, "validation": validation}]
-        )
-        monkeypatch.setattr(library, "_cache", (None, 0, []))
-        assert library.runtime_entries() == []
-
-
-def test_highest_score_must_be_qualified_and_wrong_match_switches_to_backup(tmp_path, samples, monkeypatch):
-    first = samples("source")
-    second = samples("source", channel=4, name="sample-001")
-    library.update_library(tmp_path, [first, second], "trial")
-    samples("positive-a")
-    samples("positive-b", channel=4)
-    samples("negative", card="cannon", channel=8)
-    library.refresh_ranked_library(tmp_path)
-    old = next(entry for entry in library.read_library(tmp_path) if entry.get("auto_selected"))
-    samples("wrong", card="cannon", channel=0 if old["sources"] == [first.key] else 4)
-    library.refresh_ranked_library(tmp_path)
-    monkeypatch.setattr("crX.bot.card_samples.get_card_samples_dir", lambda: tmp_path)
-    monkeypatch.setattr(library, "_cache", (None, 0, []))
-    runtime = library.runtime_entries()
-    assert len(runtime) == 1 and runtime[0]["id"] != old["id"]
-    assert runtime[0]["auto_selected"] and runtime[0]["validation"]["wrong"] == 0
-
-
-def test_runtime_deduplicates_same_card_without_merging_versions(tmp_path, samples, monkeypatch):
-    first = samples("source")
-    second = samples("source", channel=4, name="sample-001")
-    evo = samples("evo", card="evo_knight", channel=8)
-    library.update_library(tmp_path, [first, second, evo], "trial")
-    entries = library.read_library(tmp_path)
-    for entry, score in zip(entries, (70, 90, 80), strict=True):
-        entry.update(
-            status="active",
-            auto_selected=True,
-            score=score,
-            validation={"correct": 1, "extra": 1, "other_cards": 1, "wrong": 0},
-        )
+    for entry, status in zip(entries, ("trial", "covered", "disabled"), strict=True):
+        entry.update(status=status, score=100, validation={}, auto_selected=False)
     library._write_library(tmp_path, entries)
+    records, errors, _ = scan_grouped_samples(tmp_path, refresh_library=True)
+    assert not errors and len(records) == 3
+    entries = library.read_library(tmp_path)
+    assert [e["status"] for e in entries] == ["active", "active", "disabled"]
+    assert all("score" not in e and "validation" not in e for e in entries)
     monkeypatch.setattr("crX.bot.card_samples.get_card_samples_dir", lambda: tmp_path)
     monkeypatch.setattr(library, "_cache", (None, 0, []))
-    runtime = library.runtime_entries()
-    assert len(runtime) == 2 and {entry["card_id"] for entry in runtime} == {"knight", "evo_knight"}
-    assert next(entry for entry in runtime if entry["card_id"] == "knight")["score"] == 90
+    assert len(library.runtime_entries()) == 2
 
 
-def test_runtime_uses_only_selected_candidate_after_auto_ranking(tmp_path, samples, monkeypatch):
-    first = samples("source")
-    second = samples("source", shift=100, name="sample-001")
-    library.update_library(tmp_path, [first, second], "trial")
-    samples("positive", shift=10)
-    samples("negative", card="cannon", channel=3)
-    library.refresh_ranked_library(tmp_path)
+def test_runtime_counts_do_not_promote_disable_or_rank_appearances(tmp_path, samples):
+    a = samples("source")
+    b = samples("source", channel=4, name="sample-001")
+    library.update_library(tmp_path, [a, b], "enable")
+    identifier = library.read_library(tmp_path)[0]["id"]
+    library.merge_match_stats(tmp_path, {identifier: {"matches": 100, "distance_total": 90000, "margin_total": 50}})
+    library.sync_library(tmp_path)
+    entries = library.read_library(tmp_path)
+    assert all(e["status"] == "active" for e in entries)
+    assert entries[0]["runtime"]["matches"] == 100 and entries[1]["runtime"]["matches"] == 0
+    assert len(scan_samples(tmp_path)[0]) == 2
+
+
+def test_pending_sample_cannot_be_enabled_by_a_prediction(tmp_path, monkeypatch):
+    source = add_group_sample(tmp_path, "pending", "sample-000")
+    library.update_library(tmp_path, [source], "enable")
+    assert library.read_library(tmp_path) == []
+    library.merge_match_stats(tmp_path, {"0" * 16: {"matches": 100, "distance_total": 0, "margin_total": 10000}})
+    library.sync_library(tmp_path)
+    assert library.read_library(tmp_path) == [] and scan_samples(tmp_path)[0][0].status == "pending"
+
+
+def test_correcting_a_conflicting_label_restores_valid_appearance(tmp_path, samples):
+    source = samples("source")
+    library.update_library(tmp_path, [source], "enable")
+    wrong = samples("wrong", card="cannon")
+    assert library.read_library(tmp_path)[0]["disabled_reason"] == "conflict"
+    save_review(wrong, "confirmed", "knight")
+    assert library.read_library(tmp_path)[0]["status"] == "active"
+
+
+def test_multiple_appearances_and_versions_are_all_loaded(tmp_path, samples, monkeypatch):
+    a = samples("source")
+    b = samples("source", channel=4, name="sample-001")
+    evo = samples("evo", card="evo_knight", channel=8)
+    library.update_library(tmp_path, [a, b, evo], "enable")
     monkeypatch.setattr("crX.bot.card_samples.get_card_samples_dir", lambda: tmp_path)
     monkeypatch.setattr(library, "_cache", (None, 0, []))
-    runtime = library.runtime_entries()
-    assert len(runtime) == 1 and runtime[0]["sources"] == [first.key]
+    entries = library.runtime_entries()
+    assert len(entries) == 3
+    for entry in entries:
+        collected = [dict(zip(card_detection.COLORS_KEYS, row, strict=True)) for row in entry["fingerprint"]]
+        recognition = card_detection.recognize_card_fingerprint(collected)
+        assert recognition["source"] == f"local_active:{entry['id']}"
+        assert recognition["card_id"] == entry["card_id"]
+        ids = [candidate["card_id"] for candidate in recognition["candidates"]]
+        assert len(ids) == len(set(ids))
 
 
-def test_runtime_quality_changes_score_but_wrong_label_disables_candidate(tmp_path, samples):
+def test_manual_revoke_survives_refresh_and_new_matching_labels(tmp_path, samples):
     source = samples("source")
-    library.update_library(tmp_path, [source], "trial")
-    entry = library.read_library(tmp_path)[0]
-    library.merge_match_stats(tmp_path, {entry["id"]: {"matches": 2, "distance_total": 100, "margin_total": 200}})
-    samples("positive", shift=5)
-    samples("negative", card="cannon", channel=3)
-    library.refresh_ranked_library(tmp_path)
-    assert library.read_library(tmp_path)[0]["auto_selected"]
-    samples("wrong", card="cannon")
-    library.refresh_ranked_library(tmp_path)
-    entry = library.read_library(tmp_path)[0]
-    assert entry["status"] == "disabled" and not entry["auto_selected"]
+    library.update_library(tmp_path, [source], "enable")
+    library.update_library(tmp_path, [source], "revoke")
+    samples("new-confirmation")
+    library.sync_library(tmp_path)
+    assert library.read_library(tmp_path)[0]["status"] == "disabled"
+    library.update_library(tmp_path, [source], "enable")
+    assert library.read_library(tmp_path)[0]["status"] == "active"
 
 
-def test_collector_flushes_bounded_telemetry_without_source_images(tmp_path, samples):
+def test_collector_flushes_telemetry_without_creating_labels_or_images(tmp_path, samples):
     source = samples("source")
-    library.update_library(tmp_path, [source], "trial")
+    library.update_library(tmp_path, [source], "enable")
     identifier = library.read_library(tmp_path)[0]["id"]
     collector = CardSampleCollector("Classic 1v1", tmp_path)
     try:
         for _ in range(3):
             collector.observe_library_match(
-                {"source": f"local_trial:{identifier}", "candidates": [{"distance": 30}], "candidate_margin": 150}
+                {"source": f"local_active:{identifier}", "candidates": [{"distance": 30}], "candidate_margin": 150}
             )
     finally:
         assert collector.close()
-    record = library.read_match_stats(tmp_path)[identifier]
-    assert record == {"matches": 3, "distance_total": 90, "margin_total": 450}
+    assert library.read_match_stats(tmp_path)[identifier] == {"matches": 3, "distance_total": 90, "margin_total": 450}
     assert not collector.directory.exists()
+    assert len(scan_samples(tmp_path)[0]) == 1
 
 
-def test_malformed_runtime_stats_are_reported_without_changing_library(tmp_path, samples):
+def test_malformed_runtime_stats_do_not_change_library(tmp_path, samples):
     source = samples("source")
-    library.update_library(tmp_path, [source], "trial")
+    library.update_library(tmp_path, [source], "enable")
     before = library.library_path(tmp_path).read_bytes()
     (tmp_path / "runtime-matches.json").write_text(json.dumps({"entries": {"broken": {}}}), encoding="utf-8")
-    _, errors, _ = scan_grouped_samples(tmp_path, rank_library=True)
+    _, errors, _ = scan_grouped_samples(tmp_path, refresh_library=True)
     assert errors and library.library_path(tmp_path).read_bytes() == before
 
 
-def test_clear_filters_also_remove_candidate_runtime_stats(tmp_path, samples):
-    source = samples("source")
-    library.update_library(tmp_path, [source], "trial")
-    identifier = library.read_library(tmp_path)[0]["id"]
-    library.merge_match_stats(tmp_path, {identifier: {"matches": 1, "distance_total": 10, "margin_total": 10}})
-    library.clear_filtered_samples(tmp_path, {source.key})
-    assert not library.read_match_stats(tmp_path)
+def test_selected_clear_removes_only_associated_references_and_stats(tmp_path, samples):
+    a = samples("source")
+    b = samples("other", card="cannon", channel=4)
+    library.update_library(tmp_path, [a, b], "enable")
+    entries = library.read_library(tmp_path)
+    for entry in entries:
+        library.merge_match_stats(tmp_path, {entry["id"]: {"matches": 1, "distance_total": 10, "margin_total": 10}})
+    assert library.clear_filtered_samples(tmp_path, {a.key}) == 1
+    assert len(library.read_library(tmp_path)) == 1 and library.read_library(tmp_path)[0]["card_id"] == "cannon"
+    assert set(library.read_match_stats(tmp_path)) == {entries[1]["id"]}
+    assert b.file("frame").exists()
 
 
-def test_gameplay_sample_scan_never_writes_ranked_library(tmp_path, samples):
+def test_gameplay_sample_scan_never_writes_library(tmp_path, samples):
     source = samples("source")
-    library.update_library(tmp_path, [source], "trial")
-    samples("positive")
-    samples("negative", card="cannon", channel=3)
+    library.update_library(tmp_path, [source], "enable")
     before = library.library_path(tmp_path).read_bytes()
     scan_grouped_samples(tmp_path)
     assert library.library_path(tmp_path).read_bytes() == before
-    scan_grouped_samples(tmp_path, rank_library=True)
-    assert library.read_library(tmp_path)[0]["auto_selected"]
 
 
-def test_trial_stage_clear_preserves_selected_source_and_library(tmp_path, samples):
-    chosen = samples("source")
-    trial = samples("source", shift=100, name="sample-001")
-    library.update_library(tmp_path, [chosen, trial], "trial")
-    samples("positive", shift=10)
-    samples("negative", card="cannon", channel=3)
-    library.refresh_ranked_library(tmp_path)
-    selected = next(entry for entry in library.read_library(tmp_path) if entry.get("auto_selected"))
-    assert library.clear_filtered_samples(tmp_path, {chosen.key, trial.key}, statuses={"trial", "covered"}) == 1
-    remaining = {sample.key: sample for sample in scan_samples(tmp_path)[0]}
-    assert remaining[chosen.key].status == "included" and trial.key not in remaining
-    assert chosen.file("frame").exists()
-    assert library.read_library(tmp_path) == [selected]
-
-
-def test_summary_clear_rechecks_selection_and_preserves_all_working_card_candidates(tmp_path, samples):
-    chosen = samples("source")
-    backup = samples("source", shift=100, name="sample-001")
-    library.update_library(tmp_path, [chosen, backup], "trial")
-    # Simulate selection changing after the UI prepared its clearing confirmation.
-    keys = {chosen.key, backup.key}
-    samples("positive", shift=10)
-    samples("negative", card="cannon", channel=3)
-    library.refresh_ranked_library(tmp_path)
+def test_optional_protected_clear_keeps_all_enabled_appearances(tmp_path, samples):
+    a = samples("source")
+    b = samples("source", channel=4, name="sample-001")
+    library.update_library(tmp_path, [a, b], "enable")
     before = library.library_path(tmp_path).read_bytes()
-    assert (
-        library.clear_filtered_samples(tmp_path, keys, statuses={"trial", "covered"}, preserve_selected_cards=True) == 0
-    )
-    assert chosen.file("frame").exists() and backup.file("frame").exists()
+    assert library.clear_filtered_samples(tmp_path, {a.key, b.key}, preserve_selected_cards=True) == 0
     assert library.library_path(tmp_path).read_bytes() == before
+    assert a.file("frame").exists() and b.file("frame").exists()
+
+
+def test_legacy_migration_preserves_one_backup(tmp_path, samples):
+    source = samples("source")
+    library.update_library(tmp_path, [source], "enable")
+    legacy = {"version": 1, "entries": library.read_library(tmp_path)}
+    legacy["entries"][0].update(status="trial", validation={}, score=0, auto_selected=False)
+    library.library_path(tmp_path).write_text(json.dumps(legacy), encoding="utf-8")
+    library.sync_library(tmp_path)
+    backup = tmp_path / "fingerprints-before-multi.json"
+    assert json.loads(backup.read_text(encoding="utf-8")) == legacy
+    before = backup.read_bytes()
+    library.update_library(tmp_path, [source], "revoke")
+    library.sync_library(tmp_path)
+    assert backup.read_bytes() == before
+    assert library.read_library(tmp_path)[0]["status"] == "disabled"
+
+
+def test_reenable_cannot_exceed_eight_appearances_or_corrupt_library(tmp_path, samples):
+    rows = [samples("source", channel=i, name=f"sample-{i:03d}") for i in range(9)]
+    library.update_library(tmp_path, rows[:8], "enable")
+    library.update_library(tmp_path, rows[:1], "revoke")
+    library.update_library(tmp_path, rows[8:], "enable")
+    result = library.update_library(tmp_path, rows[:1], "enable")
+    assert "达到单卡8份上限" in result
+    entries = library.read_library(tmp_path)
+    assert len(entries) == 9 and sum(e["status"] == "active" for e in entries) == 8

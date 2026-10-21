@@ -1,4 +1,4 @@
-"""Small local fingerprint library: independent candidates, validation and rollback."""
+"""Human-confirmed fingerprints, multiple appearances and bounded match telemetry."""
 
 from __future__ import annotations
 
@@ -19,10 +19,10 @@ import numpy as np
 
 from crX.bot.card_data import CARD_NAMES_ZH
 from crX.bot.coords import GAME_SCREEN_SIZE, LEGACY_SCREEN_SIZE
-from crX.utils.card_review import atomic_json, read_json, sample_file, validation_passed
+from crX.utils.card_review import atomic_json, read_json, sample_file
 
 MAX_PER_CARD = 8
-MAX_TRIALS_PER_CARD = 5
+SIMILAR_FINGERPRINT_DISTANCE = 100
 MAX_ENTRIES = 2048
 MAX_LIBRARY_BYTES = 2 * 1024 * 1024
 _LOCK = threading.Lock()
@@ -116,6 +116,19 @@ def read_library(root: Path | None = None) -> list[dict]:
             raise ValueError("本地指纹选用状态无效")
         if not isinstance(entry.get("validation", {}), dict) or not isinstance(entry.get("runtime", {}), dict):
             raise ValueError("本地指纹验证信息无效")
+        if type(entry.get("manual_disabled", False)) is not bool or entry.get("disabled_reason", "") not in (
+            "",
+            "manual",
+            "conflict",
+            "source",
+            "limit",
+        ):
+            raise ValueError("本地指纹停用信息无效")
+        conflicts = entry.get("conflicts", [])
+        if not isinstance(conflicts, list) or any(
+            not isinstance(card, str) or card not in CARD_NAMES_ZH for card in conflicts
+        ):
+            raise ValueError("本地指纹冲突信息无效")
         if entry["status"] in ("trial", "active"):
             counts[entry["card_id"]] += 1
     if any(count > MAX_PER_CARD for count in counts.values()):
@@ -124,14 +137,19 @@ def read_library(root: Path | None = None) -> list[dict]:
 
 
 def _write_library(root, entries):
-    value = {"version": 1, "entries": entries}
+    value = {"version": 2, "entries": entries}
     if (
         len(entries) > MAX_ENTRIES
         or len(json.dumps(value, ensure_ascii=False, indent=2).encode("utf-8")) + 1 > MAX_LIBRARY_BYTES
     ):
         raise ValueError("本地指纹记录已达上限，请先整理样本库")
     root.mkdir(parents=True, exist_ok=True)
-    atomic_json(library_path(root), value)
+    path = library_path(root)
+    previous = read_json(path)
+    backup = sample_file(root, "fingerprints-before-multi.json")
+    if previous and previous.get("version", 1) == 1 and not backup.exists():
+        atomic_json(backup, previous)
+    atomic_json(path, value)
 
 
 def runtime_entries() -> list[dict]:
@@ -145,51 +163,15 @@ def runtime_entries() -> list[dict]:
         return []
     if path != _cache[0] or now - _cache[1] >= 1:
         try:
-            eligible = [
+            entries = [
                 entry
                 for entry in read_library()
-                if entry["status"] == "active"
-                and entry.get("auto_selected") is True
-                and validation_passed(entry.get("validation", {}))
+                if entry["status"] == "active" and not entry.get("manual_disabled") and not entry.get("disabled_reason")
             ]
-            best = {}
-            for entry in sorted(eligible, key=lambda item: (-(item.get("score") or 0), item["id"])):
-                best.setdefault(entry["card_id"], entry)
-            entries = list(best.values())
         except (OSError, ValueError, TypeError):
             entries = []
         _cache = (path, now, entries)
     return _cache[2]
-
-
-def recheck_library(root: Path) -> int:
-    """New human labels can invalidate a trial; never use predictions as truth."""
-    from crX.utils.card_review import scan_samples
-
-    if not library_path(root).exists():
-        return 0
-    with _LOCK:
-        entries = read_library(root)
-        samples, _ = scan_samples(root)
-        sources = {sample.key: sample for sample in samples}
-        evidence = _evidence(root)
-        changed = 0
-        for entry in entries:
-            if entry["status"] not in ("trial", "active", "covered"):
-                continue
-            source = sources.get(entry["sources"][0])
-            invalid_source = (
-                not entry.get("sources_cleared", False)
-                if source is None
-                else source.card_id != entry["card_id"] or source.status in ("pending", "ignored")
-            )
-            result = _validate(entry, evidence)
-            entry["validation"] = result
-            if invalid_source or result["wrong"]:
-                entry["status"] = "disabled"
-                changed += 1
-        _write_library(root, entries)
-        return changed
 
 
 def clear_samples(root: Path) -> int:
@@ -356,53 +338,24 @@ def _evidence(root):
     evidence = []
     samples, _ = scan_samples(root)
     for sample in samples:
-        if sample.status not in ("confirmed", "trial", "included", "covered") or sample.card_id not in CARD_NAMES_ZH:
+        if (
+            sample.status not in ("confirmed", "trial", "included", "covered", "conflict")
+            or sample.card_id not in CARD_NAMES_ZH
+        ):
             continue
         try:
-            fingerprint = sample_fingerprint(sample)
+            evidence.append((sample, sample_fingerprint(sample)))
         except (OSError, ValueError, cv2.error):
             continue
-        evidence.append((sample, fingerprint, base_match(fingerprint)))
     return evidence
 
 
-def _validate(entry, evidence, retained=()) -> dict:
-    """Hold out source sessions; reject any wrong-card match, require extra coverage."""
-    from crX.bot.card_detection import CARD_MATCH_THRESHOLD
+def sync_library(root: Path) -> None:
+    """Enable confirmed appearances; only human-label conflicts can block them.
 
-    source_sessions = {entry["sources"][0].split("/")[0]}
-    result = {"correct": 0, "wrong": 0, "extra": 0, "other_cards": 0, "same_card_samples": 0, "distance_total": 0}
-    for sample, fingerprint, (base_card, base_distance) in evidence:
-        if sample.directory.name in source_sessions:
-            continue
-        same_card = sample.card_id == entry["card_id"]
-        if same_card:
-            result["same_card_samples"] += 1
-        if not same_card:
-            result["other_cards"] += 1
-        distance = int(np.abs(fingerprint - np.array(entry["fingerprint"])).sum())
-        if distance > CARD_MATCH_THRESHOLD or distance >= base_distance:
-            continue
-        result["correct" if same_card else "wrong"] += 1
-        if same_card:
-            result["distance_total"] += distance
-            retained_card, retained_distance = base_card, base_distance
-            for other in retained:
-                if other["id"] == entry["id"] or other["status"] != "active":
-                    continue
-                other_distance = int(np.abs(fingerprint - np.array(other["fingerprint"])).sum())
-                if other_distance < retained_distance:
-                    retained_card, retained_distance = other["card_id"], other_distance
-            if distance < retained_distance and (
-                retained_distance > CARD_MATCH_THRESHOLD or retained_card != sample.card_id
-            ):
-                result["extra"] += 1
-    return result
-
-
-def refresh_ranked_library(root: Path) -> None:
-    """Rank from independent labels plus matching quality; predictions are never labels."""
-    from crX.bot.card_detection import CARD_MATCH_THRESHOLD
+    Legacy trial/covered entries migrate here. Explicitly revoked and previously
+    disabled entries stay off; runtime similarity never supplies a human label.
+    """
     from crX.utils.card_review import scan_samples
 
     if not library_path(root).exists():
@@ -412,74 +365,83 @@ def refresh_ranked_library(root: Path) -> None:
         before = json.dumps(entries, sort_keys=True)
         samples, errors = scan_samples(root)
         if errors:
-            raise ValueError("样本记录不完整，本轮不调整补库选用")
+            raise ValueError("样本记录不完整，本轮不调整补库")
         sources = {sample.key: sample for sample in samples}
         evidence = _evidence(root)
         stats = read_match_stats(root)
-        qualified: dict[str, list[dict]] = {}
-        previously_selected = {entry["id"] for entry in entries if entry.get("auto_selected") is True}
+        counts: Counter = Counter()
         for entry in entries:
-            if entry["status"] not in ("trial", "active", "covered"):
-                entry["auto_selected"] = False
+            entry["runtime"] = stats.get(entry["id"], {"matches": 0, "distance_total": 0, "margin_total": 0})
+            for obsolete in ("score", "validation", "auto_selected"):
+                entry.pop(obsolete, None)
+            reason = entry.get("disabled_reason", "")
+            if entry.get("manual_disabled") or (
+                entry["status"] == "disabled" and reason not in ("conflict", "source", "limit")
+            ):
+                entry["manual_disabled"] = True
                 continue
-            source = sources.get(entry["sources"][0])
-            invalid = (
-                not entry.get("sources_cleared", False)
-                if source is None
-                else source.card_id != entry["card_id"] or source.status in ("pending", "ignored")
-            )
-            result = _validate(entry, evidence)
-            entry["validation"] = result
-            entry["runtime"] = runtime = stats.get(entry["id"], {"matches": 0, "distance_total": 0, "margin_total": 0})
-            correct = result["correct"]
-            quality = (
-                max(0.0, 1 - result["distance_total"] / max(1, correct) / CARD_MATCH_THRESHOLD) if correct else 0.0
-            )
-            runtime_quality = max(
-                0.0, 1 - runtime["distance_total"] / max(1, runtime["matches"]) / CARD_MATCH_THRESHOLD
-            )
-            entry["score"] = round(
-                70 * quality + (20 * runtime_quality if runtime["matches"] else 0) + min(10, correct * 2), 1
-            )
-            entry["auto_selected"] = False
-            if invalid or result["wrong"]:
-                entry["status"] = "disabled"
-            elif entry["status"] != "covered" and validation_passed(result):
-                qualified.setdefault(entry["card_id"], []).append(entry)
-            elif entry["status"] == "active":
-                entry["status"] = "trial"
-        for candidates in qualified.values():
-            candidates.sort(
-                key=lambda entry: (
-                    -entry["score"],
-                    entry["id"] not in previously_selected,
-                    -entry["validation"]["correct"],
-                    entry["id"],
+            known = [sources[key] for key in entry["sources"] if key in sources]
+            valid = (
+                any(
+                    sample.card_id == entry["card_id"] and sample.status not in ("pending", "ignored")
+                    for sample in known
                 )
+                if known
+                else entry.get("sources_cleared", False)
             )
-            for index, entry in enumerate(candidates):
-                entry["status"] = "active" if index == 0 else "trial"
-                entry["auto_selected"] = index == 0
+            conflicts = (
+                sorted(
+                    {
+                        sample.card_id
+                        for sample, fingerprint in evidence
+                        if sample.card_id != entry["card_id"]
+                        and int(np.abs(fingerprint - np.array(entry["fingerprint"])).sum())
+                        <= SIMILAR_FINGERPRINT_DISTANCE
+                    }
+                )
+                if valid
+                else []
+            )
+            entry["conflicts"] = conflicts
+            if not valid:
+                entry["status"], entry["disabled_reason"] = "disabled", "source"
+            elif conflicts:
+                entry["status"], entry["disabled_reason"] = "disabled", "conflict"
+            elif counts[entry["card_id"]] >= MAX_PER_CARD:
+                entry["status"], entry["disabled_reason"] = "disabled", "limit"
+            else:
+                entry["status"] = "active"
+                entry.pop("disabled_reason", None)
+                counts[entry["card_id"]] += 1
         if json.dumps(entries, sort_keys=True) != before:
             _write_library(root, entries)
 
 
 def update_library(root: Path, selected, action: str) -> str:
-    """One UI writer; the gameplay process only reads atomic snapshots."""
-    if action not in ("trial", "validate", "revoke"):
+    """Confirm-to-enable, explicit revoke, and near-duplicate merging."""
+    if action not in ("enable", "trial", "validate", "revoke"):
         raise ValueError("补库操作无效")
-    from crX.bot.card_detection import CARD_MATCH_THRESHOLD
     from crX.utils.card_review import scan_samples
 
     with _LOCK:
         entries = read_library(root)
-        fresh, _ = scan_samples(root)
+        fresh, errors = scan_samples(root)
+        if errors:
+            raise ValueError("样本记录不完整，请先刷新检查")
         keys = {sample.key for sample in selected}
         selected = [sample for sample in fresh if sample.key in keys]
         counts: Counter = Counter()
-        if action == "trial":
+        if action == "revoke":
+            for entry in entries:
+                if keys.intersection(entry["sources"]):
+                    entry.update(status="disabled", manual_disabled=True, disabled_reason="manual")
+                    counts["disabled"] += 1
+        else:
             for sample in selected:
-                if sample.status != "confirmed":
+                if (
+                    sample.status not in ("confirmed", "trial", "included", "covered", "conflict")
+                    or sample.card_id not in CARD_NAMES_ZH
+                ):
                     counts["skipped"] += 1
                     continue
                 fingerprint = sample_fingerprint(sample)
@@ -488,76 +450,51 @@ def update_library(root: Path, selected, action: str) -> str:
                         entry
                         for entry in entries
                         if entry["card_id"] == sample.card_id
-                        and np.abs(np.array(entry["fingerprint"]) - fingerprint).sum() <= 100
-                        and entry["status"] != "disabled"
+                        and int(np.abs(np.array(entry["fingerprint"]) - fingerprint).sum())
+                        <= SIMILAR_FINGERPRINT_DISTANCE
                     ),
                     None,
                 )
                 if existing:
+                    if (
+                        existing["status"] not in ("active", "trial")
+                        and sum(
+                            entry["card_id"] == sample.card_id and entry["status"] in ("active", "trial")
+                            for entry in entries
+                        )
+                        >= MAX_PER_CARD
+                    ):
+                        counts["limit"] += 1
+                        continue
                     if sample.key not in existing["sources"] and len(existing["sources"]) < 128:
                         existing["sources"].append(sample.key)
+                    existing.update(status="active", manual_disabled=False)
                     counts["duplicate"] += 1
                     continue
                 live = [
-                    entry
-                    for entry in entries
-                    if entry["card_id"] == sample.card_id and entry["status"] in ("trial", "active")
+                    entry for entry in entries if entry["card_id"] == sample.card_id and entry["status"] != "disabled"
                 ]
-                if (
-                    len(live) >= MAX_PER_CARD
-                    or sum(entry["status"] == "trial" for entry in live) >= MAX_TRIALS_PER_CARD
-                ):
+                if len(live) >= MAX_PER_CARD:
                     counts["limit"] += 1
                     continue
-                base_card, distance = base_match(fingerprint)
                 identifier = hashlib.sha256(sample.key.encode() + fingerprint.tobytes()).hexdigest()[:16]
                 entry = {
                     "id": identifier,
                     "card_id": sample.card_id,
                     "fingerprint": fingerprint.tolist(),
                     "sources": [sample.key],
-                    "status": "covered"
-                    if base_card == sample.card_id and distance <= CARD_MATCH_THRESHOLD
-                    else "trial",
+                    "status": "active",
                 }
                 entries = [prior for prior in entries if prior["id"] != identifier]
                 entries.append(entry)
-                counts[entry["status"]] += 1
-        targets = [entry for entry in entries if keys.intersection(entry["sources"])]
-        if action == "revoke":
-            for entry in targets:
-                entry["status"] = "disabled"
-                counts["disabled"] += 1
-        else:
-            evidence = _evidence(root)
-            for entry in targets:
-                if entry["status"] not in ("trial", "active"):
-                    continue
-                result = _validate(entry, evidence, entries if action == "validate" else ())
-                entry["validation"] = result
-                if result["wrong"]:
-                    entry["status"] = "disabled"
-                    counts["failed"] += 1
-                elif action == "validate":
-                    if result["correct"] and result["extra"] and result["other_cards"]:
-                        entry["status"] = "active"
-                        counts["active"] += 1
-                    elif result["correct"] and not result["extra"] and result["other_cards"]:
-                        entry["status"] = "covered"
-                        counts["redundant"] += 1
-                    else:
-                        counts["waiting"] += 1
+                counts["active"] += 1
         _write_library(root, entries)
+    sync_library(root)
     labels = {
-        "trial": "新增离线验证候选",
-        "covered": "原库已识别，无需补库",
-        "duplicate": "合并近似候选",
-        "limit": "达到单卡上限",
-        "skipped": "跳过非待补库",
+        "active": "已补库",
+        "duplicate": "合并近似样本",
+        "limit": "达到单卡8份上限，请整理后重试",
+        "skipped": "跳过未确认样本",
         "disabled": "已撤销",
-        "failed": "验证误认，已停用",
-        "active": "验证通过并保留",
-        "waiting": "证据不足，保持未启用",
-        "redundant": "已有指纹覆盖，无需重复保留",
     }
-    return "；".join(f"{labels[key]} {value}" for key, value in counts.items()) or "没有可处理的候选"
+    return "；".join(f"{labels[key]} {value}" for key, value in counts.items()) or "没有可处理的样本"

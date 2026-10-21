@@ -67,9 +67,11 @@ class CrXUI(ttk.Window):
         self.card_samples_tab = CardReviewTab(
             self.notebook,
             count_callback=self._update_sample_count,
-            clear_busy_callback=lambda busy: self.main_btn.configure(state="disabled" if busy else "normal"),
+            clear_busy_callback=self._update_clear_busy,
         )
-        self.failure_samples_tab = FailureReviewTab(self.notebook, count_callback=self._update_failure_count)
+        self.failure_samples_tab = FailureReviewTab(
+            self.notebook, count_callback=self._update_failure_count, clear_busy_callback=self._update_clear_busy
+        )
         for tab, title in (
             (self.jobs_tab, "任务"),
             (self.device_tab, "设备"),
@@ -423,7 +425,13 @@ class CrXUI(ttk.Window):
             self._suspend = False
 
     def can_start(self):
-        return has_start_ready_job(self.get_all_values())
+        return not self._samples_clearing() and has_start_ready_job(self.get_all_values())
+
+    def _samples_clearing(self):
+        return self.card_samples_tab.clearing or self.failure_samples_tab.clearing
+
+    def _update_clear_busy(self, _busy=None):
+        self.main_btn.configure(state="disabled" if self._samples_clearing() else "normal")
 
     def get_button_state(self):
         return self._state
@@ -431,6 +439,8 @@ class CrXUI(ttk.Window):
     def set_button_state(self, state):
         self._state = state
         self.card_samples_tab.set_running(state == "running")
+        self.failure_samples_tab.set_running(state == "running")
+        self._update_clear_busy()
         self.main_btn.configure(
             text="停止" if state == "running" else "启动", bootstyle="danger" if state == "running" else "success"
         )
