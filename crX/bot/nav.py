@@ -140,7 +140,7 @@ def handle_clan_voyage_page(emulator) -> None:
 
 
 def wait_for_clash_main_menu(emulator, logger: Logger, deadspace_click=True, timeout: float | None = None) -> bool:
-    """Wait on fresh frames; only dismiss recognized popups, never tap loading screens.
+    """Wait on fresh frames; dismiss known results/rewards, never tap loading screens.
 
     Keep the legacy deadspace_click option for callers; it now controls dismissal
     of the known voyage popup rather than random clicks on unknown pages.
@@ -162,9 +162,13 @@ def wait_for_clash_main_menu(emulator, logger: Logger, deadspace_click=True, tim
             handle_trophy_reward_menu(emulator, logger)
             time.sleep(2)
             continue
-        if detect_post_battle_reward(image) is not None or is_generic_post_battle_reward(image):
+        if (
+            find_post_battle_button_in_image(image) is not None
+            or detect_post_battle_reward(image) is not None
+            or is_generic_post_battle_reward(image)
+        ):
             return get_to_main_after_fight(
-                emulator, logger, timeout=max(0, deadline - time.monotonic()), allow_result_button=False
+                emulator, logger, timeout=max(0, deadline - time.monotonic()), allow_result_button=True
             )
         if deadspace_click and check_if_on_clan_voyage(emulator):
             logger.change_status("正在关闭部落旅途弹窗")

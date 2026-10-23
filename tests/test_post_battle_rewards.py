@@ -678,6 +678,32 @@ def test_startup_wait_accepts_daily_bonus_main_without_clicking(clock, monkeypat
     assert messages == ["正在等待游戏主界面（已等待 0/15 秒）", "正在等待游戏主界面（已等待 10/15 秒）"]
 
 
+@pytest.mark.parametrize("filename", ["replay-result-zh.png", "training-result-zh.png"])
+def test_recovery_wait_drains_result_then_rewards_without_recounting(clock, filename):
+    screen = RewardSequence(
+        clock,
+        [
+            (image(filename), None),
+            (image("post-battle-attached-09.png"), None),
+            (image("main-daily-bonus-360-native.png"), None),
+        ],
+    )
+    assert nav.wait_for_clash_main_menu(screen, Logger(), timeout=15)
+    assert len(screen.clicks) == 2
+    assert screen.index == 2
+    assert nav.POST_BATTLE_MAIN_STABLE_S <= clock[0] <= 15
+
+
+def test_recovery_result_clicks_remain_bounded(clock):
+    screen = RewardSequence(clock, [(image("replay-result-zh.png"), None)])
+    logger = Logger()
+    assert not nav.wait_for_clash_main_menu(screen, logger, timeout=15)
+    assert len(screen.clicks) == 5
+    failure = getattr(logger, "failure_frame")
+    assert failure["details"]["actions"] == 5
+    assert clock[0] <= 15
+
+
 def test_new_reward_backdrops_require_foreground_artwork():
     chest = image("failure-chest-rainbow.png")
     chest[233:425, 77:284] = chest[233, 77]

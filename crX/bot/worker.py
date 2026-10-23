@@ -1,7 +1,9 @@
 """Worker process and bounded recovery around the serial state machine."""
 
 import logging
+import subprocess
 import traceback
+from contextlib import contextmanager
 from multiprocessing import Process, Queue
 from multiprocessing.synchronize import Event
 from typing import Any, Protocol
@@ -14,6 +16,41 @@ from crX.emulators.base import EmulatorNotReadyError
 from crX.interface.enums import UIField
 from crX.utils.failure_samples import FailureSampleRecorder
 from crX.utils.logger import ProcessLogger, attach_worker_file_logging
+
+
+@contextmanager
+def screenshot_retry_policy(emulator, logger, shutdown_event):
+    """Retry one timed-out read, without replaying a state or any device input.
+
+    The worker owns recovery policy. Adapters retain a single bounded I/O attempt;
+    patching the instance also covers screenshot calls inside adapter.restart().
+    """
+    original = getattr(emulator, "screenshot", None)
+    if original is None:
+        yield
+        return
+    overridden = "screenshot" in vars(emulator)
+
+    def capture():
+        try:
+            return original()
+        except subprocess.TimeoutExpired as error:
+            command = error.cmd
+            if not isinstance(command, list | tuple) or list(command[-3:]) != ["exec-out", "screencap", "-p"]:
+                raise
+            logger.change_status("ADB 截图超时，正在重试一次；暂不重启游戏")
+            if shutdown_event.wait(0.5):
+                raise
+            return original()
+
+    emulator.screenshot = capture
+    try:
+        yield
+    finally:
+        if overridden:
+            emulator.screenshot = original
+        else:
+            del emulator.screenshot
 
 
 class WorkerProcess(Process):
@@ -39,7 +76,8 @@ class WorkerProcess(Process):
             else:
                 kwargs["device_serial"] = jobs.get(UIField.ADB_SERIAL) or None
             emulator = cls(logger, **kwargs)
-            emulator.restart()
+            with screenshot_retry_policy(emulator, logger, self.shutdown_event):
+                emulator.restart()
             return emulator
         except (EmulatorNotReadyError, OSError, ValueError) as error:
             logger.error(f"设备尚未就绪：{error}")
@@ -52,7 +90,8 @@ class WorkerProcess(Process):
         except Exception:
             logging.warning("异常采样未能启动，继续执行任务", exc_info=True)
         try:
-            return self._run_bot_states(emulator, jobs, logger, diagnostics)
+            with screenshot_retry_policy(emulator, logger, self.shutdown_event):
+                return self._run_bot_states(emulator, jobs, logger, diagnostics)
         finally:
             if diagnostics is not None:
                 diagnostics.close()

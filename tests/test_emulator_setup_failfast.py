@@ -77,8 +77,11 @@ def test_setup_emulator_returns_none_and_reports_when_restart_not_ready(monkeypa
         lambda: {EmulatorType.ADB: _FakeNotReadyController},
     )
 
-    # _setup_emulator doesn't touch instance state; skip Process.__init__.
+    # Skip Process.__init__, but supply the stop event used by capture retries.
     worker = worker_module.WorkerProcess.__new__(worker_module.WorkerProcess)
+    from threading import Event
+
+    worker.shutdown_event = Event()
     logger = _RecordingLogger()
 
     result = worker._setup_emulator({"emulator": EmulatorType.ADB}, logger)
