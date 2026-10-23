@@ -35,6 +35,7 @@ REASON_LABELS = {
 SAMPLE_NAME = re.compile(r"sample-\d{3,}")
 GROUP_HASH_DISTANCE = 8
 GROUP_PIXEL_DIFFERENCE = 12
+CARD_THUMBNAIL_SIZE = (16, 20)
 
 
 def sample_file(directory: Path, filename: str) -> Path:
@@ -352,6 +353,22 @@ def scan_grouped_samples(root: Path, *, refresh_library=False) -> tuple[list[Rev
         return samples, errors + 1, group_similar_samples(samples)
     samples, errors = scan_samples(root)
     return samples, errors, group_similar_samples(samples)
+
+
+def load_card_thumbnail(sample: ReviewSample, *, size=CARD_THUMBNAIL_SIZE) -> Image.Image | None:
+    """Read only the bounded card crop; callers create Tk images on the UI thread."""
+    try:
+        path = sample.file("card")
+        if path.stat().st_size > 1024 * 1024:
+            return None
+        with Image.open(path) as image:
+            if image.width > 1000 or image.height > 1000:
+                return None
+            preview = image.convert("RGB")
+            preview.thumbnail(size, Image.Resampling.LANCZOS)
+            return preview
+    except (OSError, ValueError, KeyError, Image.DecompressionBombError):
+        return None
 
 
 def load_previews(sample: ReviewSample) -> dict:

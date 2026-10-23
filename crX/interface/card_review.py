@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import threading
 import tkinter as tk
-from collections import Counter
+from collections import Counter, OrderedDict
 from datetime import datetime
 from queue import Empty, Queue
 from tkinter import messagebox
+from tkinter.font import Font
 
 import ttkbootstrap as ttk
 from PIL import ImageTk
@@ -17,9 +18,11 @@ from crX.bot.card_data import CARD_NAMES_ZH
 from crX.bot.card_samples import get_card_samples_dir
 from crX.utils.card_library import clear_filtered_samples, update_library
 from crX.utils.card_review import (
+    CARD_THUMBNAIL_SIZE,
     REASON_LABELS,
     STATUS_LABELS,
     library_card_summaries,
+    load_card_thumbnail,
     load_previews,
     sample_progress,
     save_reviews,
@@ -34,6 +37,25 @@ STAGE_ACTIONS = {
     "补库": ("promote", "revoke"),
     "全部": ("confirm",),
 }
+COLUMN_SPECS = {
+    "group": ("相似分组", 100),
+    "session": ("对局 / 样本", 210),
+    "reason": ("采样原因", 115),
+    "status": ("处理状态", 100),
+    "card": ("确认卡名", 200),
+    "enabled": ("已启用指纹数", 100),
+    "runtime": ("补库命中次数", 100),
+    "pending": ("需复核样本数", 100),
+    "validation_reason": ("说明", 210),
+}
+FILTER_COLUMNS = {
+    "待确认": ("group", "session", "reason"),
+    "补库": ("card", "enabled", "runtime", "pending", "validation_reason"),
+    "全部": ("group", "session", "reason", "status", "card", "runtime", "validation_reason"),
+}
+PENDING_COLUMN_WIDTHS = {"group": 110, "session": 320, "reason": 120}
+SUMMARY_COLUMN_WIDTHS = {"card": 150, "enabled": 80, "runtime": 80, "pending": 80, "validation_reason": 210}
+THUMBNAIL_CACHE_SIZE = 128
 
 
 def search_card_choices(choices: dict[str, str], query: str) -> list[str]:
@@ -79,10 +101,16 @@ class CardReviewTab(ttk.Frame):
         self._scan_busy = False
         self._action_busy = False
         self._images = {}
+        self._thumbnail_images = OrderedDict()
+        self._thumbnail_busy = False
+        self._thumbnail_after = None
         self._frame_preview = None
         self._selection_version = 0
         self._revision = 0
         self._closed = False
+        self._details_expanded = False
+        self._table_height = 220
+        self._details_height = 120
         self._after_ids = set()
         self.bind("<Destroy>", self._on_destroy, add="+")
         self.columnconfigure(0, weight=1)
@@ -113,6 +141,8 @@ class CardReviewTab(ttk.Frame):
         self.group_combo.bind("<<ComboboxSelected>>", lambda _: self._render_list())
         ttk.Button(filters, text="刷新", command=self.refresh).pack(side="left", padx=8)
         ttk.Button(filters, text="打开样本目录", command=self._open_folder).pack(side="left")
+        self.expand_details_button = ttk.Button(filters, text="展开详情", command=self._toggle_details)
+        self.expand_details_button.pack(side="right")
         self.select_group_button = ttk.Button(
             selection_tools, text="选中本组", command=self._select_group, state="disabled"
         )
@@ -129,68 +159,87 @@ class CardReviewTab(ttk.Frame):
             selection_tools, text="清空选中", bootstyle="danger-outline", command=self._clear_samples, state="disabled"
         )
         self.clear_button.pack(side="left")
-        self.review_panes = ttk.Panedwindow(self, orient="vertical")
+        self.review_panes = tk.PanedWindow(
+            self,
+            orient="vertical",
+            sashwidth=8,
+            sashpad=0,
+            sashrelief="flat",
+            showhandle=False,
+            opaqueresize=True,
+            borderwidth=0,
+            background=ttk.Style().colors.border,
+        )
+        self.bind(
+            "<<ThemeChanged>>",
+            self._update_review_theme,
+            add="+",
+        )
+        self._update_review_theme()
         self.review_panes.grid(row=2, column=0, rowspan=2, sticky="nsew", pady=(0, 4))
         table = ttk.Frame(self.review_panes)
+        self.sample_table = table
         table.columnconfigure(0, weight=1)
         table.rowconfigure(1, weight=1)
-        self.review_panes.add(table, weight=1)
+        self.review_panes.add(table, minsize=80, height=220, stretch="always")
         self.selection_var = tk.StringVar(value="已选 0 张；Ctrl / Shift 多选，卡名和备注应用于全部选中样本。")
         selection_label = ttk.Label(table, textvariable=self.selection_var)
-        selection_label.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 4))
+        selection_label.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 4))
         selection_label.bind("<Configure>", lambda event: selection_label.configure(wraplength=max(1, event.width)))
+        self.rows_frame = tk.Frame(table, width=1, height=180, borderwidth=0, highlightthickness=1)
+        self.rows_frame.grid(row=1, column=0, columnspan=3, sticky="nsew")
+        self.rows_frame.grid_propagate(False)
+        self.rows_frame.columnconfigure(2, weight=1)
+        self.rows_frame.rowconfigure(0, weight=1)
+        self.text_frame = ttk.Frame(self.rows_frame, width=1, height=1)
+        self.text_frame.grid(row=0, column=0, sticky="ns")
+        self.text_frame.grid_propagate(False)
+        self.text_frame.columnconfigure(0, weight=1)
+        self.text_frame.rowconfigure(0, weight=1)
         self.tree = ttk.Treeview(
-            table,
-            columns=(
-                "group",
-                "session",
-                "reason",
-                "status",
-                "card",
-                "enabled",
-                "runtime",
-                "pending",
-                "validation_reason",
-            ),
+            self.text_frame,
             show="headings",
-            height=3,
+            height=6,
             selectmode="extended",
+            style="CardSamples.Treeview",
         )
-        for column, title, width in (
-            ("group", "相似分组", 100),
-            ("session", "对局 / 样本", 210),
-            ("reason", "采样原因", 115),
-            ("status", "处理状态", 100),
-            ("validation_reason", "说明", 210),
-            ("card", "确认卡名", 200),
-            ("enabled", "已启用指纹数", 100),
-            ("runtime", "补库命中次数", 100),
-            ("pending", "需复核样本数", 100),
-        ):
-            self.tree.heading(column, text=title)
-            self.tree.column(column, width=width, minwidth=width, stretch=False)
-        for column in ("card", "validation_reason"):
-            self.tree.heading(column, anchor="w")
-        for column in ("enabled", "runtime", "pending"):
-            self.tree.column(column, anchor="center")
-        scroll = ttk.Scrollbar(table, orient="vertical", command=self.tree.yview)
-        horizontal = ttk.Scrollbar(table, orient="horizontal", command=self.tree.xview)
-        horizontal.grid(row=2, column=0, sticky="ew")
+        self._configure_columns()
+        self.thumbnail_tree = ttk.Treeview(
+            self.rows_frame, show="tree headings", height=6, selectmode="extended", style="CardSamples.Treeview"
+        )
+        self.thumbnail_tree.heading("#0", text="缩略图", anchor="center")
+        self.thumbnail_tree.column("#0", stretch=False, anchor="center")
+        self.row_scroll = ttk.Scrollbar(self.rows_frame, orient="vertical", command=self._scroll_rows)
+        horizontal = ttk.Scrollbar(self.rows_frame, orient="horizontal", command=self.tree.xview)
+        horizontal.grid(row=1, column=0, columnspan=3, sticky="ew")
         self.tree.configure(xscrollcommand=horizontal.set)
-        self.tree.configure(yscrollcommand=scroll.set)
-        self.tree.grid(row=1, column=0, sticky="nsew")
-        scroll.grid(row=1, column=1, sticky="ns")
+        self.tree.configure(yscrollcommand=self._tree_scrolled)
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        self.thumbnail_tree.grid(row=0, column=1, sticky="ns")
+        self.row_scroll.grid(row=0, column=3, rowspan=2, sticky="ns")
+        self.rows_frame.bind("<Configure>", self._layout_rows, add="+")
+        self._update_review_theme()
         self.description_var = tk.StringVar(value="选择样本可查看完整说明。")
         self.description_label = ttk.Label(table, textvariable=self.description_var, justify="left", wraplength=500)
-        self.description_label.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        self.description_label.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(4, 0))
         self.description_label.bind(
             "<Configure>", lambda event: self.description_label.configure(wraplength=max(1, event.width))
         )
         self.tree.bind("<<TreeviewSelect>>", self._select)
         self.tree.bind("<Control-a>", self._select_all)
+        self.thumbnail_tree.bind("<<TreeviewSelect>>", self._select_thumbnail)
+        self.thumbnail_tree.bind("<Control-a>", self._select_all)
+        for tree in (self.tree, self.thumbnail_tree):
+            tree.bind("<Button-1>", self._fixed_table_pointer)
+            tree.bind("<Motion>", self._fixed_table_pointer)
+        self.thumbnail_tree.bind("<MouseWheel>", self._thumbnail_wheel)
+        self.thumbnail_tree.bind("<Button-4>", lambda _: self._thumbnail_scroll(-1))
+        self.thumbnail_tree.bind("<Button-5>", lambda _: self._thumbnail_scroll(1))
+        self.thumbnail_tree.bind("<Map>", lambda _: self._queue_thumbnails())
         self.details = ttk.Notebook(self.review_panes)
-        self.review_panes.add(self.details, weight=2)
+        self.review_panes.add(self.details, minsize=0, height=120, stretch="never")
         info = ScrolledFrame(self.details, padding=8, height=220)
+        self.info_panel = info
         frame = ttk.Frame(self.details, padding=4)
         self.details.add(info.container, text="手牌与识别信息")
         self.details.add(frame, text="完整战斗截图")
@@ -258,6 +307,129 @@ class CardReviewTab(ttk.Frame):
         self._later(100, self._poll)
         self._later(5000, self._auto_refresh)
         self.refresh()
+
+    def _update_review_theme(self, _event=None):
+        style = ttk.Style()
+        self.review_panes.configure(background=style.colors.bg)
+        style.configure("CardSamples.Treeview", rowheight=CARD_THUMBNAIL_SIZE[1] + 4, indent=0)
+        style.layout("CardSamples.Treeview", [("Treeview.treearea", {"sticky": "nsew"})])
+        if hasattr(self, "rows_frame"):
+            heading_font = Font(root=self, font=style.lookup("CardSamples.Treeview.Heading", "font") or "TkHeadingFont")
+            thumbnail_width = max(64, heading_font.measure(self.thumbnail_tree.heading("#0", "text")) + 24)
+            self.thumbnail_tree.column("#0", width=thumbnail_width, minwidth=thumbnail_width)
+            self.rows_frame.configure(
+                background=style.colors.inputbg,
+                highlightbackground=style.colors.border,
+                highlightcolor=style.colors.border,
+            )
+            self._later(0, self._layout_rows)
+
+    def _layout_rows(self, _event=None):
+        text_width = sum(self.tree.column(column, "width") for column in self.tree.cget("columns"))
+        side_width = self.thumbnail_tree.winfo_reqwidth() + self.row_scroll.winfo_reqwidth()
+        width = max(1, min(text_width, self.rows_frame.winfo_width() - side_width - 2))
+        if int(self.text_frame.cget("width")) != width:
+            self.text_frame.configure(width=width)
+
+    def _scroll_rows(self, *args):
+        self.tree.yview(*args)
+
+    def _tree_scrolled(self, first, last):
+        self.row_scroll.set(first, last)
+        self.thumbnail_tree.yview_moveto(first)
+        self._queue_thumbnails()
+
+    def _thumbnail_scroll(self, steps):
+        self.tree.yview_scroll(steps, "units")
+        return "break"
+
+    def _thumbnail_wheel(self, event):
+        steps = max(1, abs(event.delta) // 120)
+        return self._thumbnail_scroll(-steps if event.delta > 0 else steps)
+
+    def _fixed_table_pointer(self, event):
+        tree = event.widget
+        if tree.identify_region(event.x, event.y) in {"heading", "separator"}:
+            tree.configure(cursor="")
+            return "break"
+        return None
+
+    def _sync_thumbnail_selection(self):
+        selection = self.tree.selection()
+        if self.thumbnail_tree.selection() != selection:
+            self.thumbnail_tree.selection_set(selection)
+        focus = self.tree.focus()
+        if focus and self.thumbnail_tree.exists(focus):
+            self.thumbnail_tree.focus(focus)
+
+    def _select_thumbnail(self, _event=None):
+        selection = self.thumbnail_tree.selection()
+        if selection == self.tree.selection():
+            return
+        self.tree.selection_set(selection)
+        focus = self.thumbnail_tree.focus()
+        if focus and self.tree.exists(focus):
+            self.tree.focus(focus)
+            self.tree.see(focus)
+        self._select()
+
+    def _queue_thumbnails(self):
+        if not self._closed and self._thumbnail_after is None:
+            self._thumbnail_after = self._later(30, self._load_visible_thumbnails)
+
+    def _load_visible_thumbnails(self):
+        self._thumbnail_after = None
+        if self._thumbnail_busy or not self.sample_table.winfo_ismapped():
+            return
+        keys = self.tree.get_children()
+        position = self.tree.yview()
+        start = int(float(position[0]) * len(keys))
+        end = min(len(keys), int(float(position[-1]) * len(keys)) + 2)
+        targets = []
+        for key in keys[start:end]:
+            if key in self._thumbnail_images:
+                self._thumbnail_images.move_to_end(key)
+                self._show_thumbnail(key)
+            elif key in self.samples and len(targets) < 32:
+                targets.append(self.samples[key])
+        if targets:
+            self._thumbnail_busy = True
+            self._background(
+                "thumbnails", lambda: {sample.key: load_card_thumbnail(sample) for sample in targets}, self._revision
+            )
+
+    def _show_thumbnail(self, key):
+        if self.thumbnail_tree.exists(key):
+            photo = self._thumbnail_images[key]
+            self.thumbnail_tree.item(key, image=photo or "", text="" if photo else "无图")
+
+    def _render_thumbnails(self, keys):
+        if self.thumbnail_tree.get_children() != keys:
+            self.thumbnail_tree.delete(*self.thumbnail_tree.get_children())
+            for key in keys:
+                self.thumbnail_tree.insert("", "end", iid=key, text="加载中")
+        visible = set(keys)
+        for key in list(self._thumbnail_images):
+            if key not in visible:
+                del self._thumbnail_images[key]
+            else:
+                self._show_thumbnail(key)
+        self.thumbnail_tree.yview_moveto(self.tree.yview()[0])
+        self._queue_thumbnails()
+
+    def _toggle_details(self):
+        if self._details_expanded:
+            self.review_panes.paneconfigure(self.details, height=self._details_height, stretch="never")
+            self.review_panes.add(
+                self.sample_table, before=self.details, minsize=80, height=self._table_height, stretch="always"
+            )
+        else:
+            self._table_height = self.sample_table.winfo_height()
+            self._details_height = self.details.winfo_height()
+            self.review_panes.forget(self.sample_table)
+            self.review_panes.paneconfigure(self.details, stretch="always")
+        self._details_expanded = not self._details_expanded
+        self.expand_details_button.configure(text="恢复列表" if self._details_expanded else "展开详情")
 
     def _later(self, delay, callback):
         def run():
@@ -419,6 +591,20 @@ class CardReviewTab(ttk.Frame):
                         photo = ImageTk.PhotoImage(preview, master=self) if preview is not None else None
                         self._images[image_kind] = photo
                         widget.configure(image=photo or "", text="图片缺失或损坏" if photo is None else "")
+            elif kind == "thumbnails":
+                self._thumbnail_busy = False
+                if error is None and token == self._revision:
+                    for key, preview in result.items():
+                        if not self.thumbnail_tree.exists(key):
+                            continue
+                        self._thumbnail_images[key] = (
+                            ImageTk.PhotoImage(preview, master=self) if preview is not None else None
+                        )
+                        self._thumbnail_images.move_to_end(key)
+                        self._show_thumbnail(key)
+                    while len(self._thumbnail_images) > THUMBNAIL_CACHE_SIZE:
+                        self._thumbnail_images.popitem(last=False)
+                self._queue_thumbnails()
             elif kind in ("save", "library", "clear"):
                 self._action_busy = False
                 if kind == "clear":
@@ -447,6 +633,39 @@ class CardReviewTab(ttk.Frame):
             next((label for label, group in self.group_choices.items() if group == prior_group), "全部分组")
         )
 
+    def _configure_columns(self):
+        pending = self.filter_var.get() == "待确认"
+        columns = FILTER_COLUMNS[self.filter_var.get()]
+        if tuple(self.tree.cget("columns")) != columns:
+            self.tree.configure(columns=columns, displaycolumns="#all")
+            heading_font = Font(
+                root=self, font=ttk.Style().lookup("CardSamples.Treeview.Heading", "font") or "TkHeadingFont"
+            )
+            for column in columns:
+                title, width = COLUMN_SPECS[column]
+                if pending:
+                    width = PENDING_COLUMN_WIDTHS[column]
+                elif self.filter_var.get() == "补库":
+                    width = SUMMARY_COLUMN_WIDTHS[column]
+                if column == "card" and self.filter_var.get() == "补库":
+                    title = "卡牌名称"
+                width = max(width, heading_font.measure(title) + 20)
+                self.tree.heading(
+                    column,
+                    text=title,
+                    anchor="w" if column in ("session", "reason", "card", "validation_reason") else "center",
+                )
+                self.tree.column(
+                    column,
+                    width=width,
+                    minwidth=width,
+                    stretch=False,
+                    anchor="center"
+                    if column in ("enabled", "runtime", "pending") or pending and column == "group"
+                    else "w",
+                )
+        return columns
+
     def _render_list(self):
         states = {
             "待确认": {"pending"},
@@ -459,13 +678,11 @@ class CardReviewTab(ttk.Frame):
         if summary:
             self.group_var.set("全部分组")
         self.group_combo.configure(state="disabled" if summary else "readonly")
-        self.tree.configure(
-            displaycolumns=("card", "enabled", "runtime", "pending", "validation_reason")
-            if summary
-            else ("group", "session", "reason", "status", "card", "runtime", "validation_reason")
-        )
-        self.tree.heading("status", text="处理状态")
-        self.tree.heading("card", text="卡牌名称" if summary else "确认卡名")
+        columns = self._configure_columns()
+        if self.filter_var.get() == "待确认":
+            self.description_label.grid_remove()
+        else:
+            self.description_label.grid()
         if summary:
             visible = library_card_summaries(list(self.samples.values()))
             by_card = {sample.card_id: sample.key for sample in visible}
@@ -488,25 +705,37 @@ class CardReviewTab(ttk.Frame):
             self.tree.delete(*current)
         labels = {group: label.removeprefix("相似组 ") for label, group in self.group_choices.items()}
         for sample in visible:
-            verification, runtime, _ = sample_progress(sample)
-            description = validation_reason(sample)
-            if sample.status == "included" and not sample.review.get("library_issue"):
-                description = "已启用；支持多外观"
-            values = (
-                labels[self.sample_groups[sample.key]],
-                sample.key,
-                REASON_LABELS.get(sample.record.get("reason"), "识别异常"),
-                verification,
-                CARD_NAMES_ZH.get(sample.card_id, "—"),
-                sample.review.get("summary_enabled", "—"),
-                str(sample.review.get("summary_matches", 0)) if summary else runtime,
-                sample.review.get("summary_pending", "—"),
-                description,
-            )
+            row = {
+                "group": labels[self.sample_groups[sample.key]],
+                "session": sample.key,
+                "reason": REASON_LABELS.get(sample.record.get("reason"), "识别异常"),
+            }
+            if self.filter_var.get() != "待确认":
+                verification, runtime, _ = sample_progress(sample)
+                description = validation_reason(sample)
+                if sample.status == "included" and not sample.review.get("library_issue"):
+                    description = "已启用；支持多外观"
+                row.update(
+                    status=verification,
+                    card=CARD_NAMES_ZH.get(sample.card_id, "—"),
+                    enabled=sample.review.get("summary_enabled", "—"),
+                    runtime=str(sample.review.get("summary_matches", 0)) if summary else runtime,
+                    pending=sample.review.get("summary_pending", "—"),
+                    validation_reason=description,
+                )
+            values = tuple(row[column] for column in columns)
             if self.tree.exists(sample.key):
                 self.tree.item(sample.key, values=values)
             else:
                 self.tree.insert("", "end", iid=sample.key, values=values)
+        if "session" in columns:
+            font = Font(root=self, font=ttk.Style().lookup("CardSamples.Treeview", "font") or "TkDefaultFont")
+            text_width = max((font.measure(key) for key in desired), default=0)
+            self.tree.column("session", width=max(220, text_width + 24), minwidth=220)
+            reason_width = max((font.measure(self.tree.set(key, "reason")) for key in desired), default=0)
+            self.tree.column("reason", width=max(80, reason_width + 24), minwidth=80)
+        self._layout_rows()
+        self._render_thumbnails(desired)
         remaining = tuple(key for key in selection if key in desired)
         if remaining:
             self.tree.selection_set(remaining)
@@ -543,6 +772,7 @@ class CardReviewTab(ttk.Frame):
             self._set_action_state()
 
     def _select(self, _event=None):
+        self._sync_thumbnail_selection()
         selection = self.tree.selection()
         if not selection:
             self._selected_keys = ()
@@ -556,7 +786,9 @@ class CardReviewTab(ttk.Frame):
             return
         sample = self.samples[key]
         if self.selected and self.selected.key == sample.key and set(selection) == set(self._selected_keys):
+            self.selected = sample
             self._selected_keys = selection
+            self._describe_sample(sample)
             return
         self._selected_keys = selection
         self.selected = sample
@@ -717,6 +949,7 @@ class CardReviewTab(ttk.Frame):
         return "break"
 
     def _set_action_state(self):
+        self._sync_thumbnail_selection()
         self.set_running(self._running)
         count = len(self.tree.selection())
         stage = self.filter_var.get()

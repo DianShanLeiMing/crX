@@ -11,6 +11,7 @@ from crX.utils.card_review import (
     export_candidate,
     group_similar_samples,
     library_card_summaries,
+    load_card_thumbnail,
     load_previews,
     sample_file,
     sample_progress,
@@ -275,6 +276,35 @@ def test_atomic_write_failure_keeps_previous_review(tmp_path, monkeypatch):
         save_review(sample, "ignored")
     assert scan_samples(tmp_path)[0][0].status == "confirmed"
     assert not list(sample.directory.glob("*.tmp"))
+
+
+def test_card_thumbnail_reads_only_crop_and_preserves_source(tmp_path):
+    sample = add_group_sample(tmp_path, "thumbnail", "sample-000")
+    original = sample.file("card").read_bytes()
+    sample.file("frame").unlink()
+    sample.file("hand").unlink()
+    image = load_card_thumbnail(sample)
+    assert image is not None and image.mode == "RGB"
+    assert 0 < image.width <= 16 and 0 < image.height <= 20
+    assert sample.file("card").read_bytes() == original
+
+
+@pytest.mark.parametrize("kind", ["missing", "corrupt", "file_size", "dimensions", "escape"])
+def test_card_thumbnail_rejects_missing_unsafe_or_oversized_files(tmp_path, kind):
+    from PIL import Image
+
+    sample = add_group_sample(tmp_path, "thumbnail", "sample-000")
+    if kind == "missing":
+        sample.file("card").unlink()
+    elif kind == "corrupt":
+        sample.file("card").write_bytes(b"invalid PNG")
+    elif kind == "file_size":
+        sample.file("card").write_bytes(b"0" * (1024 * 1024 + 1))
+    elif kind == "dimensions":
+        Image.new("RGB", (1001, 10)).save(sample.file("card"))
+    else:
+        sample.record["files"]["card"] = "../outside.png"
+    assert load_card_thumbnail(sample) is None
 
 
 def test_visual_groups_cross_sessions_slots_and_candidates(tmp_path):

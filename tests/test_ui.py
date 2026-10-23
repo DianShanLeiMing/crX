@@ -360,15 +360,15 @@ def test_card_review_group_multi_selection_refresh_and_bulk_actions(desktop_ui, 
     tab._render_list()
     trial_keys = [key for key in tab.tree.get_children() if tab.samples[key].status == "included"]
     assert len(trial_keys) == 1
-    assert all(tab.tree.set(key, "status") == "已启用" for key in trial_keys)
+    assert all(tab.tree.set(key, "validation_reason") == "已启用；支持多外观" for key in trial_keys)
     assert {first.key, second.key}.issubset(tab.samples)  # Hidden candidates remain available.
-    labels_before = {key: tab.tree.set(key, "status") for key in trial_keys}
+    labels_before = {key: tab.tree.set(key, "validation_reason") for key in trial_keys}
     tab.filter_var.set("全部")
     tab._render_list()
     assert all(tab.tree.set(key, "status") == "已启用" for key in trial_keys)
     tab.filter_var.set("补库")
     tab._render_list()
-    assert {key: tab.tree.set(key, "status") for key in trial_keys} == labels_before
+    assert {key: tab.tree.set(key, "validation_reason") for key in trial_keys} == labels_before
     assert str(tab.select_group_button.cget("state")) == "disabled"
     assert len(tab.tree.selection()) == 1
     tab.stage_buttons["revoke"].invoke()
@@ -443,11 +443,12 @@ def test_stage_buttons_and_clearing_preserve_other_stages(desktop_ui, monkeypatc
     tab = ui.card_samples_tab
     assert tuple(tab.filter_combo.cget("values")) == ("待确认", "补库", "全部")
     assert "trial" not in tab.stage_buttons
-    assert {"enabled", "runtime", "pending"}.issubset(tab.tree.cget("columns"))
     tab.filter_var.set("待确认")
     tab.group_var.set("全部分组")
     tab.refresh()
     _wait_ui(ui, lambda: not tab._scan_busy and source.key in tab.tree.get_children())
+    assert tuple(tab.tree.cget("columns")) == ("group", "session", "reason")
+    assert tuple(tab.tree.cget("displaycolumns")) == ("#all",)
     tab.tree.selection_set(source.key)
     tab.tree.focus(source.key)
     tab._select()
@@ -471,6 +472,7 @@ def test_stage_buttons_and_clearing_preserve_other_stages(desktop_ui, monkeypatc
     tab.filter_var.set("补库")
     tab._render_list()
     assert visible_buttons() == ["启用", "撤销"]
+    assert set(tab.stage_buttons) == {"confirm", "promote", "revoke"}
     assert tab.tree.get_children() == (source.key,)
     assert tab.tree.set(source.key, "enabled") == "1"
     assert tab.tree.set(source.key, "runtime") == "0"
@@ -560,9 +562,9 @@ def test_library_summary_shows_one_result_per_card_and_tracks_selection(desktop_
     tab.filter_var.set("补库")
     tab._render_list()
     assert set(tab.tree.get_children()) == {samples[index].key for index in (1, 3, 4)}
-    assert tuple(tab.tree.cget("displaycolumns")) == ("card", "enabled", "runtime", "pending", "validation_reason")
+    assert tuple(tab.tree.cget("columns")) == ("card", "enabled", "runtime", "pending", "validation_reason")
     assert str(tab.group_combo.cget("state")) == "disabled" and tab.group_var.get() == "全部分组"
-    assert tab.tree.set(samples[1].key, "status") == "已启用"
+    assert tab.tree.set(samples[1].key, "validation_reason") == "已启用；支持多外观"
     assert "score" not in tab.tree.cget("columns")
     tab.tree.selection_set(samples[1].key)
     tab.tree.focus(samples[1].key)
@@ -576,7 +578,7 @@ def test_library_summary_shows_one_result_per_card_and_tracks_selection(desktop_
     tab._update_groups(groups)
     tab._render_list()
     assert tab.tree.selection() == (samples[6].key,)  # Keep the selected card when its representative changes.
-    assert tab.tree.set(samples[6].key, "status") == "已启用"
+    assert tab.tree.set(samples[6].key, "validation_reason") == "已启用；支持多外观"
     assert len(tab.samples) == 7 and all(sample.file("frame").exists() for sample in samples)
     tab.filter_var.set("全部")
     tab._render_list()
@@ -605,6 +607,13 @@ def test_library_summary_fits_small_window_and_wraps_full_description(desktop_ui
         for width in (760, 850, 1100):
             window.geometry(f"{width}x700")
             ui.update()
+            heading_font = Font(
+                root=ui, font=ui.style.lookup("CardSamples.Treeview.Heading", "font") or "TkHeadingFont"
+            )
+            for column in tab.tree.cget("columns"):
+                title = tab.tree.heading(column, "text")
+                assert heading_font.measure(title) + 20 <= tab.tree.column(column, "width")
+            assert heading_font.measure("缩略图") + 24 <= tab.thumbnail_tree.column("#0", "width")
             bbox = tab.tree.bbox(sample.key, "validation_reason")
             assert bbox and bbox[0] + bbox[2] <= tab.tree.winfo_width()
             font = Font(root=ui, font=ui.style.lookup("Treeview", "font"))
@@ -615,6 +624,18 @@ def test_library_summary_fits_small_window_and_wraps_full_description(desktop_ui
             assert card_bbox
             column_sizes.append((bbox[2], card_bbox[2]))
         assert len(set(column_sizes)) == 1  # Keep columns compact when the window grows.
+        widths = {column: tab.tree.column(column, "width") for column in tab.tree.cget("columns")}
+        separators = [x for x in range(tab.tree.winfo_width()) if tab.tree.identify_region(x, 10) == "separator"]
+        assert separators
+        for index, x in enumerate(separators):
+            timestamp = (index + 1) * 1000
+            tab.tree.event_generate("<Motion>", x=x, y=10)
+            assert tab.tree.cget("cursor") == ""
+            tab.tree.event_generate("<Button-1>", x=x, y=10, time=timestamp)
+            tab.tree.event_generate("<B1-Motion>", x=x + 80, y=10, time=timestamp + 1)
+            tab.tree.event_generate("<ButtonRelease-1>", x=x + 80, y=10, time=timestamp + 2)
+        ui.update()
+        assert {column: tab.tree.column(column, "width") for column in widths} == widths
         tab.description_var.set("很长的完整说明" * 50)
         window.geometry("760x700")
         ui.update()
@@ -623,6 +644,247 @@ def test_library_summary_fits_small_window_and_wraps_full_description(desktop_ui
         tab._clear_selection()
         assert tab.description_var.get() == "选择样本可查看完整说明。"
     finally:
+        window.destroy()
+
+
+def test_review_details_expand_scroll_and_restore_without_resizing_window(desktop_ui, tmp_path):
+    import tkinter as tk
+
+    from crX.interface.card_review import CardReviewTab
+
+    ui, _root = desktop_ui
+    sample = add_group_sample(tmp_path, "details-layout", "sample-000")
+    window = tk.Toplevel(ui)
+    window.geometry("760x540")
+    tab = CardReviewTab(window, root=tmp_path)
+    tab.pack(fill="both", expand=True)
+    try:
+        _wait_ui(ui, lambda: not tab._scan_busy and tab.selected is not None and bool(tab._images))
+        ui.update()
+        window_size = (window.winfo_width(), window.winfo_height())
+        selection = tab.tree.selection()
+        rows = tab.tree.get_children()
+        tab.note_var.set("保留正在编辑的备注")
+        # The wider native sash can be dragged while both panes remain visible.
+        assert int(tab.review_panes.cget("sashwidth")) >= 8
+        assert tab.review_panes.cget("sashrelief") == "flat"
+        assert not tab.review_panes.tk.getboolean(tab.review_panes.cget("showhandle"))
+        tab.review_panes.sash_place(0, 0, tab.review_panes.sash_coord(0)[1] + 12)
+        ui.update()
+        table_height = tab.sample_table.winfo_height()
+        details_height = tab.details.winfo_height()
+        assert details_height > 0
+        tab.expand_details_button.invoke()
+        ui.update()
+        assert len(tab.review_panes.panes()) == 1
+        assert tab.details.winfo_height() > details_height + 60
+        assert (window.winfo_width(), window.winfo_height()) == window_size
+        assert tab.expand_details_button.cget("text") == "恢复列表"
+        tab.detail_var.set("识别详情与候选信息\n" * 40)
+        ui.update()
+        tab.info_panel.yview_moveto(1)
+        ui.update()
+        scroll_position = tab.info_panel.vscroll.get()
+        assert scroll_position[0] > 0 and scroll_position[-1] == 1
+        tab.expand_details_button.invoke()
+        ui.update()
+        assert len(tab.review_panes.panes()) == 2
+        assert abs(tab.sample_table.winfo_height() - table_height) <= 4
+        assert tab.tree.get_children() == rows and tab.tree.selection() == selection == (sample.key,)
+        assert tab.note_var.get() == "保留正在编辑的备注"
+        assert tab.expand_details_button.cget("text") == "展开详情"
+        tab.expand_details_button.invoke()
+        window.geometry("760x680")
+        ui.update()
+        assert tab.details.winfo_height() > details_height + 180
+        tab.expand_details_button.invoke()
+        ui.update()
+        table_height = tab.sample_table.winfo_height()
+        window.geometry("760x820")
+        ui.update()
+        assert tab.sample_table.winfo_height() > table_height + 100
+        for stage in ("待确认", "补库"):
+            tab.filter_var.set(stage)
+            tab._render_list()
+            ui.update()
+            tab.review_panes.sash_place(0, 0, tab.review_panes.winfo_height())
+            ui.update()
+            assert tab.review_panes.sash_coord(0)[1] >= tab.review_panes.winfo_height() - 10
+            assert tab.sample_table.winfo_height() >= tab.review_panes.winfo_height() - 10
+        confirm = tab.stage_buttons["confirm"]
+        assert confirm.winfo_rooty() + confirm.winfo_height() <= tab.winfo_rooty() + tab.winfo_height()
+    finally:
+        window.destroy()
+
+
+def test_row_thumbnails_align_scroll_and_support_bulk_selection(desktop_ui, tmp_path):
+    from crX.interface.card_review import CardReviewTab
+
+    ui, _root = desktop_ui
+    samples = [add_group_sample(tmp_path, "thumbnail-rows", f"sample-{index:03d}") for index in range(10)]
+    samples[-1].file("card").unlink()
+    prior_geometry, prior_tab = ui.geometry(), ui.notebook.select()
+    ui.attributes("-alpha", 0)
+    ui.geometry("850x760")
+    tab = CardReviewTab(ui.notebook, root=tmp_path)
+    ui.notebook.add(tab, text="缩略图布局检查")
+    ui.notebook.select(tab)
+    ui.deiconify()
+    try:
+        _wait_ui(ui, lambda: not tab._scan_busy and bool(tab._thumbnail_images))
+        rows = tab.tree.get_children()
+        assert tab.thumbnail_tree.get_children() == rows
+        first = rows[0]
+        image = tab._thumbnail_images[first]
+        assert image is not None and image.width() <= 16 and image.height() <= 20
+        assert tab.thumbnail_tree.item(first, "image")
+        text_bbox = tab.tree.bbox(first)
+        thumbnail_bbox = tab.thumbnail_tree.bbox(first)
+        assert text_bbox and thumbnail_bbox
+        assert text_bbox[1] == thumbnail_bbox[1] and text_bbox[3] == thumbnail_bbox[3]
+        assert 20 <= text_bbox[3] <= 28
+        viewport_bottom = tab.tree.winfo_height()
+        visible_rows = [key for key in rows if (box := tab.tree.bbox(key)) and box[1] + box[3] <= viewport_bottom]
+        assert len(visible_rows) >= 4, (len(visible_rows), tab.tree.winfo_height(), tab.sample_table.winfo_height())
+
+        def assert_thumbnail_next_to_text(key):
+            bbox = tab.tree.bbox(key, "reason")
+            assert bbox
+            gap = tab.thumbnail_tree.winfo_rootx() - (tab.tree.winfo_rootx() + bbox[0] + bbox[2])
+            assert 0 <= gap <= 8
+
+        assert_thumbnail_next_to_text(first)
+        content_width = tab.text_frame.winfo_width()
+        thumbnail_width = tab.thumbnail_tree.winfo_width()
+        from tkinter.font import Font
+
+        heading_font = Font(root=ui, font=ui.style.lookup("CardSamples.Treeview.Heading", "font") or "TkHeadingFont")
+        assert thumbnail_width == tab.thumbnail_tree.column("#0", "width")
+        assert thumbnail_width >= heading_font.measure("缩略图") + 24
+        separator_x = next(
+            x for x in range(thumbnail_width) if tab.thumbnail_tree.identify_region(x, 10) == "separator"
+        )
+        tab.thumbnail_tree.event_generate("<Motion>", x=separator_x, y=10)
+        tab.thumbnail_tree.event_generate("<Button-1>", x=separator_x, y=10)
+        tab.thumbnail_tree.event_generate("<B1-Motion>", x=separator_x + 80, y=10)
+        tab.thumbnail_tree.event_generate("<ButtonRelease-1>", x=separator_x + 80, y=10)
+        ui.update()
+        assert tab.thumbnail_tree.column("#0", "width") == thumbnail_width
+        outer_width = tab.rows_frame.winfo_width()
+        assert tab.rows_frame.winfo_width() == tab.sample_table.winfo_width()
+        ui.geometry("1100x760")
+        ui.update()
+        assert_thumbnail_next_to_text(first)
+        assert tab.text_frame.winfo_width() == content_width
+        assert tab.thumbnail_tree.winfo_width() == thumbnail_width
+        assert tab.rows_frame.winfo_width() > outer_width
+        assert tab.rows_frame.winfo_width() == tab.sample_table.winfo_width()
+        assert tab.row_scroll.winfo_rootx() + tab.row_scroll.winfo_width() == (
+            tab.rows_frame.winfo_rootx() + tab.rows_frame.winfo_width() - 1
+        )
+
+        click_time = [1000]
+
+        def click_thumbnail(key, state=0):
+            tab.tree.see(key)
+            ui.update()
+            bbox = tab.thumbnail_tree.bbox(key)
+            assert bbox
+            x, y = bbox[0] + bbox[2] // 2, bbox[1] + bbox[3] // 2
+            assert tab.thumbnail_tree.identify_row(y) == key
+            click_time[0] += 1000  # Keep separate synthetic clicks out of Tk's double-click interval.
+            tab.thumbnail_tree.event_generate("<Button-1>", x=x, y=y, state=state, time=click_time[0])
+            tab.thumbnail_tree.event_generate("<ButtonRelease-1>", x=x, y=y, state=state, time=click_time[0] + 1)
+            ui.update()
+
+        click_thumbnail(rows[0])
+        click_thumbnail(rows[1], state=0x0004)  # Ctrl adds another image to the selection.
+        assert set(tab.tree.selection()) == set(tab.thumbnail_tree.selection()) == set(rows[:2])
+        click_thumbnail(rows[3], state=0x0001)  # Shift selects a contiguous range.
+        assert set(rows[1:4]).issubset(tab.tree.selection())
+        assert tab.tree.selection() == tab.thumbnail_tree.selection()
+        tab.select_all_button.invoke()
+        ui.update()
+        assert tab.tree.selection() == tab.thumbnail_tree.selection() == rows
+        tab._scroll_rows("moveto", 1)
+        ui.update()
+        _wait_ui(ui, lambda: rows[-1] in tab._thumbnail_images)
+        assert tab._thumbnail_images[rows[-1]] is None
+        assert tab.thumbnail_tree.item(rows[-1], "text") == "无图"
+        assert tab.thumbnail_tree.yview() == tab.tree.yview()
+        tab.thumbnail_tree.event_generate("<MouseWheel>", delta=120)
+        ui.update()
+        assert tab.thumbnail_tree.yview() == tab.tree.yview()
+        tab.clear_selection_button.invoke()
+        ui.update()
+        assert not tab.tree.selection() and not tab.thumbnail_tree.selection()
+        tab.filter_var.set("全部")
+        tab._render_list()
+        ui.update()
+        assert tab.thumbnail_tree.get_children() == tab.tree.get_children() == rows
+        assert (
+            tab.thumbnail_tree.winfo_rootx() + tab.thumbnail_tree.winfo_width()
+            <= tab.sample_table.winfo_rootx() + tab.sample_table.winfo_width()
+        )
+        tab.filter_var.set("待确认")
+        tab._render_list()
+        ui.geometry("760x700")
+        tab.tree.yview_moveto(0)
+        ui.update()
+        compact_rows = [
+            key for key in rows if (box := tab.tree.bbox(key)) and box[1] + box[3] <= tab.tree.winfo_height()
+        ]
+        assert len(compact_rows) >= 2, (len(compact_rows), tab.tree.winfo_height())
+        assert_thumbnail_next_to_text(rows[0])
+    finally:
+        ui.withdraw()
+        ui.notebook.forget(tab)
+        tab.destroy()
+        ui.notebook.select(prior_tab)
+        ui.geometry(prior_geometry)
+        ui.attributes("-alpha", 1)
+
+
+def test_thumbnail_results_follow_current_filter_without_resetting_edits(desktop_ui, tmp_path, monkeypatch):
+    import threading
+    import tkinter as tk
+
+    import cv2
+
+    from crX.interface.card_review import CardReviewTab
+    from crX.utils.card_review import load_card_thumbnail
+
+    ui, _root = desktop_ui
+    first = add_group_sample(tmp_path, "first-thumbnail", "sample-000")
+    art = cv2.imread(str(first.file("card")))
+    second = add_group_sample(tmp_path, "second-thumbnail", "sample-000", pixels=art[:, ::-1])
+    entered, release = threading.Event(), threading.Event()
+
+    def delayed_thumbnail(sample):
+        entered.set()
+        assert release.wait(4)
+        return load_card_thumbnail(sample)
+
+    monkeypatch.setattr("crX.interface.card_review.load_card_thumbnail", delayed_thumbnail)
+    window = tk.Toplevel(ui)
+    window.geometry("850x740")
+    tab = CardReviewTab(window, root=tmp_path)
+    tab.pack(fill="both", expand=True)
+    try:
+        _wait_ui(ui, lambda: not tab._scan_busy and entered.is_set())
+        group = tab.sample_groups[second.key]
+        tab.group_var.set(next(label for label, key in tab.group_choices.items() if key == group))
+        tab._render_list()
+        tab.note_var.set("后台读图时仍可编辑")
+        assert tab.tree.get_children() == (second.key,)
+        release.set()
+        _wait_ui(ui, lambda: second.key in tab._thumbnail_images and not tab._thumbnail_busy)
+        assert tab.thumbnail_tree.get_children() == (second.key,)
+        assert first.key not in tab._thumbnail_images
+        assert tab.tree.selection() == tab.thumbnail_tree.selection() == (second.key,)
+        assert tab.note_var.get() == "后台读图时仍可编辑"
+    finally:
+        release.set()
         window.destroy()
 
 
