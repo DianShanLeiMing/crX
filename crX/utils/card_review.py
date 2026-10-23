@@ -103,14 +103,18 @@ def validation_reason(sample: ReviewSample) -> str:
         names = "、".join(CARD_NAMES_ZH.get(card, card) for card in sample.review.get("library_conflicts", []))
         return f"与已确认卡名 {names} 的图像近似，请在全部列表更正卡名"
     if issue == "limit":
-        return "达到单卡8份上限，请整理后启用"
+        return "达到单卡8份上限，请清理后在全部列表重新确认卡名"
     if issue == "source":
         return "来源已撤销或更正，请检查人工标注"
     if sample.status == "pending":
         return "确认准确卡名及版本后自动启用"
     if sample.status == "included":
-        return "人工确认后已启用；同卡不同外观共同参与识别"
-    return "已停用，可点击启用" if sample.review.get("library_id") else "可点击启用加入补库"
+        return "本地试用中"
+    return (
+        "已停用，请在全部列表重新确认卡名"
+        if sample.review.get("library_id")
+        else "未加入补库，请在全部列表重新确认卡名"
+    )
 
 
 def sample_progress(sample: ReviewSample) -> tuple[str, str, str]:
@@ -133,11 +137,6 @@ def library_card_summaries(samples: list[ReviewSample]) -> list[ReviewSample]:
         entries = {sample.review["library_id"]: sample for sample in candidates if sample.review.get("library_id")}
         enabled = sum(sample.status == "included" for sample in entries.values())
         matches = sum(sample.review.get("library_runtime", {}).get("matches", 0) for sample in entries.values())
-        pending = sum(
-            (sample.status == "conflict" and sample.card_id == card)
-            or (sample.status == "pending" and sample.record.get("card_id") == card)
-            for sample in samples
-        )
         summaries.append(
             replace(
                 representative,
@@ -145,7 +144,6 @@ def library_card_summaries(samples: list[ReviewSample]) -> list[ReviewSample]:
                     **representative.review,
                     "summary_enabled": enabled,
                     "summary_matches": matches,
-                    "summary_pending": pending,
                 },
             )
         )

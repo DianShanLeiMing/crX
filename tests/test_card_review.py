@@ -79,12 +79,12 @@ def test_library_summary_aggregates_unique_ids_and_keeps_versions_distinct(tmp_p
     assert set(by_card) == {"knight", "evo_knight", "cannon"}
     assert by_card["knight"].review["summary_enabled"] == 2
     assert by_card["knight"].review["summary_matches"] == 5
-    assert by_card["cannon"].review["summary_pending"] == 1
-    assert by_card["knight"].review["summary_pending"] == 0
+    assert by_card["cannon"].review["summary_enabled"] == 0
+    assert by_card["cannon"].status == "conflict"
     assert "summary_enabled" not in source.review
 
 
-def test_summary_only_attributes_pending_samples_with_a_recognized_card(tmp_path):
+def test_summary_excludes_unconfirmed_samples_without_changing_their_status(tmp_path):
     source = make_sample(tmp_path)
     enabled = replace(
         source,
@@ -99,8 +99,9 @@ def test_summary_only_attributes_pending_samples_with_a_recognized_card(tmp_path
     unknown = replace(
         source, name="sample-002", record={**source.record, "card_id": "UNKNOWN", "candidates": [{"card_id": "knight"}]}
     )
-    summary = library_card_summaries([enabled, uncertain, unknown])[0]
-    assert summary.review["summary_pending"] == 1
+    summaries = library_card_summaries([enabled, uncertain, unknown])
+    assert len(summaries) == 1 and summaries[0].card_id == "knight"
+    assert summaries[0].review["summary_enabled"] == 1
     assert uncertain.status == unknown.status == "pending"
 
 

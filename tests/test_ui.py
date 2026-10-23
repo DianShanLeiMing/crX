@@ -110,7 +110,7 @@ def _wait_ui(ui, condition):
     raise AssertionError("GUI background operation did not complete")
 
 
-def test_review_tab_confirm_trial_and_revoke(desktop_ui):
+def test_review_tab_confirmation_automatically_adds_reference_without_library_actions(desktop_ui):
     ui, root = desktop_ui
     source = make_sample(root)
     errors = []
@@ -142,12 +142,9 @@ def test_review_tab_confirm_trial_and_revoke(desktop_ui):
         assert tab.note_var.get() == "人工核对"
         assert tab.selected.status == "included"
         assert not (source.directory / "sample-000-candidate.json").exists()
-        tab.stage_buttons["revoke"].invoke()
-        _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy)
-        tab.filter_var.set("补库")
-        tab._render_list()
-        assert tab.selected.status == "confirmed" and tab.selected.card_id == "evo_cannon"
-        assert tab.note_var.get() == "人工核对"
+        assert set(tab.stage_buttons) == {"confirm"}
+        assert not tab.stage_buttons["confirm"].winfo_manager()
+        assert tab.tree.heading("enabled", "text") == "样本参考数"
         assert not errors
     finally:
         ui.set_button_state("idle")
@@ -360,7 +357,7 @@ def test_card_review_group_multi_selection_refresh_and_bulk_actions(desktop_ui, 
     tab._render_list()
     trial_keys = [key for key in tab.tree.get_children() if tab.samples[key].status == "included"]
     assert len(trial_keys) == 1
-    assert all(tab.tree.set(key, "validation_reason") == "已启用；支持多外观" for key in trial_keys)
+    assert all(tab.tree.set(key, "validation_reason") in {"本地试用中"} for key in trial_keys)
     assert {first.key, second.key}.issubset(tab.samples)  # Hidden candidates remain available.
     labels_before = {key: tab.tree.set(key, "validation_reason") for key in trial_keys}
     tab.filter_var.set("全部")
@@ -371,10 +368,8 @@ def test_card_review_group_multi_selection_refresh_and_bulk_actions(desktop_ui, 
     assert {key: tab.tree.set(key, "validation_reason") for key in trial_keys} == labels_before
     assert str(tab.select_group_button.cget("state")) == "disabled"
     assert len(tab.tree.selection()) == 1
-    tab.stage_buttons["revoke"].invoke()
-    _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy)
-    reviewed = {sample.key: sample for sample in scan_samples(root)[0]}
-    assert all(reviewed[key].status == "confirmed" for key in (first.key, second.key))
+    assert set(tab.stage_buttons) == {"confirm"}
+    assert not tab.stage_buttons["confirm"].winfo_manager()
 
 
 def test_card_samples_clear_confirmation_running_guard_and_refresh(desktop_ui, monkeypatch):
@@ -385,7 +380,7 @@ def test_card_samples_clear_confirmation_running_guard_and_refresh(desktop_ui, m
     tab.group_var.set("全部分组")
     tab.refresh()
     _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy and sample.key in tab.tree.get_children())
-    assert any(item.status == "confirmed" for item in tab.samples.values())
+    assert any(item.status == "included" for item in tab.samples.values())
     group = tab.sample_groups[sample.key]
     tab.group_var.set(next(label for label, value in tab.group_choices.items() if value == group))
     tab._render_list()
@@ -471,14 +466,14 @@ def test_stage_buttons_and_clearing_preserve_other_stages(desktop_ui, monkeypatc
     assert reviewed[other.key].status == "pending"
     tab.filter_var.set("补库")
     tab._render_list()
-    assert visible_buttons() == ["启用", "撤销"]
-    assert set(tab.stage_buttons) == {"confirm", "promote", "revoke"}
+    assert visible_buttons() == []
+    assert set(tab.stage_buttons) == {"confirm"}
     assert tab.tree.get_children() == (source.key,)
     assert tab.tree.set(source.key, "enabled") == "1"
     assert tab.tree.set(source.key, "runtime") == "0"
-    assert tab.tree.set(source.key, "pending") == "0"
-    assert tab.tree.set(source.key, "validation_reason") == "已启用；支持多外观"
-    assert "人工确认后已启用" in tab.description_var.get()
+    assert "pending" not in tab.tree.cget("columns")
+    assert tab.tree.set(source.key, "validation_reason") == "本地试用中"
+    assert "本地试用中" in tab.description_var.get()
     prompts = []
     monkeypatch.setattr(
         "crX.interface.card_review.messagebox.askyesno",
@@ -562,9 +557,9 @@ def test_library_summary_shows_one_result_per_card_and_tracks_selection(desktop_
     tab.filter_var.set("补库")
     tab._render_list()
     assert set(tab.tree.get_children()) == {samples[index].key for index in (1, 3, 4)}
-    assert tuple(tab.tree.cget("columns")) == ("card", "enabled", "runtime", "pending", "validation_reason")
+    assert tuple(tab.tree.cget("columns")) == ("card", "enabled", "runtime", "validation_reason")
     assert str(tab.group_combo.cget("state")) == "disabled" and tab.group_var.get() == "全部分组"
-    assert tab.tree.set(samples[1].key, "validation_reason") == "已启用；支持多外观"
+    assert tab.tree.set(samples[1].key, "validation_reason") == "本地试用中"
     assert "score" not in tab.tree.cget("columns")
     tab.tree.selection_set(samples[1].key)
     tab.tree.focus(samples[1].key)
@@ -578,7 +573,7 @@ def test_library_summary_shows_one_result_per_card_and_tracks_selection(desktop_
     tab._update_groups(groups)
     tab._render_list()
     assert tab.tree.selection() == (samples[6].key,)  # Keep the selected card when its representative changes.
-    assert tab.tree.set(samples[6].key, "validation_reason") == "已启用；支持多外观"
+    assert tab.tree.set(samples[6].key, "validation_reason") == "本地试用中"
     assert len(tab.samples) == 7 and all(sample.file("frame").exists() for sample in samples)
     tab.filter_var.set("全部")
     tab._render_list()
@@ -618,7 +613,7 @@ def test_library_summary_fits_small_window_and_wraps_full_description(desktop_ui
             assert bbox and bbox[0] + bbox[2] <= tab.tree.winfo_width()
             font = Font(root=ui, font=ui.style.lookup("Treeview", "font"))
             assert font.measure(tab.tree.set(sample.key, "validation_reason")) + 12 <= bbox[2]
-            assert "人工确认后已启用" in tab.description_var.get()
+            assert "本地试用中" in tab.description_var.get()
             assert int(tab.description_label.cget("wraplength")) <= tab.description_label.winfo_width()
             card_bbox = tab.tree.bbox(sample.key, "card")
             assert card_bbox
@@ -888,7 +883,7 @@ def test_thumbnail_results_follow_current_filter_without_resetting_edits(desktop
         window.destroy()
 
 
-def test_legacy_confirmed_records_retry_from_library_without_confirmed_filter(desktop_ui, tmp_path, monkeypatch):
+def test_legacy_confirmed_records_retry_by_reconfirming_from_all(desktop_ui, tmp_path, monkeypatch):
     from crX.interface.card_review import CardReviewTab
 
     monkeypatch.setattr("crX.utils.card_library.base_match", lambda _: ("UNKNOWN", 10000))
@@ -902,21 +897,51 @@ def test_legacy_confirmed_records_retry_from_library_without_confirmed_filter(de
         tab.filter_var.set("补库")
         tab._render_list()
         assert tab.tree.get_children() == (source.key,)
-        assert "启用" in tab.tree.set(source.key, "validation_reason")
-        assert str(tab.stage_buttons["promote"].cget("state")) == "normal"
-        tab.stage_buttons["promote"].invoke()
+        assert "全部列表重新确认卡名" in tab.tree.set(source.key, "validation_reason")
+        assert set(tab.stage_buttons) == {"confirm"}
+        assert not tab.stage_buttons["confirm"].winfo_manager()
+        tab.filter_var.set("全部")
+        tab._render_list()
+        tab.stage_buttons["confirm"].invoke()
         _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy)
         assert tab.samples[source.key].status == "included"
         assert tab.samples[source.key].review["note"] == "历史确认记录"
-        tab.stage_buttons["revoke"].invoke()
-        _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy)
-        assert tab.samples[source.key].status == "confirmed"
+        tab.filter_var.set("补库")
+        tab._render_list()
+        assert tab.tree.set(source.key, "enabled") == "1"
+        assert tab.tree.heading("enabled", "text") == "样本参考数"
         tab.refresh()
         _wait_ui(ui, lambda: not tab._scan_busy)
-        assert tab.samples[source.key].status == "confirmed"  # Refresh must not undo an explicit revocation.
-        tab.stage_buttons["promote"].invoke()
-        _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy)
         assert tab.samples[source.key].status == "included"
+    finally:
+        tab.destroy()
+
+
+def test_reconfirmation_keeps_conflicting_labels_blocked_without_library_buttons(desktop_ui, tmp_path):
+    from crX.interface.card_review import CardReviewTab
+
+    ui, _root = desktop_ui
+    source = add_group_sample(tmp_path, "enable-conflict", "sample-000")
+    conflicting = add_group_sample(tmp_path, "enable-conflict", "sample-001")
+    save_review(source, "confirmed", "evo_cannon")
+    save_review(conflicting, "confirmed", "knight")
+    tab = CardReviewTab(ui.notebook, root=tmp_path)
+    try:
+        _wait_ui(ui, lambda: not tab._scan_busy)
+        tab.filter_var.set("全部")
+        tab._render_list()
+        tab.tree.selection_set(source.key)
+        tab.tree.focus(source.key)
+        tab._select()
+        tab.stage_buttons["confirm"].invoke()
+        _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy)
+        assert tab.samples[source.key].status == "conflict"
+        tab.filter_var.set("补库")
+        tab._render_list()
+        assert tab.tree.set(source.key, "enabled") == "0"
+        assert "图像近似" in tab.tree.set(source.key, "validation_reason")
+        assert set(tab.stage_buttons) == {"confirm"}
+        assert not tab.stage_buttons["confirm"].winfo_manager()
     finally:
         tab.destroy()
 

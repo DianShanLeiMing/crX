@@ -34,7 +34,7 @@ from crX.utils.open_folder import open_folder
 MODE_LABELS = {"practice": "练习", "1v1": "1v1", "2v2": "2v2"}
 STAGE_ACTIONS = {
     "待确认": ("confirm",),
-    "补库": ("promote", "revoke"),
+    "补库": (),
     "全部": ("confirm",),
 }
 COLUMN_SPECS = {
@@ -43,18 +43,17 @@ COLUMN_SPECS = {
     "reason": ("采样原因", 115),
     "status": ("处理状态", 100),
     "card": ("确认卡名", 200),
-    "enabled": ("已启用指纹数", 100),
+    "enabled": ("样本参考数", 100),
     "runtime": ("补库命中次数", 100),
-    "pending": ("需复核样本数", 100),
     "validation_reason": ("说明", 210),
 }
 FILTER_COLUMNS = {
     "待确认": ("group", "session", "reason"),
-    "补库": ("card", "enabled", "runtime", "pending", "validation_reason"),
+    "补库": ("card", "enabled", "runtime", "validation_reason"),
     "全部": ("group", "session", "reason", "status", "card", "runtime", "validation_reason"),
 }
 PENDING_COLUMN_WIDTHS = {"group": 110, "session": 320, "reason": 120}
-SUMMARY_COLUMN_WIDTHS = {"card": 150, "enabled": 80, "runtime": 80, "pending": 80, "validation_reason": 210}
+SUMMARY_COLUMN_WIDTHS = {"card": 150, "enabled": 80, "runtime": 80, "validation_reason": 210}
 THUMBNAIL_CACHE_SIZE = 128
 
 
@@ -286,18 +285,9 @@ class CardReviewTab(ttk.Frame):
         ttk.Entry(notes, textvariable=self.note_var).pack(side="left", fill="x", expand=True, padx=8)
         actions = ttk.Frame(self)
         actions.grid(row=6, column=0, sticky="ew", pady=2)
-        self.stage_buttons = {}
-        for key, title, callback in (
-            ("confirm", "确认", lambda: self._save("confirmed")),
-            ("promote", "启用", lambda: self._library_action("promote")),
-            ("revoke", "撤销", lambda: self._library_action("revoke")),
-        ):
-            self.stage_buttons[key] = ttk.Button(
-                actions,
-                text=title,
-                command=callback,
-                state="disabled",
-            )
+        self.stage_buttons = {
+            "confirm": ttk.Button(actions, text="确认", command=lambda: self._save("confirmed"), state="disabled"),
+        }
         self.stage_help = tk.StringVar()
         ttk.Label(self, textvariable=self.stage_help, wraplength=700).grid(row=7, column=0, sticky="w", pady=2)
         self.message_var = tk.StringVar(value="确认卡名后自动补库；同卡不同外观共同识别。运行命中仅是观察记录。")
@@ -605,7 +595,7 @@ class CardReviewTab(ttk.Frame):
                     while len(self._thumbnail_images) > THUMBNAIL_CACHE_SIZE:
                         self._thumbnail_images.popitem(last=False)
                 self._queue_thumbnails()
-            elif kind in ("save", "library", "clear"):
+            elif kind in ("save", "clear"):
                 self._action_busy = False
                 if kind == "clear":
                     self.clearing = False
@@ -660,9 +650,7 @@ class CardReviewTab(ttk.Frame):
                     width=width,
                     minwidth=width,
                     stretch=False,
-                    anchor="center"
-                    if column in ("enabled", "runtime", "pending") or pending and column == "group"
-                    else "w",
+                    anchor="center" if column in ("enabled", "runtime") or pending and column == "group" else "w",
                 )
         return columns
 
@@ -714,13 +702,12 @@ class CardReviewTab(ttk.Frame):
                 verification, runtime, _ = sample_progress(sample)
                 description = validation_reason(sample)
                 if sample.status == "included" and not sample.review.get("library_issue"):
-                    description = "已启用；支持多外观"
+                    description = "本地试用中"
                 row.update(
                     status=verification,
                     card=CARD_NAMES_ZH.get(sample.card_id, "—"),
                     enabled=sample.review.get("summary_enabled", "—"),
                     runtime=str(sample.review.get("summary_matches", 0)) if summary else runtime,
-                    pending=sample.review.get("summary_pending", "—"),
                     validation_reason=description,
                 )
             values = tuple(row[column] for column in columns)
@@ -964,8 +951,6 @@ class CardReviewTab(ttk.Frame):
         selected_statuses = {sample.status for sample in action_samples}
         eligible = {
             "confirm": {"pending", "confirmed", "trial", "included", "covered", "conflict"},
-            "promote": {"confirmed", "trial", "included", "covered", "conflict"},
-            "revoke": {"trial", "included", "covered", "conflict"},
         }
         for key, button in self.stage_buttons.items():
             button.pack_forget()
@@ -977,7 +962,7 @@ class CardReviewTab(ttk.Frame):
         self.stage_help.set(
             {
                 "待确认": "确认卡名后自动补库并启用；清空只处理选中样本，全选只作用于当前列表。",
-                "补库": "每卡汇总多份外观指纹；在“全部”中可更正具体样本卡名。撤销停用该卡指纹；清空选中会删除所选卡牌的全部候选，确认框会列明范围。",
+                "补库": "样本参考数为去重后参与识别的外观数量；在“全部”中可更正卡名。无需保留时使用上方“清空选中”，确认框会列明范围。",
             }.get(stage, "可选择具体样本确认或更正卡名，也可多选后清空；未知样本不自动继承预测卡名。")
         )
         self.select_group_button.configure(
@@ -990,26 +975,6 @@ class CardReviewTab(ttk.Frame):
             cards = {sample.card_id for sample in selected}
             return [sample for sample in self.samples.values() if sample.card_id in cards]
         return selected
-
-    def _library_action(self, action):
-        allowed = {
-            "promote": {"confirmed", "trial", "included", "covered", "conflict"},
-            "revoke": {"trial", "included", "covered", "conflict"},
-        }[action]
-        samples = [sample for sample in self._action_samples() if sample.status in allowed]
-        if not samples or self._action_busy:
-            return
-        self._revision += 1
-        self._action_busy = True
-        self._set_action_state()
-        self.message_var.set("正在处理补库……")
-
-        def apply():
-            if action == "revoke":
-                return update_library(self.root, samples, action)
-            return update_library(self.root, samples, "enable")
-
-        self._background("library", apply)
 
     def _save(self, status):
         samples = [
@@ -1038,8 +1003,8 @@ class CardReviewTab(ttk.Frame):
                 candidate_result = update_library(self.root, samples, "enable")
             except (OSError, ValueError, TypeError) as error:
                 raise ValueError(
-                    f"已保存 {count} 张样本的卡名；补库失败，可在“补库”中点击“启用”重试：{error}"
+                    f"已保存 {count} 张样本的卡名；补库失败，请在“全部”中选择对应样本重新确认卡名后重试：{error}"
                 ) from error
-            return f"已确认 {count} 张样本；{candidate_result}。启用数量及冲突提示见“补库”。"
+            return f"已确认 {count} 张样本；{candidate_result}。样本参考数及冲突提示见“补库”。"
 
         self._background("save", confirm_and_validate)
