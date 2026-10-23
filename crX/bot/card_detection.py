@@ -25,6 +25,7 @@ from crX.bot.coords import (
 )
 from crX.bot.state_detect import image_has_elixir
 from crX.utils.card_library import runtime_entries
+from crX.utils.formal_library import runtime_formal_entries
 
 toplefts = HAND_CARD_TOP_LEFTS
 
@@ -100,6 +101,14 @@ def recognize_card_fingerprint(collected_data):
     distances = numpy.abs(_REFERENCE_MATRIX - collected).sum(axis=(1, 2))
     names = _REFERENCE_NAMES
     sources = _REFERENCE_SOURCES
+    formal = runtime_formal_entries()
+    if formal:
+        formal_distances = numpy.abs(numpy.array([entry["fingerprint"] for entry in formal]) - collected).sum(
+            axis=(1, 2)
+        )
+        distances = numpy.concatenate((distances, formal_distances))
+        names += tuple(entry["card_id"] for entry in formal)
+        sources += tuple(f"builtin:{entry['id']}" for entry in formal)
     local = runtime_entries()
     if local:
         local_distances = numpy.abs(numpy.array([entry["fingerprint"] for entry in local]) - collected).sum(axis=(1, 2))

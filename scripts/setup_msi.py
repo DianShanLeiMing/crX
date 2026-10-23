@@ -41,6 +41,7 @@ build_exe_options = {
         ROOT_DIR / "assets" / "crX.ico",
         ROOT_DIR / "crX" / "detection" / "reference_images",
         ROOT_DIR / "crX" / "__version__",
+        (ROOT_DIR / "crX" / "bot" / "card_reference_library.json", "card_reference_library.json"),
     ],
     "include_msvcr": True,
 }

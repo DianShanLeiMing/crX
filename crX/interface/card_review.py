@@ -29,12 +29,13 @@ from crX.utils.card_review import (
     scan_grouped_samples,
     validation_reason,
 )
+from crX.utils.formal_library import confirm_promotion, prepare_promotion
 from crX.utils.open_folder import open_folder
 
 MODE_LABELS = {"practice": "练习", "1v1": "1v1", "2v2": "2v2"}
 STAGE_ACTIONS = {
     "待确认": ("confirm",),
-    "补库": (),
+    "补库": ("formal",),
     "全部": ("confirm",),
 }
 COLUMN_SPECS = {
@@ -45,15 +46,16 @@ COLUMN_SPECS = {
     "card": ("确认卡名", 200),
     "enabled": ("样本参考数", 100),
     "runtime": ("补库命中次数", 100),
+    "formal": ("正式补库", 100),
     "validation_reason": ("说明", 210),
 }
 FILTER_COLUMNS = {
     "待确认": ("group", "session", "reason"),
-    "补库": ("card", "enabled", "runtime", "validation_reason"),
+    "补库": ("card", "enabled", "runtime", "formal", "validation_reason"),
     "全部": ("group", "session", "reason", "status", "card", "runtime", "validation_reason"),
 }
 PENDING_COLUMN_WIDTHS = {"group": 110, "session": 320, "reason": 120}
-SUMMARY_COLUMN_WIDTHS = {"card": 150, "enabled": 80, "runtime": 80, "validation_reason": 210}
+SUMMARY_COLUMN_WIDTHS = {"card": 150, "enabled": 80, "runtime": 80, "formal": 92, "validation_reason": 150}
 THUMBNAIL_CACHE_SIZE = 128
 
 
@@ -89,6 +91,9 @@ class CardReviewTab(ttk.Frame):
         self.count_callback = count_callback
         self.clear_busy_callback = clear_busy_callback
         self._running = self.clearing = False
+        self.formalizing = False
+        self._formal_dialog = None
+        self._formal_images = []
         self.samples = {}
         self.groups = {}
         self.sample_groups = {}
@@ -287,6 +292,7 @@ class CardReviewTab(ttk.Frame):
         actions.grid(row=6, column=0, sticky="ew", pady=2)
         self.stage_buttons = {
             "confirm": ttk.Button(actions, text="确认", command=lambda: self._save("confirmed"), state="disabled"),
+            "formal": ttk.Button(actions, text="确认正式补库", command=self._prepare_formal, state="disabled"),
         }
         self.stage_help = tk.StringVar()
         ttk.Label(self, textvariable=self.stage_help, wraplength=700).grid(row=7, column=0, sticky="w", pady=2)
@@ -434,6 +440,7 @@ class CardReviewTab(ttk.Frame):
     def _on_destroy(self, event):
         if event.widget is self:
             self._closed = True
+            self._close_formal_dialog()
             self._search_toplevel.unbind("<Button-1>", self._search_click_binding)
             self._search_toplevel.unbind("<Configure>", self._search_move_binding)
             for identifier in self._after_ids:
@@ -463,6 +470,11 @@ class CardReviewTab(ttk.Frame):
 
     def set_running(self, running):
         self._running = running
+        if "formal" in self.stage_buttons:
+            eligible = any(sample.review.get("formal_status") == "建议纳入" for sample in self._action_samples())
+            self.stage_buttons["formal"].configure(
+                state="normal" if eligible and not running and not self._action_busy else "disabled"
+            )
         self.clear_button.configure(
             state="normal" if self._selected_clear_keys() and not running and not self._action_busy else "disabled"
         )
@@ -508,7 +520,7 @@ class CardReviewTab(ttk.Frame):
         if (
             not messagebox.askyesno(
                 "清空选中项",
-                f"确定清空{scope}？{details}\n会删除相关截图、标注、导出文件及关联补库记录，未选中的其他记录保留。此操作无法撤销。",
+                f"确定清空{scope}？{details}\n会删除相关截图、标注、导出文件及关联补库记录，未选中的其他记录保留。已纳入的正式内置参考保留。此操作无法撤销。",
                 parent=self,
             )
             or self._running
@@ -595,6 +607,19 @@ class CardReviewTab(ttk.Frame):
                     while len(self._thumbnail_images) > THUMBNAIL_CACHE_SIZE:
                         self._thumbnail_images.popitem(last=False)
                 self._queue_thumbnails()
+            elif kind == "formal_prepare":
+                if error:
+                    self._finish_formal()
+                elif not result:
+                    self._finish_formal()
+                    self.message_var.set("所选卡牌没有建议纳入的参考，请查看详情中的原因。")
+                else:
+                    self._show_formal_confirmation(result)
+            elif kind == "formal_confirm":
+                self._finish_formal()
+                if error is None:
+                    self.message_var.set(result)
+                self.refresh()
             elif kind in ("save", "clear"):
                 self._action_busy = False
                 if kind == "clear":
@@ -702,12 +727,13 @@ class CardReviewTab(ttk.Frame):
                 verification, runtime, _ = sample_progress(sample)
                 description = validation_reason(sample)
                 if sample.status == "included" and not sample.review.get("library_issue"):
-                    description = "本地试用中"
+                    description = "内置参考使用中" if sample.review.get("formal_status") == "已纳入" else "本地试用中"
                 row.update(
                     status=verification,
                     card=CARD_NAMES_ZH.get(sample.card_id, "—"),
                     enabled=sample.review.get("summary_enabled", "—"),
                     runtime=str(sample.review.get("summary_matches", 0)) if summary else runtime,
+                    formal=sample.review.get("formal_status", "暂不建议"),
                     validation_reason=description,
                 )
             values = tuple(row[column] for column in columns)
@@ -828,6 +854,13 @@ class CardReviewTab(ttk.Frame):
                 + f"\n运行记录：{runtime_text}；{verification}。"
                 + "\n命中次数只统计该指纹参与识别的次数，不代表自动核验卡名正确。"
             )
+        if self.filter_var.get() == "补库":
+            summary = next(
+                (row for row in library_card_summaries(list(self.samples.values())) if row.card_id == sample.card_id),
+                None,
+            )
+            if summary:
+                self.detail_var.set(self.detail_var.get() + "\n" + summary.review["formal_detail"])
 
     def _resize_frame(self):
         if self._frame_preview is None:
@@ -951,6 +984,7 @@ class CardReviewTab(ttk.Frame):
         selected_statuses = {sample.status for sample in action_samples}
         eligible = {
             "confirm": {"pending", "confirmed", "trial", "included", "covered", "conflict"},
+            "formal": set(),
         }
         for key, button in self.stage_buttons.items():
             button.pack_forget()
@@ -958,11 +992,16 @@ class CardReviewTab(ttk.Frame):
                 continue
             button.pack(side="left", padx=(0, 8))
             enabled = bool(selected_statuses.intersection(eligible[key]))
+            if key == "formal":
+                enabled = (
+                    any(sample.review.get("formal_status") == "建议纳入" for sample in action_samples)
+                    and not self._running
+                )
             button.configure(state="normal" if enabled and not self._action_busy else "disabled")
         self.stage_help.set(
             {
                 "待确认": "确认卡名后自动补库并启用；清空只处理选中样本，全选只作用于当前列表。",
-                "补库": "样本参考数为去重后参与识别的外观数量；在“全部”中可更正卡名。无需保留时使用上方“清空选中”，确认框会列明范围。",
+                "补库": "样本参考数为去重后参与识别的外观数量；正式补库需人工核对。清空选中清理本地样本，已纳入的内置参考保留。",
             }.get(stage, "可选择具体样本确认或更正卡名，也可多选后清空；未知样本不自动继承预测卡名。")
         )
         self.select_group_button.configure(
@@ -975,6 +1014,84 @@ class CardReviewTab(ttk.Frame):
             cards = {sample.card_id for sample in selected}
             return [sample for sample in self.samples.values() if sample.card_id in cards]
         return selected
+
+    def _prepare_formal(self):
+        if self._running or self._action_busy or self.filter_var.get() != "补库":
+            return
+        cards = {sample.card_id for sample in self._action_samples()}
+        if not cards:
+            self.message_var.set("请先选择要正式补库的卡牌。")
+            return
+        self._revision += 1
+        self._action_busy = self.formalizing = True
+        if self.clear_busy_callback:
+            self.clear_busy_callback(True)
+        self._set_action_state()
+        self.message_var.set("正在检查正式补库建议……")
+        self._background("formal_prepare", lambda: prepare_promotion(self.root, cards))
+
+    def _close_formal_dialog(self):
+        if self._formal_dialog is not None:
+            self._formal_dialog.destroy()
+            self._formal_dialog = None
+        self._formal_images.clear()
+
+    def _finish_formal(self):
+        self._close_formal_dialog()
+        self._action_busy = self.formalizing = False
+        if self.clear_busy_callback:
+            self.clear_busy_callback(False)
+        if not self._closed:
+            self._set_action_state()
+
+    def _cancel_formal(self):
+        self._finish_formal()
+        self.message_var.set("已取消正式补库，继续使用本地参考。")
+
+    def _commit_formal(self, entries):
+        if self._running or not self.formalizing:
+            self._finish_formal()
+            return
+        self._close_formal_dialog()
+        approved = [{key: entry[key] for key in ("id", "card_id", "fingerprint")} for entry in entries]
+        self.message_var.set("正在正式补库……")
+        self._background("formal_confirm", lambda: confirm_promotion(self.root, approved))
+
+    def _show_formal_confirmation(self, entries):
+        dialog = self._formal_dialog = tk.Toplevel(self)
+        dialog.title("确认正式补库")
+        dialog.transient(self.winfo_toplevel())
+        dialog.geometry("660x460")
+        dialog.minsize(560, 300)
+        dialog.columnconfigure(0, weight=1)
+        dialog.rowconfigure(1, weight=1)
+        ttk.Label(
+            dialog,
+            text=f"共 {len(entries)} 份参考。请核对卡名、版本及实际识别结果；命中次数不代表自动验证通过。",
+            wraplength=600,
+            padding=12,
+        ).grid(row=0, column=0, sticky="ew")
+        previews = ScrolledFrame(dialog, padding=12, autohide=False)
+        previews.grid(row=1, column=0, sticky="nsew")
+        previews.columnconfigure(1, weight=1)
+        self._formal_images = []
+        for index, entry in enumerate(entries):
+            photo = ImageTk.PhotoImage(entry["preview"], master=dialog)
+            self._formal_images.append(photo)
+            ttk.Label(previews, image=photo).grid(row=index, column=0, padx=(0, 12), pady=6)
+            text = (
+                f"{CARD_NAMES_ZH[entry['card_id']]}\n命中 {entry['matches']} 次 · 平均匹配距离 {entry['average_distance']:.1f}"
+                f" · 平均候选差距 {entry['average_margin']:.1f}\n参考 {entry['id']}"
+            )
+            ttk.Label(previews, text=text, justify="left", wraplength=490).grid(row=index, column=1, sticky="w", pady=6)
+        buttons = ttk.Frame(dialog, padding=12)
+        buttons.grid(row=2, column=0, sticky="ew")
+        ttk.Button(buttons, text="确认加入内置库", command=lambda: self._commit_formal(entries)).pack(side="right")
+        ttk.Button(buttons, text="取消", command=self._cancel_formal).pack(side="right", padx=8)
+        dialog.protocol("WM_DELETE_WINDOW", self._cancel_formal)
+        dialog.bind("<Escape>", lambda _: self._cancel_formal())
+        dialog.grab_set()
+        dialog.focus_set()
 
     def _save(self, status):
         samples = [

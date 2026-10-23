@@ -428,7 +428,7 @@ class CrXUI(ttk.Window):
         return not self._samples_clearing() and has_start_ready_job(self.get_all_values())
 
     def _samples_clearing(self):
-        return self.card_samples_tab.clearing or self.failure_samples_tab.clearing
+        return self.card_samples_tab.clearing or self.card_samples_tab.formalizing or self.failure_samples_tab.clearing
 
     def _update_clear_busy(self, _busy=None):
         self.main_btn.configure(state="disabled" if self._samples_clearing() else "normal")

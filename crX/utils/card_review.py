@@ -109,7 +109,7 @@ def validation_reason(sample: ReviewSample) -> str:
     if sample.status == "pending":
         return "确认准确卡名及版本后自动启用"
     if sample.status == "included":
-        return "本地试用中"
+        return "内置参考使用中" if sample.review.get("formal_status") == "已纳入" else "本地试用中"
     return (
         "已停用，请在全部列表重新确认卡名"
         if sample.review.get("library_id")
@@ -137,6 +137,14 @@ def library_card_summaries(samples: list[ReviewSample]) -> list[ReviewSample]:
         entries = {sample.review["library_id"]: sample for sample in candidates if sample.review.get("library_id")}
         enabled = sum(sample.status == "included" for sample in entries.values())
         matches = sum(sample.review.get("library_runtime", {}).get("matches", 0) for sample in entries.values())
+        recommended = sum(sample.review.get("formal_status") == "建议纳入" for sample in entries.values())
+        incorporated = sum(sample.review.get("formal_status") == "已纳入" for sample in entries.values())
+        formal_status = "建议纳入" if recommended else "已纳入" if incorporated else "暂不建议"
+        formal_detail = f"正式补库：建议纳入 {recommended} 份，已纳入 {incorporated} 份，其余暂不建议。"
+        formal_detail += "\n" + "\n".join(
+            f"{identifier}：{sample.review.get('formal_status', '暂不建议')}；{sample.review.get('formal_reason', '暂无可用运行记录')}"
+            for identifier, sample in entries.items()
+        )
         summaries.append(
             replace(
                 representative,
@@ -144,6 +152,8 @@ def library_card_summaries(samples: list[ReviewSample]) -> list[ReviewSample]:
                     **representative.review,
                     "summary_enabled": enabled,
                     "summary_matches": matches,
+                    "formal_status": formal_status,
+                    "formal_detail": formal_detail,
                 },
             )
         )
@@ -350,6 +360,14 @@ def scan_grouped_samples(root: Path, *, refresh_library=False) -> tuple[list[Rev
         samples, errors = scan_samples(root)
         return samples, errors + 1, group_similar_samples(samples)
     samples, errors = scan_samples(root)
+    from crX.utils.formal_library import annotate_references
+
+    try:
+        annotate_references(root, samples)
+    except (OSError, ValueError, TypeError) as error:
+        errors += 1
+        for sample in samples:
+            sample.review.update(formal_status="暂不建议", formal_reason=f"正式补库检查失败：{error}")
     return samples, errors, group_similar_samples(samples)
 
 
