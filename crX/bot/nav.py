@@ -34,6 +34,7 @@ from crX.bot.coords import CLASH_MAIN_DEADSPACE_COORD as CLASH_MAIN_MENU_DEADSPA
 from crX.bot.find import (
     find_daily_shop_heading,
     find_fight_mode_icon,
+    find_popup_close,
     find_post_battle_button_in_image,
     find_shop_recommendations,
 )
@@ -63,6 +64,7 @@ POST_BATTLE_MAX_ACTIONS = 40
 POST_BATTLE_GENERIC_MAX_ACTIONS = 5
 POST_BATTLE_GENERIC_CONFIRM_S = 1.0
 POST_BATTLE_GENERIC_CLICK_INTERVAL_S = 1.5
+POPUP_CLOSE_MAX_ACTIONS = 5
 
 
 def wait_for_battle_start(emulator, logger, timeout: int = 120) -> bool:
@@ -166,6 +168,7 @@ def wait_for_clash_main_menu(emulator, logger: Logger, deadspace_click=True, tim
             find_post_battle_button_in_image(image) is not None
             or detect_post_battle_reward(image) is not None
             or is_generic_post_battle_reward(image)
+            or find_popup_close(image) is not None
         ):
             return get_to_main_after_fight(
                 emulator, logger, timeout=max(0, deadline - time.monotonic()), allow_result_button=True
@@ -468,8 +471,8 @@ def get_to_main_after_fight(
 ):
     """Drain recognized rewards, then verify an uninterrupted, settled main menu.
 
-    Every action is chosen from a fresh frame. Unclassified reward presentations
-    have a separate bounded click budget; other unknown scenes only wait.
+    Every action is chosen from a fresh frame. Unclassified rewards and visible
+    red X buttons have separate bounded click budgets; other unknown scenes wait.
     """
     deadline = time.monotonic() + timeout
     main_since = None
@@ -479,10 +482,15 @@ def get_to_main_after_fight(
     generic_actions = 0
     generic_since = None
     generic_limit_reached = False
+    close_actions = 0
+    close_coord = None
+    close_limit_reached = False
     last_stage = None
     image = None
     logger.change_status("对战结束，正在返回主界面……")
     while time.monotonic() < deadline:
+        previous_close = close_coord
+        close_coord = None
         image = emulator.screenshot()
         if is_clash_main_menu_image(image):
             generic_since = None
@@ -536,6 +544,23 @@ def get_to_main_after_fight(
                 last_stage = "result"
                 time.sleep(1)
                 continue
+        close_coord = find_popup_close(image)
+        if close_coord is not None:
+            generic_since = None
+            last_stage = "popup_close"
+            if close_actions >= POPUP_CLOSE_MAX_ACTIONS:
+                close_limit_reached = True
+                break
+            if previous_close is None or any(abs(a - b) > 3 for a, b in zip(close_coord, previous_close, strict=True)):
+                time.sleep(0.5)
+                continue
+            close_actions += 1
+            logger.change_status(f"正在关闭弹窗 X {close_coord}（{close_actions}/{POPUP_CLOSE_MAX_ACTIONS}）")
+            emulator.click(*close_coord)
+            actions += 1
+            close_coord = None
+            time.sleep(1)
+            continue
         if is_generic_post_battle_reward(image):
             if generic_since is None:
                 generic_since = time.monotonic()
@@ -561,7 +586,9 @@ def get_to_main_after_fight(
             logger.change_status("正在等待战后奖励或加载动画，不点击未知页面")
         last_stage = "unknown"
         time.sleep(0.5)
-    if generic_limit_reached:
+    if close_limit_reached:
+        reason = "弹窗关闭操作达到上限"
+    elif generic_limit_reached:
         reason = "战后奖励通用推进达到上限"
     else:
         reason = "战后奖励操作达到上限" if actions >= POST_BATTLE_MAX_ACTIONS else "战后返回主界面超时"
@@ -572,6 +599,7 @@ def get_to_main_after_fight(
         stage=last_stage,
         actions=actions,
         generic_actions=generic_actions,
+        close_actions=close_actions,
         timeout_s=timeout,
     )
     logger.change_status(
@@ -586,7 +614,10 @@ def finish_pending_battle_rewards(emulator, logger) -> bool:
     if is_clash_main_menu_image(image):
         return True
     if detect_post_battle_reward(image) is None and not (
-        is_generic_post_battle_reward(image) or is_trophy_reward_image(image) or is_reward_choice_image(image)
+        is_generic_post_battle_reward(image)
+        or is_trophy_reward_image(image)
+        or is_reward_choice_image(image)
+        or find_popup_close(image) is not None
     ):
         return False
     if logger is None:

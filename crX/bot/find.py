@@ -1,9 +1,7 @@
 """Pure screen-detection helpers.
 
-Imports only from crX.detection.*, crX.utils.*, and crX.bot.coords.
-Never imports from other crX.bot.* modules, with one exception:
-detect_upgradable_cards reuses pixel_indicates_upgradable from state_detect (a leaf
-predicate module that does not import from find).
+Imports only from crX.detection.*, crX.utils.*, crX.bot.coords and the leaf pixel
+predicates in state_detect, which does not import from find.
 """
 
 from typing import Literal
@@ -15,6 +13,8 @@ from crX.bot.coords import (
     GAME_SCREEN_SIZE,
     OPPONENT_WINNER_LABEL_REGION,
     PLAYER_WINNER_LABEL_REGION,
+    POPUP_CLOSE_BUTTON_SIZE,
+    POPUP_CLOSE_REGION,
     SHOP_CATALOG_REGION,
     SHOP_DAILY_FIRST_COLUMN,
     SHOP_DAILY_LABEL_OFFSETS,
@@ -22,6 +22,7 @@ from crX.bot.coords import (
     SHOP_FREE_CONFIRM_REGION,
     SHOP_RECOMMENDATIONS_REGION,
 )
+from crX.bot.state_detect import is_bright_red_close_button
 from crX.detection.image_rec import find_image, pixel_is_equal
 
 
@@ -132,6 +133,17 @@ def _is_bright_green(image, coord, size) -> bool:
     blue, green, red = pixels[..., 0], pixels[..., 1], pixels[..., 2]
     # Grayscale template matching also matches dimmed labels behind a modal.
     return bool(np.mean((green > 150) & (green > blue + 35) & (green > red + 20)) > 0.25)
+
+
+def find_popup_close(image) -> tuple[int, int] | None:
+    """Locate a visible red X anywhere in the right half, using existing templates."""
+    if not _shop_image_is_valid(image):
+        return None
+    coord = find_image(image, "shop_offer_dialog_close", tolerance=0.9, subcrop=POPUP_CLOSE_REGION)
+    if coord is None or not is_bright_red_close_button(image, coord):
+        return None
+    width, height = POPUP_CLOSE_BUTTON_SIZE
+    return coord[0] + width // 2, coord[1] + height // 2
 
 
 def find_shop_offer_dialog_close(image) -> tuple[int, int] | None:

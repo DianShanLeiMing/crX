@@ -19,6 +19,7 @@ from crX.bot.coords import (
     POST_BATTLE_REWARD_TOP_REGION,
     START_FIGHT_BUTTON_COORD,
 )
+from crX.bot.find import find_popup_close
 from crX.bot.state_detect import detect_post_battle_reward, is_clash_main_menu_image, is_generic_post_battle_reward
 from crX.utils.logger import Logger
 
@@ -62,6 +63,8 @@ class RewardSequence:
         assert not is_clash_main_menu_image(self.last_frame), "Never tap to advance a verified main menu"
         if detect_post_battle_reward(self.last_frame):
             assert (x, y) == POST_BATTLE_REWARD_CONTINUE_COORD
+        elif find_popup_close(self.last_frame) is not None:
+            assert (x, y) == find_popup_close(self.last_frame)
         else:
             assert 137 < x < 301 and 536 < y < 627
         _, delay = self.scenes[self.index]
@@ -194,9 +197,17 @@ def test_next_match_drains_late_rewards_before_start(clock, monkeypatch):
 
 
 def test_matchmaking_refuses_unknown_screens_without_taps(clock):
-    screen = RewardSequence(clock, [(image("shop-paid-dialog-zh.png"), None)])
+    screen = RewardSequence(clock, [(image("loading-native-360.png"), None)])
     assert not fight.start_fight(screen, Logger(), "Classic 1v1")
     assert screen.clicks == []
+
+
+def test_matchmaking_refuses_popup_that_does_not_close(clock):
+    frame = image("shop-paid-dialog-zh.png")
+    screen = RewardSequence(clock, [(frame, None)])
+    assert not fight.start_fight(screen, Logger(), "Classic 1v1")
+    assert len(screen.clicks) == nav.POPUP_CLOSE_MAX_ACTIONS
+    assert all((x, y) == find_popup_close(frame) for _, x, y in screen.clicks)
 
 
 @pytest.mark.parametrize(
@@ -567,7 +578,7 @@ def test_main_menu_takes_priority_over_both_reward_routes(clock, monkeypatch):
     assert screen.clicks == []
 
 
-@pytest.mark.parametrize("filename", ("shop-paid-dialog-zh.png", "training-battle-zh.png", "loading-native-360.png"))
+@pytest.mark.parametrize("filename", ("training-battle-zh.png", "loading-native-360.png"))
 @pytest.mark.parametrize("entry", ("post_battle", "startup", "before_match"))
 def test_unrecognized_non_reward_pages_never_use_generic_clicks(clock, monkeypatch, filename, entry):
     screen = RewardSequence(clock, [(image(filename), None)])
@@ -748,3 +759,88 @@ def test_startup_unknown_timeout_remembers_exact_frame_without_clicks(clock, mon
     assert logger.failure_frame is not None
     assert np.array_equal(logger.failure_frame["image"], unknown)
     assert is_clash_main_menu_image(screen.screenshot())  # A later capture must not replace the failed frame.
+
+
+@pytest.mark.parametrize("offset", [(0, 0), (-80, -150), (-50, 220), (15, 370)])
+def test_popup_close_follows_button_position(offset):
+    # User's 240x427 attachment normalized to runtime geometry; no native capture claim.
+    original = image("card-received-popup-360.png")
+    coord = find_popup_close(original)
+    assert coord is not None and 310 < coord[0] < 330 and 205 < coord[1] < 230
+    dx, dy = offset
+    moved = cv2.warpAffine(original, np.array([[1, 0, dx], [0, 1, dy]], dtype=np.float32), (360, 640))
+    assert find_popup_close(moved) == (coord[0] + dx, coord[1] + dy)
+
+
+def test_popup_close_requires_bright_red_x():
+    original = image("card-received-popup-360.png")
+    gray = cv2.cvtColor(cv2.cvtColor(original, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR)
+    no_x = original.copy()
+    no_x[203:232, 307:337] = (40, 40, 230)
+    for frame in (None, original[:200], gray, (original * 0.4).astype(np.uint8), no_x):
+        assert find_popup_close(frame) is None
+    for name in ("failure-main-recovered.png", "training-battle-zh.png", "loading-native-360.png"):
+        assert find_popup_close(image(name)) is None
+
+
+@pytest.mark.parametrize("entry", ("startup", "post_battle", "before_match"))
+@pytest.mark.parametrize("filename", ("card-received-popup-360.png", "shop-paid-dialog-zh.png"))
+def test_close_popup_then_verify_main_without_counting_a_match(clock, entry, filename):
+    screen = RewardSequence(clock, [(image(filename), None), (image("failure-main-recovered.png"), None)])
+    logger = Logger()
+    if entry == "startup":
+        result = nav.wait_for_clash_main_menu(screen, logger, timeout=10)
+    elif entry == "before_match":
+        result = nav.finish_pending_battle_rewards(screen, logger)
+    else:
+        result = nav.get_to_main_after_fight(screen, logger, timeout=10)
+    assert result
+    assert len(screen.clicks) == 1
+    assert clock[0] - screen.entered >= nav.POST_BATTLE_MAIN_STABLE_S
+    assert logger.stats["completed_fights"] == logger.stats["wins"] == logger.stats["losses"] == 0
+
+
+def test_popup_must_stay_at_the_same_position_before_click(clock):
+    original = image("card-received-popup-360.png")
+    moved = cv2.warpAffine(original, np.array([[1, 0, -50], [0, 1, 120]], dtype=np.float32), (360, 640))
+    screen = RewardSequence(clock, [(original, 0.5), (moved, None), (image("failure-main-recovered.png"), None)])
+    assert nav.get_to_main_after_fight(screen, Logger(), timeout=10)
+    assert [index for index, _, _ in screen.clicks] == [1]
+    assert screen.clicks[0][1:] == find_popup_close(moved)
+
+
+@pytest.mark.parametrize("timeout", (0.25, 10))
+def test_transient_popup_and_expired_deadline_never_click(clock, timeout):
+    screen = RewardSequence(
+        clock, [(image("card-received-popup-360.png"), 0.5), (image("failure-main-recovered.png"), None)]
+    )
+    assert nav.get_to_main_after_fight(screen, Logger(), timeout=timeout) == (timeout == 10)
+    assert screen.clicks == []
+
+
+@pytest.mark.parametrize("entry", ("startup", "post_battle", "before_match"))
+def test_unresponsive_popup_close_is_bounded(clock, entry):
+    frame = image("card-received-popup-360.png")
+    screen = RewardSequence(clock, [(frame, None)])
+    logger = Logger()
+    if entry == "startup":
+        result = nav.wait_for_clash_main_menu(screen, logger, timeout=15)
+    elif entry == "before_match":
+        result = nav.finish_pending_battle_rewards(screen, logger)
+    else:
+        result = nav.get_to_main_after_fight(screen, logger, timeout=15)
+    assert not result
+    assert len(screen.clicks) == nav.POPUP_CLOSE_MAX_ACTIONS
+    assert logger.failure_frame is not None
+    assert logger.failure_frame["details"]["reason"] == "弹窗关闭操作达到上限"
+    assert logger.failure_frame["details"]["close_actions"] == nav.POPUP_CLOSE_MAX_ACTIONS
+    assert np.array_equal(logger.failure_frame["image"], frame)
+
+
+def test_fifth_closed_popup_can_still_finish_on_main(clock):
+    original = image("card-received-popup-360.png")
+    moved = cv2.warpAffine(original, np.array([[1, 0, -50], [0, 1, 120]], dtype=np.float32), (360, 640))
+    scenes = [(original if index % 2 == 0 else moved, None) for index in range(nav.POPUP_CLOSE_MAX_ACTIONS)]
+    screen = RewardSequence(clock, [*scenes, (image("failure-main-recovered.png"), None)])
+    assert nav.get_to_main_after_fight(screen, Logger(), timeout=15)
+    assert len(screen.clicks) == nav.POPUP_CLOSE_MAX_ACTIONS

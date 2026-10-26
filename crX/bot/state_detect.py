@@ -28,6 +28,7 @@ from crX.bot.coords import (
     MAIN_BATTLE_TAB_REGION,
     MAIN_BURGER_BUTTON_REGION,
     MAIN_NATIVE_YELLOW_POINTS,
+    POPUP_CLOSE_BUTTON_SIZE,
     POST_BATTLE_COIN_REWARD_REGION,
     POST_BATTLE_PUZZLE_CROWN_REGION,
     POST_BATTLE_PUZZLE_FRAME_REGION,
@@ -47,6 +48,15 @@ from crX.bot.coords import (
     SHOP_RECOMMENDATIONS_REGION,
 )
 from crX.detection.image_rec import all_pixels_are_equal, check_line_for_color, find_image, pixel_is_equal
+
+
+def is_bright_red_close_button(image, coord: tuple[int, int]) -> bool:
+    """Reject dimmed or differently colored matches of the white X template."""
+    x, y = coord
+    width, height = POPUP_CLOSE_BUTTON_SIZE
+    pixels = image[y : y + height, x : x + width].astype(numpy.int16)
+    blue, green, red = pixels[..., 0], pixels[..., 1], pixels[..., 2]
+    return bool(numpy.mean((red > 150) & (red > green + 45) & (red > blue + 35)) > 0.25)
 
 
 def check_if_in_battle(emulator):
