@@ -32,31 +32,43 @@ def test_modes_cycle_with_independent_deck_positions(monkeypatch):
     monkeypatch.setattr(states, "check_if_battle_mode_is_selected", lambda *a: True)
     decks = []
     monkeypatch.setattr(
-        states, "select_deck_state", lambda emu, logger, number, count: (decks.append(number) or True, number)
+        states, "select_deck_state", lambda emu, logger, order: (decks.append(order[0]) or True, order[0])
     )
-    jobs = make_job_dictionary({UIField.CLASSIC_2V2_USER_TOGGLE: True, UIField.CYCLE_DECKS_USER_TOGGLE: True})
+    jobs = make_job_dictionary(
+        {
+            UIField.CLASSIC_2V2_USER_TOGGLE: True,
+            UIField.CYCLE_DECKS_USER_TOGGLE: True,
+            UIField.SELECTED_DECKS: [4, 2, 7],
+        }
+    )
     context, logger = states.RuntimeContext(), Logger()
     modes = []
-    for _ in range(4):
+    for _ in range(8):
         states.state_tree(None, logger, "select_battle_mode", jobs, context)
         modes.append(context.selected_mode)
         states.state_tree(None, logger, "cycle_deck", jobs, context)
-    assert modes == ["Classic 1v1", "Classic 2v2"] * 2
-    assert decks == [1, 1, 2, 2]
+    assert modes == ["Classic 1v1", "Classic 2v2"] * 4
+    assert decks == [4, 4, 2, 2, 7, 7, 4, 4]
 
 
 @pytest.mark.parametrize(
     "values",
     [
-        {UIField.MAX_DECK_SELECTION: 0},
-        {UIField.DECK_NUMBER_SELECTION: 6},
-        {UIField.MAX_DECK_SELECTION: "bad"},
+        {UIField.SELECTED_DECKS: [0]},
+        {UIField.SELECTED_DECKS: [11]},
+        {UIField.SELECTED_DECKS: "bad"},
+        {UIField.SELECTED_DECKS: [True]},
+        {UIField.SELECTED_DECKS: [1.5]},
+        {UIField.SELECTED_DECKS: [2, 2]},
+        {UIField.SELECTED_DECKS: [[1]]},
+        {UIField.SELECTED_DECKS: list(range(1, 12))},
+        {UIField.RANDOM_DECKS_USER_TOGGLE: True, UIField.SELECTED_DECKS: []},
+        {UIField.CYCLE_DECKS_USER_TOGGLE: True, UIField.SELECTED_DECKS: []},
         {UIField.MUMU_INSTANCE: "all"},
         {UIField.MUMU_INSTANCE: "0,1"},
         {UIField.ADB_SERIAL: "host:99999"},
         {UIField.ADB_SERIAL: "host:1234 & echo injected"},
         {UIField.CLASSIC_1V1_USER_TOGGLE: "false"},
-        {UIField.RANDOM_DECKS_USER_TOGGLE: True, UIField.CYCLE_DECKS_USER_TOGGLE: True},
     ],
 )
 def test_invalid_settings_are_rejected(values):

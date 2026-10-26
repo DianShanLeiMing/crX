@@ -13,7 +13,7 @@ from crX.emulators import EmulatorType
 from crX.emulators.adb import AdbController
 from crX.emulators.adb_base import validate_device_serial
 from crX.emulators.mumu import MuMuEmulatorController
-from crX.interface.config import DEFAULTS, MAX_FIGHT_LIMIT
+from crX.interface.config import DEFAULTS, MAX_FIGHT_LIMIT, selected_decks_from_settings
 from crX.interface.enums import UIField, has_start_ready_job
 from crX.interface.ui import CrXUI, no_jobs_popup
 from crX.utils.caching import USER_SETTINGS_CACHE
@@ -28,13 +28,11 @@ def make_job_dictionary(values: dict[str, Any]) -> dict[str, Any]:
     for key, default in DEFAULTS.items():
         if isinstance(default, bool) and not isinstance(jobs[key], bool):
             raise ValueError(f"勾选项的值无效：{key}")
-    for key, maximum in ((UIField.DECK_NUMBER_SELECTION, 5), (UIField.MAX_DECK_SELECTION, 10)):
-        try:
-            jobs[key] = int(jobs[key])
-        except (ValueError, TypeError) as error:
-            raise ValueError(f"卡组选择无效：{key}") from error
-        if not 1 <= jobs[key] <= maximum:
-            raise ValueError(f"卡组编号必须在 1 到 {maximum} 之间")
+    jobs[UIField.SELECTED_DECKS] = selected_decks_from_settings(values)
+    if not jobs[UIField.SELECTED_DECKS] and (
+        jobs[UIField.RANDOM_DECKS_USER_TOGGLE] or jobs[UIField.CYCLE_DECKS_USER_TOGGLE]
+    ):
+        raise ValueError("启用随机或轮换卡组时，请至少勾选一套卡组")
     raw_limit = jobs[UIField.MAX_FIGHTS]
     message = f"执行局数必须是 0 到 {MAX_FIGHT_LIMIT} 之间的整数，0 表示不限"
     if isinstance(raw_limit, bool) or not isinstance(raw_limit, int | str):
@@ -57,8 +55,6 @@ def make_job_dictionary(values: dict[str, Any]) -> dict[str, Any]:
     jobs[UIField.MUMU_INSTANCE] = index
     for key in (UIField.ADB_PATH, UIField.MUMU_PATH, UIField.RECORDING_FOLDER_PATH):
         jobs[key] = str(jobs[key] or "").strip()
-    if jobs[UIField.RANDOM_DECKS_USER_TOGGLE] and jobs[UIField.CYCLE_DECKS_USER_TOGGLE]:
-        raise ValueError("随机卡组与轮换卡组只能启用一项")
     if jobs[UIField.RECORD_FIGHTS_TOGGLE]:
         valid, message = validate_recordings_path(jobs[UIField.RECORDING_FOLDER_PATH])
         if not valid:
@@ -79,7 +75,6 @@ class BotApplication:
         self._device_busy = False
         self.device_results = Queue()
         self.ui.set_all_values(settings or USER_SETTINGS_CACHE.load_data())
-        self.current_values = self.ui.get_all_values()
         self.ui.main_btn.configure(command=self._on_main_button)
         self.ui.config_callback = self._on_config_change
         self.ui.device_callback = self._device_action
@@ -143,13 +138,6 @@ class BotApplication:
         self.ui.set_button_state("idle")
 
     def _on_config_change(self, values):
-        random_key, cycle_key = UIField.RANDOM_DECKS_USER_TOGGLE, UIField.CYCLE_DECKS_USER_TOGGLE
-        if values[random_key] and values[cycle_key]:
-            changed = random_key if values[random_key] != self.current_values[random_key] else cycle_key
-            other = cycle_key if changed == random_key else random_key
-            values[other] = False
-            self.ui.set_all_values({other: False})
-        self.current_values = values.copy()
         try:
             USER_SETTINGS_CACHE.cache_data(values)
         except OSError as error:

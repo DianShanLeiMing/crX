@@ -13,7 +13,7 @@ from ttkbootstrap.widgets.scrolled import ScrolledFrame
 
 from crX.emulators import EmulatorType, get_available_emulators
 from crX.interface.card_review import CardReviewTab
-from crX.interface.config import DEFAULTS, JOBS, MAX_FIGHT_LIMIT, THEME_LABELS
+from crX.interface.config import DEFAULTS, JOBS, MAX_FIGHT_LIMIT, THEME_LABELS, selected_decks_from_settings
 from crX.interface.enums import BATTLE_STAT_LABELS, UIField, has_start_ready_job
 from crX.interface.failure_review import FailureReviewTab
 from crX.interface.widgets import DualRingGauge
@@ -47,7 +47,13 @@ class CrXUI(ttk.Window):
         self.open_recordings_callback = None
         self.variables: dict[str, tk.Variable] = {}
         self.config_widgets = []
+        self.selected_decks = list(DEFAULTS[UIField.SELECTED_DECKS])
+        self.deck_variables: dict[int, tk.BooleanVar] = {}
+        self.deck_checkboxes = {}
+        self.deck_order_var = tk.StringVar()
         for key, default in DEFAULTS.items():
+            if key == UIField.SELECTED_DECKS:
+                continue
             variable = tk.BooleanVar(value=default) if isinstance(default, bool) else tk.StringVar(value=str(default))
             self.variables[key] = variable
         # The visible checkbox is positive; the persisted upstream setting is negative.
@@ -133,15 +139,8 @@ class CrXUI(ttk.Window):
                 else groups["Options"]
             )
             self._checkbox(frame, job.key, job.title, job.tooltip)
-            for key, config in (job.extras or {}).items():
-                row = ttk.Frame(frame)
-                row.pack(fill="x", pady=(0, 6), padx=(18, 0))
-                ttk.Label(row, text=config.label).pack(side="left")
-                combo = ttk.Combobox(
-                    row, textvariable=self.variables[key], values=config.values, width=6, state="readonly"
-                )
-                combo.pack(side="right", padx=8)
-                self.config_widgets.append((combo, "readonly"))
+            if job.key == UIField.CYCLE_DECKS_USER_TOGGLE:
+                self._create_deck_selection(frame)
         control = ttk.Labelframe(self.jobs_tab, text="运行控制", padding=12)
         control.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=(16, 0))
         limit_row = ttk.Frame(control)
@@ -169,6 +168,41 @@ class CrXUI(ttk.Window):
             text="可启用一种或多种对战模式，程序将依次轮换。\n商店每日免费领取可单独运行，每小时检查一次。",
             wraplength=700,
         ).grid(row=2, column=0, columnspan=2, sticky="w", pady=16)
+
+    def _create_deck_selection(self, parent):
+        frame = ttk.Frame(parent)
+        frame.pack(fill="x", pady=(0, 4), padx=(18, 0))
+        ttk.Label(frame, text="参与卡组（按勾选先后顺序）").grid(row=0, column=0, columnspan=5, sticky="w")
+        for number in range(1, 11):
+            variable = tk.BooleanVar(value=number in self.selected_decks)
+            self.deck_variables[number] = variable
+            widget = ttk.Checkbutton(
+                frame, text=str(number), variable=variable, command=lambda n=number: self._toggle_deck(n)
+            )
+            row, column = divmod(number - 1, 5)
+            widget.grid(row=row + 1, column=column, sticky="w", padx=(0, 10), pady=5)
+            self.deck_checkboxes[number] = widget
+            self.config_widgets.append((widget, "normal"))
+        ttk.Label(frame, textvariable=self.deck_order_var, wraplength=290).grid(
+            row=3, column=0, columnspan=5, sticky="w", pady=(2, 0)
+        )
+        ttk.Label(frame, text="同时勾选时优先轮换；均未勾选时使用游戏当前卡组。", wraplength=290).grid(
+            row=4, column=0, columnspan=5, sticky="w", pady=(2, 0)
+        )
+        self._update_deck_order()
+
+    def _toggle_deck(self, number):
+        if self.deck_variables[number].get():
+            if number not in self.selected_decks:
+                self.selected_decks.append(number)
+        elif number in self.selected_decks:
+            self.selected_decks.remove(number)
+        self._update_deck_order()
+        self._notify()
+
+    def _update_deck_order(self):
+        order = " → ".join(map(str, self.selected_decks)) or "未选择"
+        self.deck_order_var.set(f"卡组顺序：{order}")
 
     def _entry_row(self, parent, label, key, browse=None):
         row = ttk.Frame(parent)
@@ -409,12 +443,21 @@ class CrXUI(ttk.Window):
 
     def get_all_values(self):
         values = {key: variable.get() for key, variable in self.variables.items()}
+        values[UIField.SELECTED_DECKS] = self.selected_decks.copy()
         values[UIField.DISABLE_WIN_TRACK_TOGGLE] = not values[UIField.DISABLE_WIN_TRACK_TOGGLE]
         return values
 
     def set_all_values(self, values):
         self._suspend = True
         try:
+            if any(key in values for key in (UIField.SELECTED_DECKS, "deck_number_selection", "max_deck_selection")):
+                try:
+                    self.selected_decks = selected_decks_from_settings(values)
+                except ValueError:
+                    self.selected_decks = []
+                for number, variable in self.deck_variables.items():
+                    variable.set(number in self.selected_decks)
+                self._update_deck_order()
             for key, value in values.items():
                 if key in self.variables:
                     if isinstance(DEFAULTS[key], bool) and not isinstance(value, bool):

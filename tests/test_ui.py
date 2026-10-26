@@ -100,6 +100,52 @@ def test_tabs_settings_themes_and_running_state(desktop_ui):
         ui.set_button_state("idle")
 
 
+def test_deck_checkbox_order_priority_and_json_roundtrip(desktop_ui, tmp_path, monkeypatch):
+    from crX.__main__ import BotApplication, make_job_dictionary
+    from crX.utils import caching
+
+    ui, _root = desktop_ui
+    monkeypatch.setattr(caching, "top_level", str(tmp_path))
+    application = BotApplication.__new__(BotApplication)
+    application.ui = ui
+    ui.config_callback = application._on_config_change
+    try:
+        ui.set_all_values({UIField.SELECTED_DECKS: []})
+        assert list(ui.deck_checkboxes) == list(range(1, 11))
+        for number in [4, 2, 7]:
+            ui.deck_checkboxes[number].invoke()
+        assert ui.get_all_values()[UIField.SELECTED_DECKS] == [4, 2, 7]
+        assert "4 → 2 → 7" in ui.deck_order_var.get()
+        ui.deck_checkboxes[2].invoke()
+        ui.deck_checkboxes[2].invoke()
+        assert ui.get_all_values()[UIField.SELECTED_DECKS] == [4, 7, 2]
+        ui.variables[UIField.RANDOM_DECKS_USER_TOGGLE].set(True)
+        ui.variables[UIField.CYCLE_DECKS_USER_TOGGLE].set(True)
+        persisted = caching.USER_SETTINGS_CACHE.load_data()
+        assert persisted[UIField.RANDOM_DECKS_USER_TOGGLE] is True
+        assert persisted[UIField.CYCLE_DECKS_USER_TOGGLE] is True
+        assert make_job_dictionary(persisted)[UIField.SELECTED_DECKS] == [4, 7, 2]
+        ui.set_all_values({UIField.SELECTED_DECKS: []})
+        ui.set_all_values(persisted)
+        assert ui.get_all_values()[UIField.SELECTED_DECKS] == [4, 7, 2]
+        assert [number for number, var in ui.deck_variables.items() if var.get()] == [2, 4, 7]
+        assert "4 → 7 → 2" in ui.deck_order_var.get()
+        ui.set_button_state("running")
+        ui.deck_checkboxes[10].invoke()
+        assert ui.get_all_values()[UIField.SELECTED_DECKS] == [4, 7, 2]
+        assert all(str(widget.cget("state")) == "disabled" for widget in ui.deck_checkboxes.values())
+    finally:
+        ui.config_callback = None
+        ui.set_button_state("idle")
+        ui.set_all_values(
+            {
+                UIField.SELECTED_DECKS: [1, 2],
+                UIField.RANDOM_DECKS_USER_TOGGLE: False,
+                UIField.CYCLE_DECKS_USER_TOGGLE: False,
+            }
+        )
+
+
 def _wait_ui(ui, condition):
     deadline = time.monotonic() + 4
     while time.monotonic() < deadline:

@@ -9,9 +9,8 @@ class UIField(StrEnum):
     CLASSIC_2V2_USER_TOGGLE = "classic_2v2_user_toggle"
     TROPHY_ROAD_USER_TOGGLE = "trophy_road_user_toggle"
     RANDOM_DECKS_USER_TOGGLE = "random_decks_user_toggle"
-    DECK_NUMBER_SELECTION = "deck_number_selection"
     CYCLE_DECKS_USER_TOGGLE = "cycle_decks_user_toggle"
-    MAX_DECK_SELECTION = "max_deck_selection"
+    SELECTED_DECKS = "selected_decks"
     MAX_FIGHTS = "max_fights"
     STOP_AFTER_REWARDS = "stop_after_rewards"
     RANDOM_PLAYS_USER_TOGGLE = "random_plays_user_toggle"
@@ -44,7 +43,7 @@ BATTLE_STAT_LABELS = {
     "classic_2v2_fights": "经典 2v2",
     "trophy_road_1v1_fights": "皇室征程",
     "cards_played": "出牌次数",
-    "card_randomizations": "随机卡组次数",
+    "card_randomizations": "随机选组次数",
     "card_cycles": "卡组轮换次数",
     "shop_offer_collections": "商店免费领取次数",
     "restarts_after_failure": "故障恢复次数",

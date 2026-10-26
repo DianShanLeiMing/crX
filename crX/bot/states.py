@@ -1,9 +1,10 @@
 """Small serial gameplay state machine; no device-specific policy here."""
 
+import random
 import time
 from dataclasses import dataclass, field
 
-from crX.bot.deck import randomize_deck_state, select_deck_state
+from crX.bot.deck import select_deck_state
 from crX.bot.fight import do_fight_state, end_fight_state, start_fight
 from crX.bot.nav import select_mode
 from crX.bot.recording_archiver import maybe_archive_recordings
@@ -24,7 +25,7 @@ FIGHT_MODES = {
 class RuntimeContext:
     selected_mode: str | None = None
     mode_index: int = 0
-    deck_numbers: dict[str, int] = field(default_factory=dict)
+    deck_indices: dict[str, int] = field(default_factory=dict)
     last_shop_at: float | None = None
     completed_jobs: int = 0
     completed_fights: int = 0
@@ -70,17 +71,25 @@ def state_tree(emulator, logger, state: str, jobs: dict, context: RuntimeContext
         if not check_if_battle_mode_is_selected(emulator, context.selected_mode):
             success = select_mode(emulator, context.selected_mode, logger)
     elif state == "randomize_deck":
-        if jobs.get(UIField.RANDOM_DECKS_USER_TOGGLE):
-            success = randomize_deck_state(emulator, logger, jobs[UIField.DECK_NUMBER_SELECTION])
+        if jobs.get(UIField.RANDOM_DECKS_USER_TOGGLE) and not jobs.get(UIField.CYCLE_DECKS_USER_TOGGLE):
+            candidates = jobs[UIField.SELECTED_DECKS].copy()
+            random.shuffle(candidates)
+            success, chosen = select_deck_state(emulator, logger, candidates)
+            if success and chosen is not None:
+                logger.add_card_randomization()
+            else:
+                success = False
     elif state == "cycle_deck":
         if jobs.get(UIField.CYCLE_DECKS_USER_TOGGLE):
-            count = jobs[UIField.MAX_DECK_SELECTION]
+            decks = jobs[UIField.SELECTED_DECKS]
             mode = context.selected_mode
             if mode is None:
                 raise ValueError("请先选择对战模式，再启用卡组轮换")
-            success, chosen = select_deck_state(emulator, logger, context.deck_numbers.get(mode, 1), count)
+            index = context.deck_indices.get(mode, 0)
+            success, chosen = select_deck_state(emulator, logger, decks[index:] + decks[:index])
             if success and chosen is not None:
-                context.deck_numbers[mode] = chosen % count + 1
+                context.deck_indices[mode] = (decks.index(chosen) + 1) % len(decks)
+                logger.add_deck_cycled()
             else:
                 success = False
     elif state == "start_fight":

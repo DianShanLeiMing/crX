@@ -39,20 +39,6 @@ class JobConfig:
     title: str
     default: bool = False
     tooltip: str = ""
-    extras: dict[UIField, ComboConfig] | None = None
-
-
-@dataclass
-class ComboConfig:
-    """Configuration for a combo box element."""
-
-    key: UIField
-    label: str
-    values: list[str | int]
-    default: str | int = ""
-    size: tuple[int, int] = (5, 1)
-    label_size: tuple[int, int] = (6, 1)
-    tooltip: str = ""
 
 
 JOBS = [
@@ -69,33 +55,13 @@ JOBS = [
         UIField.RANDOM_DECKS_USER_TOGGLE,
         "🎲 随机卡组",
         default=False,
-        tooltip="每场对战前随机更换指定卡组中的卡牌。",
-        extras={
-            UIField.DECK_NUMBER_SELECTION: ComboConfig(
-                key=UIField.DECK_NUMBER_SELECTION,
-                label="卡组位置",
-                values=[1, 2, 3, 4, 5],
-                default=2,
-                label_size=(10, 1),
-                tooltip="选择每场对战前需要随机更换的卡组位置（1–5）。",
-            )
-        },
+        tooltip="每场对战前从勾选的已有卡组中随机选一套；同时启用轮换时，以轮换为准。",
     ),
     JobConfig(
         UIField.CYCLE_DECKS_USER_TOGGLE,
         "♻️ 轮换卡组",
         default=False,
-        tooltip="每场对战之间依次切换不同卡组。",
-        extras={
-            UIField.MAX_DECK_SELECTION: ComboConfig(
-                key=UIField.MAX_DECK_SELECTION,
-                label="轮换卡组数量",
-                values=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-                default=2,
-                label_size=(15, 1),
-                tooltip="参与轮换的卡组数量（1–10）。",
-            )
-        },
+        tooltip="按勾选先后顺序轮换已有卡组；优先于随机卡组。",
     ),
     JobConfig(
         UIField.RANDOM_PLAYS_USER_TOGGLE,
@@ -118,11 +84,9 @@ JOBS = [
 ]
 
 DEFAULTS: dict[str, Any] = {job.key.value: job.default for job in JOBS}
-for job in JOBS:
-    for key, extra in (job.extras or {}).items():
-        DEFAULTS[key.value] = extra.default
 DEFAULTS.update(
     {
+        UIField.SELECTED_DECKS.value: [1, 2],
         UIField.EMULATOR.value: "MuMu",
         UIField.MUMU_PATH.value: "",
         UIField.MUMU_INSTANCE.value: "0",
@@ -136,3 +100,36 @@ DEFAULTS.update(
     }
 )
 USER_CONFIG_KEYS = tuple(DEFAULTS)
+
+
+def selected_decks_from_settings(values: dict) -> list[int]:
+    """Validate ordered deck slots, including the previous JSON number settings."""
+    if UIField.SELECTED_DECKS in values:
+        decks = values[UIField.SELECTED_DECKS]
+    elif values.get(UIField.CYCLE_DECKS_USER_TOGGLE) and "max_deck_selection" in values:
+        count = _legacy_deck_number(values["max_deck_selection"], 10)
+        decks = list(range(1, count + 1))
+    elif "deck_number_selection" in values:
+        decks = [_legacy_deck_number(values["deck_number_selection"], 5)]
+    else:
+        decks = DEFAULTS[UIField.SELECTED_DECKS]
+    if (
+        not isinstance(decks, list)
+        or len(decks) > 10
+        or any(type(number) is not int or not 1 <= number <= 10 for number in decks)
+        or len(set(decks)) != len(decks)
+    ):
+        raise ValueError("请选择不重复的卡组编号（1–10）")
+    return decks.copy()
+
+
+def _legacy_deck_number(value, maximum: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int | str):
+        raise ValueError("旧版卡组选择无效")
+    try:
+        number = int(value)
+    except ValueError as error:
+        raise ValueError("旧版卡组选择无效") from error
+    if not 1 <= number <= maximum:
+        raise ValueError("旧版卡组选择无效")
+    return number

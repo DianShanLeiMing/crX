@@ -11,21 +11,20 @@ from __future__ import annotations
 from crX.bot.deck import select_deck_state
 from crX.bot.nav import wait_for_clash_main_menu
 
-DECK_CYCLE_INDEX = 1
-DECK_COUNT = 10
+DECK_ORDER = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 
 def run_test(emulator, logger) -> tuple[bool, str]:
     if not wait_for_clash_main_menu(emulator, logger):
         return (False, "Didn't begin on clash main")
 
-    success, selected_deck_number = select_deck_state(emulator, logger, DECK_CYCLE_INDEX, DECK_COUNT)
+    success, selected_deck_number = select_deck_state(emulator, logger, DECK_ORDER)
     if not success or selected_deck_number is None:
-        return (False, f"Failed during select_deck_state(index={DECK_CYCLE_INDEX}, count={DECK_COUNT})")
-    if not (1 <= selected_deck_number <= DECK_COUNT):
+        return (False, f"Failed during select_deck_state(deck_order={DECK_ORDER})")
+    if selected_deck_number not in DECK_ORDER:
         return (
             False,
-            f"Failed during select_deck_state: selected_deck_number={selected_deck_number} out of range 1..{DECK_COUNT}",
+            f"Failed during select_deck_state: selected_deck_number={selected_deck_number} not in {DECK_ORDER}",
         )
 
     if not wait_for_clash_main_menu(emulator, logger):
