@@ -32,6 +32,7 @@ from crX.bot.coords import (
 )
 from crX.bot.coords import CLASH_MAIN_DEADSPACE_COORD as CLASH_MAIN_MENU_DEADSPACE_COORD
 from crX.bot.find import (
+    find_collect_all_button,
     find_daily_shop_heading,
     find_fight_mode_icon,
     find_popup_close,
@@ -49,6 +50,7 @@ from crX.bot.state_detect import (
     detect_post_battle_reward,
     is_clash_main_menu_image,
     is_generic_post_battle_reward,
+    is_item_distribution_image,
     is_reward_choice_image,
     is_trophy_reward_image,
 )
@@ -169,6 +171,7 @@ def wait_for_clash_main_menu(emulator, logger: Logger, deadspace_click=True, tim
             or detect_post_battle_reward(image) is not None
             or is_generic_post_battle_reward(image)
             or find_popup_close(image) is not None
+            or is_item_distribution_image(image)
         ):
             return get_to_main_after_fight(
                 emulator, logger, timeout=max(0, deadline - time.monotonic()), allow_result_button=True
@@ -506,6 +509,18 @@ def get_to_main_after_fight(
         main_since = None
         if actions >= POST_BATTLE_MAX_ACTIONS:
             break
+        if is_item_distribution_image(image):
+            generic_since = None
+            last_stage = "collect_all"
+            collect_all = find_collect_all_button(image)
+            if collect_all is None:
+                time.sleep(0.5)
+                continue
+            logger.change_status("正在领取道具发放页面的全部奖励")
+            emulator.click(*collect_all)
+            actions += 1
+            time.sleep(1)
+            continue
         reward = detect_post_battle_reward(image)
         if reward is not None:
             generic_since = None
@@ -618,6 +633,7 @@ def finish_pending_battle_rewards(emulator, logger) -> bool:
         or is_trophy_reward_image(image)
         or is_reward_choice_image(image)
         or find_popup_close(image) is not None
+        or is_item_distribution_image(image)
     ):
         return False
     if logger is None:

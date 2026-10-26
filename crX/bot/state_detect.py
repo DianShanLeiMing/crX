@@ -24,6 +24,8 @@ from crX.bot.coords import (
     CARD_PAGE_MENU_REGION,
     DECK_CARD_COST_REGIONS,
     GAME_SCREEN_SIZE,
+    ITEM_DISTRIBUTION_COLLECT_ALL_SIZE,
+    ITEM_DISTRIBUTION_TITLE_REGION,
     MAIN_BATTLE_BUTTON_REGION,
     MAIN_BATTLE_TAB_REGION,
     MAIN_BURGER_BUTTON_REGION,
@@ -48,6 +50,24 @@ from crX.bot.coords import (
     SHOP_RECOMMENDATIONS_REGION,
 )
 from crX.detection.image_rec import all_pixels_are_equal, check_line_for_color, find_image, pixel_is_equal
+
+
+def is_item_distribution_image(image) -> bool:
+    """Identify the distribution page even while its claim button is animating."""
+    if image is None or image.shape != (*GAME_SCREEN_SIZE[::-1], 3):
+        return False
+    return (
+        find_image(image, "item_distribution_title", tolerance=0.93, subcrop=ITEM_DISTRIBUTION_TITLE_REGION) is not None
+    )
+
+
+def is_bright_collect_all_button(image, coord: tuple[int, int]) -> bool:
+    """Require visible yellow fill; grayscale matching also accepts dimmed buttons."""
+    x, y = coord
+    width, height = ITEM_DISTRIBUTION_COLLECT_ALL_SIZE
+    pixels = image[y : y + height, x : x + width].astype(numpy.int16)
+    blue, green, red = pixels[..., 0], pixels[..., 1], pixels[..., 2]
+    return bool(numpy.mean((red > 180) & (green > 120) & (blue < 130) & (red > green + 20)) > 0.25)
 
 
 def is_bright_red_close_button(image, coord: tuple[int, int]) -> bool:

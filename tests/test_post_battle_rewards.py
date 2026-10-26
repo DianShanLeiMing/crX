@@ -19,7 +19,7 @@ from crX.bot.coords import (
     POST_BATTLE_REWARD_TOP_REGION,
     START_FIGHT_BUTTON_COORD,
 )
-from crX.bot.find import find_popup_close
+from crX.bot.find import find_collect_all_button, find_popup_close
 from crX.bot.state_detect import detect_post_battle_reward, is_clash_main_menu_image, is_generic_post_battle_reward
 from crX.utils.logger import Logger
 
@@ -61,7 +61,9 @@ class RewardSequence:
         self.clicks.append((self.index, x, y))
         assert self.last_frame is not None
         assert not is_clash_main_menu_image(self.last_frame), "Never tap to advance a verified main menu"
-        if detect_post_battle_reward(self.last_frame):
+        if find_collect_all_button(self.last_frame) is not None:
+            assert (x, y) == find_collect_all_button(self.last_frame)
+        elif detect_post_battle_reward(self.last_frame):
             assert (x, y) == POST_BATTLE_REWARD_CONTINUE_COORD
         elif find_popup_close(self.last_frame) is not None:
             assert (x, y) == find_popup_close(self.last_frame)
@@ -844,3 +846,112 @@ def test_fifth_closed_popup_can_still_finish_on_main(clock):
     screen = RewardSequence(clock, [*scenes, (image("failure-main-recovered.png"), None)])
     assert nav.get_to_main_after_fight(screen, Logger(), timeout=15)
     assert len(screen.clicks) == nav.POPUP_CLOSE_MAX_ACTIONS
+
+
+@pytest.mark.parametrize(
+    "filename", ("item-distribution-collect-all-360.png", "item-distribution-collect-all-native.png")
+)
+def test_collect_all_requires_title_and_visible_button_but_ignores_items(filename):
+    # Cover both the normalized user attachment and a native emulator capture.
+    original = image(filename)
+    assert find_collect_all_button(original) == (180, 583)
+    changed_items = original.copy()
+    changed_items[200:530, 70:290] = (150, 90, 20)
+    assert find_collect_all_button(changed_items) == (180, 583)
+    no_title = original.copy()
+    no_title[90:145, 120:240] = 0
+    no_button = original.copy()
+    no_button[535:625, 100:260] = 0
+    gray = cv2.cvtColor(cv2.cvtColor(original, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR)
+    for frame in (None, original[:200], no_title, no_button, gray, (original * 0.4).astype(np.uint8)):
+        assert find_collect_all_button(frame) is None
+
+
+@pytest.mark.parametrize(
+    "filename",
+    (
+        "failure-main-recovered.png",
+        "training-result-zh.png",
+        "training-battle-zh.png",
+        "shop-paid-dialog-zh.png",
+        "shop-free-dialog-zh.png",
+        "failure-reward-coins.png",
+        "card-received-popup-360.png",
+    ),
+)
+def test_other_screens_do_not_offer_collect_all(filename):
+    assert find_collect_all_button(image(filename)) is None
+
+
+@pytest.mark.parametrize("entry", ("startup", "post_battle", "before_match"))
+def test_collect_all_then_popup_then_main_without_recounting(clock, entry):
+    scenes = [
+        (image("failure-reward-coins.png"), None),
+        (image("item-distribution-collect-all-native.png"), None),
+        (image("card-received-popup-360.png"), None),
+        (image("failure-main-recovered.png"), None),
+    ]
+    screen = RewardSequence(clock, scenes)
+    logger = Logger()
+    if entry == "startup":
+        result = nav.wait_for_clash_main_menu(screen, logger, timeout=15)
+    elif entry == "before_match":
+        result = nav.finish_pending_battle_rewards(screen, logger)
+    else:
+        result = nav.get_to_main_after_fight(screen, logger, timeout=15)
+    assert result
+    assert [index for index, _, _ in screen.clicks] == [0, 1, 2]
+    assert screen.clicks[1][1:] == (180, 583)
+    assert clock[0] - screen.entered >= nav.POST_BATTLE_MAIN_STABLE_S
+    assert logger.stats["completed_fights"] == logger.stats["wins"] == logger.stats["losses"] == 0
+
+
+@pytest.mark.parametrize("entry", ("startup", "before_match"))
+@pytest.mark.parametrize(
+    "filename", ("item-distribution-collect-all-360.png", "item-distribution-collect-all-native.png")
+)
+def test_collect_all_is_recognized_at_entry_without_a_preceding_reward(clock, entry, filename):
+    screen = RewardSequence(clock, [(image(filename), None), (image("failure-main-recovered.png"), None)])
+    if entry == "startup":
+        result = nav.wait_for_clash_main_menu(screen, Logger(), timeout=10)
+    else:
+        result = nav.finish_pending_battle_rewards(screen, Logger())
+    assert result
+    assert len(screen.clicks) == 1
+    assert screen.clicks[0][1:] == (180, 583)
+
+
+def test_unresponsive_collect_all_uses_existing_action_limit(clock, monkeypatch):
+    monkeypatch.setattr(nav, "POST_BATTLE_MAX_ACTIONS", 3)
+    frame = image("item-distribution-collect-all-360.png")
+    screen = RewardSequence(clock, [(frame, None)])
+    logger = Logger()
+    assert not nav.get_to_main_after_fight(screen, logger, timeout=10)
+    assert len(screen.clicks) == 3
+    assert logger.failure_frame is not None
+    assert logger.failure_frame["details"]["reason"] == "战后奖励操作达到上限"
+    assert logger.failure_frame["details"]["stage"] == "collect_all"
+    assert np.array_equal(logger.failure_frame["image"], frame)
+
+
+@pytest.mark.parametrize("entry", ("startup", "post_battle", "before_match"))
+def test_distribution_waits_for_claim_button_before_any_generic_tap(clock, monkeypatch, entry):
+    original = image("item-distribution-collect-all-native.png")
+    waiting = original.copy()
+    waiting[535:625, 100:260] = 0
+    original_detection = nav.detect_post_battle_reward
+    # The specific page must take precedence even if the broad reward detector matches.
+    monkeypatch.setattr(
+        nav,
+        "detect_post_battle_reward",
+        lambda frame: "event_reward" if frame is waiting else original_detection(frame),
+    )
+    screen = RewardSequence(clock, [(waiting, 2), (original, None), (image("failure-main-recovered.png"), None)])
+    if entry == "startup":
+        result = nav.wait_for_clash_main_menu(screen, Logger(), timeout=10)
+    elif entry == "before_match":
+        result = nav.finish_pending_battle_rewards(screen, Logger())
+    else:
+        result = nav.get_to_main_after_fight(screen, Logger(), timeout=10)
+    assert result
+    assert screen.clicks == [(1, 180, 583)]

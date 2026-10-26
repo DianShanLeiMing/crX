@@ -11,6 +11,8 @@ import numpy as np
 from crX.bot.coords import (
     BATTLE_RESULT_BUTTON_REGION,
     GAME_SCREEN_SIZE,
+    ITEM_DISTRIBUTION_COLLECT_ALL_REGION,
+    ITEM_DISTRIBUTION_COLLECT_ALL_SIZE,
     OPPONENT_WINNER_LABEL_REGION,
     PLAYER_WINNER_LABEL_REGION,
     POPUP_CLOSE_BUTTON_SIZE,
@@ -22,7 +24,7 @@ from crX.bot.coords import (
     SHOP_FREE_CONFIRM_REGION,
     SHOP_RECOMMENDATIONS_REGION,
 )
-from crX.bot.state_detect import is_bright_red_close_button
+from crX.bot.state_detect import is_bright_collect_all_button, is_bright_red_close_button, is_item_distribution_image
 from crX.detection.image_rec import find_image, pixel_is_equal
 
 
@@ -133,6 +135,19 @@ def _is_bright_green(image, coord, size) -> bool:
     blue, green, red = pixels[..., 0], pixels[..., 1], pixels[..., 2]
     # Grayscale template matching also matches dimmed labels behind a modal.
     return bool(np.mean((green > 150) & (green > blue + 35) & (green > red + 20)) > 0.25)
+
+
+def find_collect_all_button(image) -> tuple[int, int] | None:
+    """Require the 道具发放 title and its visible 领取全部 button, regardless of items."""
+    if not is_item_distribution_image(image):
+        return None
+    coord = find_image(
+        image, "item_distribution_collect_all", tolerance=0.93, subcrop=ITEM_DISTRIBUTION_COLLECT_ALL_REGION
+    )
+    if coord is None or not is_bright_collect_all_button(image, coord):
+        return None
+    width, height = ITEM_DISTRIBUTION_COLLECT_ALL_SIZE
+    return coord[0] + width // 2, coord[1] + height // 2
 
 
 def find_popup_close(image) -> tuple[int, int] | None:
