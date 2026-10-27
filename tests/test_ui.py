@@ -1182,7 +1182,12 @@ def test_reference_rows_rename_delete_and_stage_layout(desktop_ui, tmp_path, mon
         tab.filter_var.set("补库")
         tab._render_list()
         _wait_ui(ui, lambda: len(tab.reference_panel._photos) == 3)
-        assert [tab.details.tab(panel, "text") for panel in tab.details.tabs()] == ["参考样本"]
+        assert [tab.details.tab(panel, "text") for panel in tab.details.tabs()] == [
+            "参考样本",
+            "手牌与识别信息",
+            "完整战斗截图",
+        ]
+        assert tab.details.select() == str(tab.reference_panel)
         assert not tab.edit_panel.winfo_manager() and not tab.notes_panel.winfo_manager()
         assert len(tab.reference_panel.rows) == 3
         assert tab.details.winfo_height() >= 190
@@ -1194,6 +1199,19 @@ def test_reference_rows_rename_delete_and_stage_layout(desktop_ui, tmp_path, mon
             assert row["rename"].cget("style") == row["delete"].cget("style")
             for state in ((), ("disabled",), ("active",), ("pressed",)):
                 assert ui.style.lookup(row["delete"].cget("style"), "foreground", state=state) == "#ffffff"
+        row = tab.reference_panel.rows[entries[2]["id"]]
+        row["label"].event_generate("<Button-1>")
+        _wait_ui(ui, lambda: tab._reference_preview_key == entries[2]["id"] and tab._frame_preview is not None)
+        assert entries[2]["id"] in tab.detail_var.get() and "补足识别 50 次" in tab.detail_var.get()
+        assert tab.reference_panel.selected == entries[2]["id"]
+        tab.details.select(tab.info_panel.container)
+        tab.refresh()
+        _wait_ui(ui, lambda: not tab._scan_busy)
+        assert tab.details.select() == str(tab.info_panel.container)
+        assert tab.reference_panel.selected == entries[2]["id"]
+        tab.details.select(tab.frame_panel)
+        assert tab._frame_preview is not None
+        tab.details.select(tab.reference_panel)
         tab.set_running(True)
         assert all(str(row["delete"].cget("state")) == "disabled" for row in tab.reference_panel.rows.values())
         tab._delete_reference(entries[0]["id"])

@@ -100,6 +100,8 @@ class CardReviewTab(ttk.Frame):
         self._formal_images = []
         self._reference_groups = {}
         self._reference_version = 0
+        self._reference_preview_key = None
+        self._reference_preview_sample = None
         self._reference_editor = None
         self.samples = {}
         self.groups = {}
@@ -255,6 +257,7 @@ class CardReviewTab(ttk.Frame):
         self.frame_panel = frame
         self.reference_panel = CardReferenceRows(
             self.details,
+            select=self._select_reference,
             rename=self._edit_reference,
             delete=self._delete_reference,
         )
@@ -807,6 +810,8 @@ class CardReviewTab(ttk.Frame):
             self.card_var.set("")
             self.note_var.set("")
             self._reference_groups = {}
+            self._reference_preview_key = None
+            self._reference_preview_sample = None
             self.reference_panel.render({})
             self._configure_detail_mode()
             self._set_action_state()
@@ -833,6 +838,8 @@ class CardReviewTab(ttk.Frame):
         self._selected_keys = selection
         self.selected = sample
         self._selection_version += 1
+        if self.filter_var.get() == "补库":
+            self._reference_preview_sample = None
         card_ids = {self.samples[key].card_id for key in selection}
         card_id = next(iter(card_ids)) if len(card_ids) == 1 else ""
         self.card_var.set(next((label for label, value in self.card_choices.items() if value == card_id), ""))
@@ -864,16 +871,15 @@ class CardReviewTab(ttk.Frame):
                 if not self._details_expanded:
                     self.review_panes.paneconfigure(self.details, height=220)
                 self.details.insert(0, self.reference_panel, text="参考样本")
-            for panel in (self.info_panel.container, self.frame_panel):
-                if str(panel) in self.details.tabs():
-                    self.details.forget(panel)
-            self.details.select(self.reference_panel)
+                self.details.select(self.reference_panel)
         else:
             self.edit_panel.grid()
             self.notes_panel.grid()
             if str(self.reference_panel) in self.details.tabs():
                 self.details.forget(self.reference_panel)
                 self._selected_keys = ()
+                self._reference_preview_key = None
+                self._reference_preview_sample = None
                 if not self._details_expanded:
                     self.review_panes.paneconfigure(self.details, height=max(120, self._regular_details_height))
             for panel, title in ((self.info_panel.container, "手牌与识别信息"), (self.frame_panel, "完整战斗截图")):
@@ -899,6 +905,30 @@ class CardReviewTab(ttk.Frame):
         self.description_var.set(
             "本地试用中；" + summary.review["formal_detail"].split("\n", 1)[0] if summary else "暂无待补库参考。"
         )
+        identifier = self._reference_preview_key
+        if identifier not in self._reference_groups:
+            identifier = next(iter(self._reference_groups), None)
+            self.details.select(self.reference_panel)
+        if identifier is not None:
+            self._select_reference(identifier)
+
+    def _select_reference(self, identifier):
+        sources = self._reference_groups.get(identifier, [])
+        if not sources:
+            return
+        sample = sources[0]
+        self.reference_panel.select(identifier)
+        self._describe_sample(sample, reference_detail=True)
+        if self._reference_preview_key == identifier and self._reference_preview_sample == sample.key:
+            return
+        self._reference_preview_key = identifier
+        self._reference_preview_sample = sample.key
+        self._selection_version += 1
+        self._images.clear()
+        self._frame_preview = None
+        for widget in (self.card_image, self.hand_image, self.frame_image):
+            widget.configure(image="", text="正在读取图片……")
+        self._background("preview", lambda: load_previews(sample), self._selection_version)
 
     def _close_reference_editor(self):
         if self._reference_editor is not None:
@@ -1016,8 +1046,8 @@ class CardReviewTab(ttk.Frame):
         self.tree.selection_set(keys)
         self._select()
 
-    def _describe_sample(self, sample):
-        if self.filter_var.get() == "补库":
+    def _describe_sample(self, sample, *, reference_detail=False):
+        if self.filter_var.get() == "补库" and not reference_detail:
             self._render_reference_samples(sample.card_id)
             return
         self.description_var.set(f"说明：{validation_reason(sample)}")

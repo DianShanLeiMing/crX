@@ -6,9 +6,11 @@ from ttkbootstrap.widgets.scrolled import ScrolledFrame
 
 
 class CardReferenceRows(ttk.Frame):
-    def __init__(self, parent, *, rename, delete):
+    def __init__(self, parent, *, select, rename, delete):
         super().__init__(parent)
         self._rename, self._delete = rename, delete
+        self._select = select
+        self.selected = None
         self.rows = {}
         self._signature = None
         self._photos = {}
@@ -72,8 +74,18 @@ class CardReferenceRows(ttk.Frame):
                 )
                 button.pack(side="left", padx=(0, 4))
                 buttons[action] = button
-            self.rows[identifier] = {"sample": sample, "image": image, "label": label, **buttons}
+            for widget in (image, label):
+                widget.configure(cursor="hand2", takefocus=True)
+                for event in ("<Button-1>", "<Return>", "<space>"):
+                    widget.bind(event, lambda _event, key=identifier: self._select(key))
+            self.rows[identifier] = {"sample": sample, "image": image, "label": label, "text": text, **buttons}
+        self.select(self.selected)
         return True
+
+    def select(self, identifier):
+        self.selected = identifier if identifier in self.rows else None
+        for key, row in self.rows.items():
+            row["label"].configure(text=("▶ " if key == self.selected else "") + row["text"])
 
     def set_running(self, running, busy):
         for row in self.rows.values():
