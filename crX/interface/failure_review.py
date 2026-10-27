@@ -54,7 +54,7 @@ class FailureReviewTab(ttk.Frame):
         self.bind("<Destroy>", self._destroyed, add="+")
         self.columnconfigure(0, weight=1)
         self.rowconfigure(2, weight=1)
-        self.summary_var = tk.StringVar(value="正在读取异常样本……")
+        self.summary_var = tk.StringVar(value="正在读取异常流程……")
         ttk.Label(self, textvariable=self.summary_var).grid(row=0, column=0, sticky="w")
         toolbar = ttk.Frame(self)
         toolbar.grid(row=1, column=0, sticky="ew", pady=8)
@@ -220,7 +220,7 @@ class FailureReviewTab(ttk.Frame):
                     self.clear_busy_callback(False)
                 self._set_buttons()
                 if error is None:
-                    self.message_var.set(f"已删除 {result} 条异常样本及其截图、诊断信息和处理标记；运行日志保留。")
+                    self.message_var.set(f"已删除 {result} 条异常流程及其截图、诊断信息和处理标记；运行日志保留。")
                 self.refresh()
             if error:
                 self.message_var.set(f"操作失败：{error}")
@@ -265,7 +265,7 @@ class FailureReviewTab(ttk.Frame):
             self._version += 1
             self._preview = self._photo = None
             self.image_label.configure(
-                image="", text="选择记录查看截图" if self.tree.get_children() else "暂无此类异常样本"
+                image="", text="选择记录查看截图" if self.tree.get_children() else "暂无此类异常流程"
             )
             self.info_var.set("")
             self._set_buttons()
@@ -336,8 +336,8 @@ class FailureReviewTab(ttk.Frame):
         if not keys:
             return
         if not messagebox.askyesno(
-            "删除选中异常样本",
-            f"确定删除“{self.filter_var.get()}”列表中选中的 {len(keys)} 条异常样本？\n"
+            "删除选中异常流程",
+            f"确定删除“{self.filter_var.get()}”列表中选中的 {len(keys)} 条异常流程？\n"
             "将删除这些记录的截图、诊断信息和处理标记；未选中记录及运行日志保留。此操作无法撤销。",
             parent=self,
             default=messagebox.NO,
@@ -351,7 +351,7 @@ class FailureReviewTab(ttk.Frame):
         self._set_buttons()
         if self.clear_busy_callback:
             self.clear_busy_callback(True)
-        self.message_var.set(f"正在删除选中的 {len(keys)} 条异常样本……")
+        self.message_var.set(f"正在删除选中的 {len(keys)} 条异常流程……")
         root = self.root
         self._background("delete", lambda: delete_failure_samples(root, keys))
 

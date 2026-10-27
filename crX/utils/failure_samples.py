@@ -80,7 +80,7 @@ class FailureSampleRecorder:
     def offer(self, emulator, logger, *, state, attempt, session_log_path=None, context=None, exception=None):
         """Called before recovery, including the final failure that stops the task."""
         if self._stop.is_set() or self._queue.full():
-            self._warn("异常样本队列已满或已关闭，继续恢复")
+            self._warn("异常流程队列已满或已关闭，继续恢复")
             return False
         cached = getattr(logger, "failure_frame", None)
         logger.failure_frame = None
@@ -113,16 +113,16 @@ class FailureSampleRecorder:
         try:
             self._queue.put_nowait((image, record))
         except queue.Full:
-            self._warn("异常样本队列已满，继续恢复")
+            self._warn("异常流程队列已满，继续恢复")
             return False
-        logger.log(f"已提交恢复前异常样本：{self.root / record['id']}")
+        logger.log(f"已提交恢复前异常流程：{self.root / record['id']}")
         return True
 
     def close(self, timeout=2.0):
         self._stop.set()
         self._thread.join(timeout=timeout)
         if self._thread.is_alive():
-            self._warn("异常样本后台尚未写完，不阻塞任务退出")
+            self._warn("异常流程后台尚未写完，不阻塞任务退出")
 
     def _warn(self, message):
         if not self._warned:
@@ -154,7 +154,7 @@ class FailureSampleRecorder:
                         record["capture_error"] = "PNG 编码失败，仅保存诊断信息"
                 size = len(encoded or b"") + len(json.dumps(record, ensure_ascii=False).encode("utf-8")) + 8192
                 if count >= self.max_samples or used_bytes + size > self.max_bytes:
-                    self._warn("异常样本达到容量上限，跳过新样本；已有样本不删除")
+                    self._warn("异常流程达到容量上限，跳过新样本；已有样本不删除")
                     continue
                 directory = self.root / record["id"]
                 directory.mkdir(parents=True, exist_ok=False)
@@ -163,9 +163,9 @@ class FailureSampleRecorder:
                 atomic_json(directory / "failure.json", record)
                 count += 1
                 used_bytes += size
-                LOG.info("恢复前异常样本已保存：%s", directory)
+                LOG.info("恢复前异常流程已保存：%s", directory)
             except Exception:
-                self._warn("异常样本保存失败，继续恢复；请检查日志目录的磁盘空间和权限")
+                self._warn("异常流程保存失败，继续恢复；请检查日志目录的磁盘空间和权限")
                 LOG.debug("Failure sample write failed", exc_info=True)
             finally:
                 self._queue.task_done()
@@ -222,40 +222,40 @@ def delete_failure_samples(root: Path, keys: set[str]) -> int:
     if not keys or not root.exists():
         return 0
     if len(keys) > MAX_FAILURE_SAMPLES:
-        raise ValueError(f"一次最多删除 {MAX_FAILURE_SAMPLES} 条异常样本")
+        raise ValueError(f"一次最多删除 {MAX_FAILURE_SAMPLES} 条异常流程")
     if root.is_symlink() or root.is_junction():
-        raise ValueError("异常样本根目录不能是链接")
+        raise ValueError("异常流程根目录不能是链接")
     base = root.resolve(strict=True)
     plans = []
     allowed = {"frame.png", "failure.json", "review.json"}
 
     def check_directory(directory):
         if directory.is_symlink() or directory.is_junction() or directory.resolve().parent != base:
-            raise ValueError("异常样本目录超出允许范围或包含链接")
+            raise ValueError("异常流程目录超出允许范围或包含链接")
 
     for key in sorted(keys):
         if not key or Path(key).name != key or key in {".", ".."}:
-            raise ValueError("异常样本编号无效")
+            raise ValueError("异常流程编号无效")
         directory = root / key
         check_directory(directory)
         if not directory.exists():
             continue
         files = list(directory.iterdir())
         if any(path.name not in allowed for path in files):
-            raise ValueError("异常样本中存在额外文件，请先检查目录，已取消删除")
+            raise ValueError("异常流程中存在额外文件，请先检查目录，已取消删除")
         for path in files:
             if path.is_symlink() or path.is_junction() or not path.is_file():
-                raise ValueError("异常样本包含链接或异常文件，已取消删除")
+                raise ValueError("异常流程包含链接或异常文件，已取消删除")
             sample_file(directory, path.name)
         data = read_json(sample_file(directory, "failure.json"))
         if not isinstance(data.get("reason"), str) or not isinstance(data.get("state"), str):
-            raise ValueError("异常样本诊断信息无效，已取消删除")
+            raise ValueError("异常流程诊断信息无效，已取消删除")
         plans.append((directory, files))
     for directory, files in plans:
         for path in files:
             check_directory(directory)
             if path.is_symlink() or path.is_junction() or path.resolve().parent != directory.resolve():
-                raise ValueError("异常样本文件已变化，已停止删除")
+                raise ValueError("异常流程文件已变化，已停止删除")
             path.unlink(missing_ok=True)
         check_directory(directory)
         directory.rmdir()

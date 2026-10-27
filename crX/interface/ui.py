@@ -83,7 +83,7 @@ class CrXUI(ttk.Window):
             (self.device_tab, "设备"),
             (self.stats_tab, "统计"),
             (self.card_samples_tab, "卡牌样本"),
-            (self.failure_samples_tab, "异常样本"),
+            (self.failure_samples_tab, "异常流程"),
             (self.settings_tab, "设置"),
         ):
             self.notebook.add(tab, text=title)
@@ -106,7 +106,7 @@ class CrXUI(ttk.Window):
         self.notebook.tab(self.card_samples_tab, text=title)
 
     def _update_failure_count(self, count):
-        title = f"异常样本 ({count})" if count else "异常样本"
+        title = f"异常流程 ({count})" if count else "异常流程"
         self.notebook.tab(self.failure_samples_tab, text=title)
 
     def _checkbox(self, parent, key, title, tooltip=""):

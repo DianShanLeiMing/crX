@@ -47,7 +47,7 @@ def test_tabs_settings_themes_and_running_state(desktop_ui):
             "设备",
             "统计",
             "卡牌样本",
-            "异常样本",
+            "异常流程",
             "设置",
         ]
         assert ui.get_all_values()[UIField.MAX_FIGHTS] == "0"
@@ -202,7 +202,7 @@ def test_failure_review_status_and_running_state(desktop_ui):
     tab = ui.failure_samples_tab
     tab.refresh()
     _wait_ui(ui, lambda: tab.selected is not None and tab._preview is not None)
-    assert ui.notebook.tab(tab, "text") == "异常样本 (1)"
+    assert ui.notebook.tab(tab, "text") == "异常流程 (1)"
     assert "unknown" in tab.info_var.get()
     assert "validation-session.txt" in tab.info_var.get()
     assert str(tab.zoom_button.cget("state")) == "normal"
@@ -222,12 +222,12 @@ def test_failure_review_status_and_running_state(desktop_ui):
         assert str(tab.buttons[0].cget("state")) == "normal"
         tab.buttons[0].invoke()
         _wait_ui(ui, lambda: not tab._busy and not tab._scan_busy and tab.selected is None)
-        assert ui.notebook.tab(tab, "text") == "异常样本"
+        assert ui.notebook.tab(tab, "text") == "异常流程"
         tab.filter_var.set("已处理")
         tab._render()
         tab.buttons[2].invoke()
         _wait_ui(ui, lambda: not tab._busy and not tab._scan_busy)
-        assert ui.notebook.tab(tab, "text") == "异常样本 (1)"
+        assert ui.notebook.tab(tab, "text") == "异常流程 (1)"
     finally:
         ui.set_button_state("idle")
 
