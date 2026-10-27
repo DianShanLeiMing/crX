@@ -16,13 +16,16 @@ from ttkbootstrap.widgets.scrolled import ScrolledFrame
 
 from crX.bot.card_data import CARD_NAMES_ZH
 from crX.bot.card_samples import get_card_samples_dir
+from crX.interface.card_reference_rows import CardReferenceRows
 from crX.utils.card_library import clear_filtered_samples, update_library
+from crX.utils.card_reference_review import delete_reference, rename_reference
 from crX.utils.card_review import (
     CARD_THUMBNAIL_SIZE,
     REASON_LABELS,
     STATUS_LABELS,
     is_library_candidate,
     library_card_summaries,
+    library_reference_samples,
     load_card_thumbnail,
     load_previews,
     sample_progress,
@@ -95,6 +98,9 @@ class CardReviewTab(ttk.Frame):
         self.formalizing = False
         self._formal_dialog = None
         self._formal_images = []
+        self._reference_groups = {}
+        self._reference_version = 0
+        self._reference_editor = None
         self.samples = {}
         self.groups = {}
         self.sample_groups = {}
@@ -246,6 +252,12 @@ class CardReviewTab(ttk.Frame):
         info = ScrolledFrame(self.details, padding=8, height=220)
         self.info_panel = info
         frame = ttk.Frame(self.details, padding=4)
+        self.frame_panel = frame
+        self.reference_panel = CardReferenceRows(
+            self.details,
+            rename=self._edit_reference,
+            delete=self._delete_reference,
+        )
         self.details.add(info.container, text="手牌与识别信息")
         self.details.add(frame, text="完整战斗截图")
         self.card_image = ttk.Label(info, text="选择样本查看截图", anchor="center", width=10)
@@ -259,6 +271,7 @@ class CardReviewTab(ttk.Frame):
         self.frame_image.pack(fill="both", expand=True)
         self.frame_image.bind("<Configure>", lambda _: self._resize_frame())
         edit = ttk.Frame(self)
+        self.edit_panel = edit
         edit.grid(row=4, column=0, sticky="ew", pady=2)
         ttk.Label(edit, text="确认卡名").pack(side="left")
         self.card_choices = {f"{name} ({card_id})": card_id for card_id, name in CARD_NAMES_ZH.items()}
@@ -285,6 +298,7 @@ class CardReviewTab(ttk.Frame):
             side="left"
         )
         notes = ttk.Frame(self)
+        self.notes_panel = notes
         notes.grid(row=5, column=0, sticky="ew", pady=2)
         ttk.Label(notes, text="处理备注").pack(side="left")
         self.note_var = tk.StringVar()
@@ -444,6 +458,7 @@ class CardReviewTab(ttk.Frame):
         if event.widget is self:
             self._closed = True
             self._close_formal_dialog()
+            self._close_reference_editor()
             self._search_toplevel.unbind("<Button-1>", self._search_click_binding)
             self._search_toplevel.unbind("<Configure>", self._search_move_binding)
             for identifier in self._after_ids:
@@ -473,6 +488,7 @@ class CardReviewTab(ttk.Frame):
 
     def set_running(self, running):
         self._running = running
+        self.reference_panel.set_running(running, self._action_busy)
         if "formal" in self.stage_buttons:
             eligible = any(sample.review.get("formal_status") == "建议纳入" for sample in self._action_samples())
             self.stage_buttons["formal"].configure(
@@ -595,6 +611,10 @@ class CardReviewTab(ttk.Frame):
                         photo = ImageTk.PhotoImage(preview, master=self) if preview is not None else None
                         self._images[image_kind] = photo
                         widget.configure(image=photo or "", text="图片缺失或损坏" if photo is None else "")
+            elif kind == "reference_thumbnails" and token == (self._revision, self._reference_version):
+                if error is None:
+                    for identifier, preview in result.items():
+                        self.reference_panel.set_image(identifier, preview)
             elif kind == "thumbnails":
                 self._thumbnail_busy = False
                 if error is None and token == self._revision:
@@ -614,7 +634,7 @@ class CardReviewTab(ttk.Frame):
                     self._finish_formal()
                 elif not result:
                     self._finish_formal()
-                    self.message_var.set("所选卡牌没有建议纳入的参考，请查看详情中的原因。")
+                    self.message_var.set("所选卡牌没有建议纳入的参考，请检查各参考的补足记录与卡名。")
                 else:
                     self._show_formal_confirmation(result)
             elif kind == "formal_confirm":
@@ -682,6 +702,7 @@ class CardReviewTab(ttk.Frame):
         return columns
 
     def _render_list(self):
+        self._configure_detail_mode()
         states = {
             "待确认": {"pending"},
             "补库": {"trial", "included", "covered"},
@@ -785,6 +806,9 @@ class CardReviewTab(ttk.Frame):
             self.description_var.set("暂无此类样本。")
             self.card_var.set("")
             self.note_var.set("")
+            self._reference_groups = {}
+            self.reference_panel.render({})
+            self._configure_detail_mode()
             self._set_action_state()
 
     def _select(self, _event=None):
@@ -818,12 +842,170 @@ class CardReviewTab(ttk.Frame):
         }
         self.note_var.set(next(iter(notes)) if len(notes) == 1 else "")
         self._describe_sample(sample)
+        if self.filter_var.get() == "补库":
+            self._set_action_state()
+            return
         self._images.clear()
         self._frame_preview = None
         for widget in (self.card_image, self.hand_image, self.frame_image):
             widget.configure(image="", text="正在读取图片……")
-        self._background("preview", lambda: load_previews(sample), self._selection_version)
+        if self.filter_var.get() != "补库":
+            self._background("preview", lambda: load_previews(sample), self._selection_version)
         self._set_action_state()
+
+    def _configure_detail_mode(self):
+        summary = self.filter_var.get() == "补库"
+        if summary:
+            self.edit_panel.grid_remove()
+            self.notes_panel.grid_remove()
+            self._hide_card_suggestions()
+            if str(self.reference_panel) not in self.details.tabs():
+                self._regular_details_height = self.details.winfo_height()
+                if not self._details_expanded:
+                    self.review_panes.paneconfigure(self.details, height=220)
+                self.details.insert(0, self.reference_panel, text="参考样本")
+            for panel in (self.info_panel.container, self.frame_panel):
+                if str(panel) in self.details.tabs():
+                    self.details.forget(panel)
+            self.details.select(self.reference_panel)
+        else:
+            self.edit_panel.grid()
+            self.notes_panel.grid()
+            if str(self.reference_panel) in self.details.tabs():
+                self.details.forget(self.reference_panel)
+                self._selected_keys = ()
+                if not self._details_expanded:
+                    self.review_panes.paneconfigure(self.details, height=max(120, self._regular_details_height))
+            for panel, title in ((self.info_panel.container, "手牌与识别信息"), (self.frame_panel, "完整战斗截图")):
+                if str(panel) not in self.details.tabs():
+                    self.details.add(panel, text=title)
+
+    def _render_reference_samples(self, card_id):
+        self._reference_groups = library_reference_samples(list(self.samples.values()), card_id)
+        if self.reference_panel.render(self._reference_groups):
+            self._reference_version += 1
+            targets = [(identifier, sources[0]) for identifier, sources in self._reference_groups.items()]
+            # One disk reader per refresh; the library bounds the number of references.
+            token = (self._revision, self._reference_version)
+            self._background(
+                "reference_thumbnails",
+                lambda: {identifier: load_card_thumbnail(sample, size=(32, 40)) for identifier, sample in targets},
+                token,
+            )
+        self.reference_panel.set_running(self._running, self._action_busy)
+        summary = next(
+            (row for row in library_card_summaries(list(self.samples.values())) if row.card_id == card_id), None
+        )
+        self.description_var.set(
+            "本地试用中；" + summary.review["formal_detail"].split("\n", 1)[0] if summary else "暂无待补库参考。"
+        )
+
+    def _close_reference_editor(self):
+        if self._reference_editor is not None:
+            self._reference_editor.destroy()
+            self._reference_editor = None
+
+    def _edit_reference(self, identifier):
+        sources = self._reference_groups.get(identifier, [])
+        if not sources or self._action_busy:
+            return
+        self._close_reference_editor()
+        dialog = self._reference_editor = tk.Toplevel(self)
+        dialog.title("修改参考样本卡名")
+        dialog.transient(self.winfo_toplevel())
+        dialog.geometry("480x350")
+        dialog.columnconfigure(0, weight=1)
+        dialog.rowconfigure(2, weight=1)
+        ttk.Label(
+            dialog, text=f"更正这份参考的 {len(sources)} 张来源；请区分普通／觉醒／精英版本。", wraplength=450
+        ).grid(
+            row=0,
+            column=0,
+            sticky="w",
+            padx=12,
+            pady=8,
+        )
+        self._reference_editor_name = tk.StringVar(value=CARD_NAMES_ZH[sources[0].card_id])
+        entry = ttk.Entry(dialog, textvariable=self._reference_editor_name)
+        entry.grid(row=1, column=0, sticky="ew", padx=12)
+        choices = ttk.Treeview(dialog, show="tree", selectmode="browse", height=7)
+        choices.grid(row=2, column=0, sticky="nsew", padx=12, pady=6)
+        scrollbar = ttk.Scrollbar(dialog, orient="vertical", command=choices.yview)
+        scrollbar.grid(row=2, column=1, sticky="ns")
+        choices.configure(yscrollcommand=scrollbar.set)
+        error = self._reference_editor_error = tk.StringVar()
+        ttk.Label(dialog, textvariable=error, wraplength=450).grid(row=3, column=0, sticky="w", padx=12)
+
+        def search(*_args):
+            if not dialog.winfo_exists():
+                return
+            choices.delete(*choices.get_children())
+            for label in search_card_choices(self.card_choices, self._reference_editor_name.get()):
+                choices.insert("", "end", iid=self.card_choices[label], text=label)
+
+        def choose(_event=None):
+            if not dialog.winfo_exists():
+                return
+            if choices.selection():
+                self._reference_editor_name.set(choices.selection()[0])
+
+        self._reference_editor_name.trace_add("write", search)
+        choices.bind("<<TreeviewSelect>>", choose)
+        keys, card_id = {sample.key for sample in sources}, sources[0].card_id
+
+        def confirm(_event=None):
+            if self._action_busy:
+                return
+            entered = self._reference_editor_name.get().strip()
+            new_id = self.card_choices.get(entered, entered)
+            new_id = next((key for key, name in CARD_NAMES_ZH.items() if name == entered), new_id)
+            if new_id not in CARD_NAMES_ZH:
+                matches = search_card_choices(self.card_choices, entered)
+                if len(matches) == 1:
+                    new_id = self.card_choices[matches[0]]
+                else:
+                    error.set("请搜索并选择准确卡名；可输入中文或英文关键词。")
+                    return
+            self._close_reference_editor()
+            self._revision += 1
+            self._action_busy = True
+            self._set_action_state()
+            self.message_var.set("正在更正这份参考的卡名并更新补库……")
+            self._background("save", lambda: rename_reference(self.root, identifier, keys, card_id, new_id))
+
+        buttons = ttk.Frame(dialog, padding=12)
+        buttons.grid(row=4, column=0, sticky="ew")
+        ttk.Button(buttons, text="确认", command=confirm).pack(side="right")
+        ttk.Button(buttons, text="取消", command=self._close_reference_editor).pack(side="right", padx=8)
+        dialog.bind("<Return>", confirm)
+        dialog.protocol("WM_DELETE_WINDOW", self._close_reference_editor)
+        search()
+        dialog.grab_set()
+        entry.focus_set()
+
+    def _delete_reference(self, identifier):
+        sources = self._reference_groups.get(identifier, [])
+        if not sources or self._running or self._action_busy:
+            return
+        keys, card_id = {sample.key for sample in sources}, sources[0].card_id
+        if (
+            not messagebox.askyesno(
+                "删除这份参考样本",
+                f"删除{CARD_NAMES_ZH[card_id]}的这 1 份参考及其 {len(keys)} 张来源截图、标注和运行记录？\n"
+                "同卡其他参考和正式库保留。此操作无法撤销。",
+                parent=self,
+                default=messagebox.NO,
+            )
+            or self._running
+            or self._action_busy
+        ):
+            return
+        self._revision += 1
+        self._action_busy = self.clearing = True
+        if self.clear_busy_callback:
+            self.clear_busy_callback(True)
+        self._set_action_state()
+        self._background("clear", lambda: delete_reference(self.root, identifier, keys, card_id))
 
     def _select_group(self):
         if self.selected is None or self._action_busy or self.filter_var.get() == "补库":
@@ -835,6 +1017,9 @@ class CardReviewTab(ttk.Frame):
         self._select()
 
     def _describe_sample(self, sample):
+        if self.filter_var.get() == "补库":
+            self._render_reference_samples(sample.card_id)
+            return
         self.description_var.set(f"说明：{validation_reason(sample)}")
         verification, runtime_text, _ = sample_progress(sample)
         record = sample.record
@@ -867,13 +1052,6 @@ class CardReviewTab(ttk.Frame):
                 + "\n只计正式库未识别、本地样本补足；连续重复识别只计一次，仍需人工核对卡名。"
                 + "历史命中记录不折算为补足次数。"
             )
-        if self.filter_var.get() == "补库":
-            summary = next(
-                (row for row in library_card_summaries(list(self.samples.values())) if row.card_id == sample.card_id),
-                None,
-            )
-            if summary:
-                self.detail_var.set(self.detail_var.get() + "\n" + summary.review["formal_detail"])
 
     def _resize_frame(self):
         if self._frame_preview is None:

@@ -155,6 +155,17 @@ def is_library_candidate(sample: ReviewSample) -> bool:
     )
 
 
+def library_reference_samples(samples: list[ReviewSample], card_id: str) -> dict[str, list[ReviewSample]]:
+    """One row per pending fingerprint, retaining every merged source for actions."""
+    references: dict[str, list[ReviewSample]] = {}
+    for sample in samples:
+        if sample.card_id == card_id and is_library_candidate(sample):
+            references.setdefault(sample.review.get("library_id") or sample.key, []).append(sample)
+    for sources in references.values():
+        sources.sort(key=lambda sample: (bool(sample.review.get("library_merged_into")), sample.key))
+    return references
+
+
 def library_card_summaries(samples: list[ReviewSample]) -> list[ReviewSample]:
     """Aggregate only pending references by card/version, counting each ID once."""
     by_card: dict[str, list[ReviewSample]] = {}

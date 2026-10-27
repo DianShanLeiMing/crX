@@ -1053,7 +1053,7 @@ def test_formal_promotion_preview_cancel_confirm_and_running_guard(desktop_ui, t
         tab._render_list()
         assert tab.tree.set(sample.key, "formal") == "建议纳入"
         assert tab.tree.set(sample.key, "validation_reason") == "本地试用中"
-        assert "平均候选差距" in tab.detail_var.get()
+        assert "补足识别 100 次" in tab.reference_panel.rows[entry["id"]]["label"].cget("text")
         ui.set_button_state("running")
         assert str(tab.stage_buttons["formal"].cget("state")) == "disabled"
         tab._prepare_formal()
@@ -1128,6 +1128,118 @@ def test_formal_promotion_preview_cancel_confirm_and_running_guard(desktop_ui, t
             tab._cancel_formal()
         window.destroy()
         ui._state = "idle"
+
+
+def test_reference_rows_rename_delete_and_stage_layout(desktop_ui, tmp_path, monkeypatch):
+    import tkinter as tk
+    from tkinter.ttk import Button
+
+    from crX.interface.card_review import CardReviewTab
+    from crX.utils import card_library as local
+    from crX.utils import formal_library as formal
+    from crX.utils.card_review import atomic_json
+    from tests.test_card_library import fingerprint
+
+    destination = tmp_path / "builtins.json"
+    atomic_json(destination, {"version": 1, "entries": []})
+    monkeypatch.setattr(formal, "formal_path", lambda: destination)
+    monkeypatch.setattr(formal, "_bundled_references", lambda: [("giant", fingerprint(15).tolist())])
+    monkeypatch.setattr(local, "sample_fingerprint", lambda sample: fingerprint(int(sample.name[-1]) % 3))
+    sources = [add_group_sample(tmp_path, "reference-rows", f"sample-{index:03d}") for index in range(4)]
+    for index, sample in enumerate(sources):
+        save_review(sample, "confirmed", "zap", f"备注{index}")
+    local.update_library(tmp_path, sources, "enable")
+    entries = local.read_library(tmp_path)
+    assert len(entries) == 3
+    for entry, count in zip(entries, (12, 0, 50), strict=True):
+        local.merge_match_stats(
+            tmp_path,
+            {
+                entry["id"]: {
+                    "matches": count,
+                    "distance_total": count * 10,
+                    "margin_total": count * 200,
+                    "assists": count,
+                    "assist_battles": min(count, 3),
+                    "assist_distance_total": count * 10,
+                    "assist_margin_total": count * 200,
+                }
+            },
+        )
+    ui, _root = desktop_ui
+    window = tk.Toplevel(ui)
+    window.geometry("850x760")
+    tab = CardReviewTab(window, root=tmp_path)
+    tab.pack(fill="both", expand=True)
+    errors = []
+    monkeypatch.setattr(ui, "report_callback_exception", lambda *args: errors.append(args))
+    prompts = []
+    monkeypatch.setattr(
+        "crX.interface.card_review.messagebox.askyesno", lambda _title, text, **_kw: prompts.append(text) or True
+    )
+    try:
+        _wait_ui(ui, lambda: not tab._scan_busy)
+        tab.filter_var.set("补库")
+        tab._render_list()
+        _wait_ui(ui, lambda: len(tab.reference_panel._photos) == 3)
+        assert [tab.details.tab(panel, "text") for panel in tab.details.tabs()] == ["参考样本"]
+        assert not tab.edit_panel.winfo_manager() and not tab.notes_panel.winfo_manager()
+        assert len(tab.reference_panel.rows) == 3
+        assert tab.details.winfo_height() >= 190
+        for entry, count in zip(entries, (12, 0, 50), strict=True):
+            row = tab.reference_panel.rows[entry["id"]]
+            assert f"补足识别 {count} 次" in row["label"].cget("text")
+            assert tab.reference_panel._photos[entry["id"]] is not None
+            assert "details" not in row
+            assert row["rename"].cget("style") == row["delete"].cget("style")
+            for state in ((), ("disabled",), ("active",), ("pressed",)):
+                assert ui.style.lookup(row["delete"].cget("style"), "foreground", state=state) == "#ffffff"
+        tab.set_running(True)
+        assert all(str(row["delete"].cget("state")) == "disabled" for row in tab.reference_panel.rows.values())
+        tab._delete_reference(entries[0]["id"])
+        assert not prompts
+        tab.set_running(False)
+        tab.reference_panel.rows[entries[1]["id"]]["rename"].invoke()
+        tab._reference_editor_name.set("not-a-card")
+        assert tab._reference_editor is not None
+        buttons = tab._reference_editor.winfo_children()[-1].winfo_children()
+        confirm_button = next(button for button in buttons if button.cget("text") == "确认")
+        assert isinstance(confirm_button, Button)
+        confirm_button.invoke()
+        assert tab._reference_editor_error.get() and not tab._action_busy
+        tab._reference_editor_name.set("knight")
+        confirm_button.invoke()
+        _wait_ui(
+            ui, lambda: not tab._action_busy and not tab._scan_busy and tab.samples[sources[1].key].card_id == "knight"
+        )
+        assert tab.samples[sources[1].key].review["note"] == "备注1"
+        assert tab.samples[sources[2].key].card_id == "zap"
+        tab.filter_var.set("全部")
+        tab._render_list()
+        tab.tree.selection_set(sources[1].key)
+        tab.tree.focus(sources[1].key)
+        tab._select()
+        assert "knight" in tab.card_var.get() and tab.note_var.get() == "备注1"
+        tab.filter_var.set("补库")
+        tab._render_list()
+        zap_key = next(key for key in tab.tree.get_children() if tab.samples[key].card_id == "zap")
+        tab.tree.selection_set(zap_key)
+        tab.tree.focus(zap_key)
+        tab._select()
+        assert len(tab.reference_panel.rows) == 2
+        tab.reference_panel.rows[entries[0]["id"]]["delete"].invoke()
+        _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy and sources[0].key not in tab.samples)
+        assert "1 份参考" in prompts[0] and "2 张来源" in prompts[0]
+        assert sources[1].file("frame").exists() and sources[2].file("frame").exists()
+        assert not sources[0].file("frame").exists() and not sources[3].file("frame").exists()
+        assert destination.read_text(encoding="utf-8").count('"entries": []') == 1
+        tab.filter_var.set("待确认")
+        tab._render_list()
+        assert tab.edit_panel.winfo_manager() == tab.notes_panel.winfo_manager() == "grid"
+        assert [tab.details.tab(panel, "text") for panel in tab.details.tabs()] == ["手牌与识别信息", "完整战斗截图"]
+        assert not errors
+    finally:
+        window.destroy()
 
 
 def test_summary_clear_selected_card_warns_and_keeps_unselected_card(desktop_ui, tmp_path, monkeypatch):
