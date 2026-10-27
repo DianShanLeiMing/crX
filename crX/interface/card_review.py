@@ -258,7 +258,6 @@ class CardReviewTab(ttk.Frame):
         self.reference_panel = CardReferenceRows(
             self.details,
             select=self._select_reference,
-            rename=self._edit_reference,
             delete=self._delete_reference,
         )
         self.details.add(info.container, text="手牌与识别信息")
@@ -312,6 +311,13 @@ class CardReviewTab(ttk.Frame):
             "confirm": ttk.Button(actions, text="确认", command=lambda: self._save("confirmed"), state="disabled"),
             "formal": ttk.Button(actions, text="确认正式补库", command=self._prepare_formal, state="disabled"),
         }
+        self.rename_reference_button = ttk.Button(
+            actions,
+            text="修改卡名",
+            command=lambda: self._edit_reference(self.reference_panel.selected),
+            style="ReferenceAction.secondary.Outline.TButton",
+            state="disabled",
+        )
         self.stage_help = tk.StringVar()
         ttk.Label(self, textvariable=self.stage_help, wraplength=700).grid(row=7, column=0, sticky="w", pady=2)
         self.message_var = tk.StringVar(
@@ -492,6 +498,13 @@ class CardReviewTab(ttk.Frame):
     def set_running(self, running):
         self._running = running
         self.reference_panel.set_running(running, self._action_busy)
+        self.rename_reference_button.configure(
+            state="normal"
+            if self.filter_var.get() == "补库"
+            and self.reference_panel.selected in self._reference_groups
+            and not self._action_busy
+            else "disabled"
+        )
         if "formal" in self.stage_buttons:
             eligible = any(sample.review.get("formal_status") == "建议纳入" for sample in self._action_samples())
             self.stage_buttons["formal"].configure(
@@ -918,6 +931,7 @@ class CardReviewTab(ttk.Frame):
             return
         sample = sources[0]
         self.reference_panel.select(identifier)
+        self.rename_reference_button.configure(state="disabled" if self._action_busy else "normal")
         self._describe_sample(sample, reference_detail=True)
         if self._reference_preview_key == identifier and self._reference_preview_sample == sample.key:
             return
@@ -1219,6 +1233,9 @@ class CardReviewTab(ttk.Frame):
                     and not self._running
                 )
             button.configure(state="normal" if enabled and not self._action_busy else "disabled")
+        self.rename_reference_button.pack_forget()
+        if stage == "补库":
+            self.rename_reference_button.pack(side="left", padx=(0, 8))
         self.stage_help.set(
             {
                 "待确认": "确认卡名后自动补库并启用；清空只处理选中样本，全选只作用于当前列表。",

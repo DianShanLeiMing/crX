@@ -1196,7 +1196,8 @@ def test_reference_rows_rename_delete_and_stage_layout(desktop_ui, tmp_path, mon
             assert f"补足识别 {count} 次" in row["label"].cget("text")
             assert tab.reference_panel._photos[entry["id"]] is not None
             assert "details" not in row
-            assert row["rename"].cget("style") == row["delete"].cget("style")
+            assert "rename" not in row
+            assert tab.rename_reference_button.cget("style") == row["delete"].cget("style")
             for state in ((), ("disabled",), ("active",), ("pressed",)):
                 assert ui.style.lookup(row["delete"].cget("style"), "foreground", state=state) == "#ffffff"
         row = tab.reference_panel.rows[entries[2]["id"]]
@@ -1204,6 +1205,17 @@ def test_reference_rows_rename_delete_and_stage_layout(desktop_ui, tmp_path, mon
         _wait_ui(ui, lambda: tab._reference_preview_key == entries[2]["id"] and tab._frame_preview is not None)
         assert entries[2]["id"] in tab.detail_var.get() and "补足识别 50 次" in tab.detail_var.get()
         assert tab.reference_panel.selected == entries[2]["id"]
+        selected_row = tab.reference_panel.rows[entries[2]["id"]]
+        assert selected_row["frame"].cget("style") == "SelectedReference.TFrame"
+        assert selected_row["label"].cget("text") == selected_row["text"]
+        assert ui.style.lookup("SelectedReference.TFrame", "background") == ui.style.lookup(
+            "CardSamples.Treeview", "background", state=("selected",)
+        )
+        assert all(
+            row["frame"].cget("style") == "TFrame"
+            for key, row in tab.reference_panel.rows.items()
+            if key != entries[2]["id"]
+        )
         tab.details.select(tab.info_panel.container)
         tab.refresh()
         _wait_ui(ui, lambda: not tab._scan_busy)
@@ -1217,7 +1229,13 @@ def test_reference_rows_rename_delete_and_stage_layout(desktop_ui, tmp_path, mon
         tab._delete_reference(entries[0]["id"])
         assert not prompts
         tab.set_running(False)
-        tab.reference_panel.rows[entries[1]["id"]]["rename"].invoke()
+        tab._select_reference(entries[1]["id"])
+        assert tab.rename_reference_button.winfo_manager() == "pack"
+        action_widgets = tab.stage_buttons["formal"].master.pack_slaves()
+        assert (
+            action_widgets.index(tab.rename_reference_button) == action_widgets.index(tab.stage_buttons["formal"]) + 1
+        )
+        tab.rename_reference_button.invoke()
         tab._reference_editor_name.set("not-a-card")
         assert tab._reference_editor is not None
         buttons = tab._reference_editor.winfo_children()[-1].winfo_children()
@@ -1254,6 +1272,7 @@ def test_reference_rows_rename_delete_and_stage_layout(desktop_ui, tmp_path, mon
         tab.filter_var.set("待确认")
         tab._render_list()
         assert tab.edit_panel.winfo_manager() == tab.notes_panel.winfo_manager() == "grid"
+        assert not tab.rename_reference_button.winfo_manager()
         assert [tab.details.tab(panel, "text") for panel in tab.details.tabs()] == ["手牌与识别信息", "完整战斗截图"]
         assert not errors
     finally:

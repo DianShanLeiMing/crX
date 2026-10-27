@@ -6,9 +6,9 @@ from ttkbootstrap.widgets.scrolled import ScrolledFrame
 
 
 class CardReferenceRows(ttk.Frame):
-    def __init__(self, parent, *, select, rename, delete):
+    def __init__(self, parent, *, select, delete):
         super().__init__(parent)
-        self._rename, self._delete = rename, delete
+        self._delete = delete
         self._select = select
         self.selected = None
         self.rows = {}
@@ -16,7 +16,7 @@ class CardReferenceRows(ttk.Frame):
         self._photos = {}
         self.scroller = ScrolledFrame(self, padding=8, autohide=False)
         self.scroller.pack(fill="both", expand=True)
-        self.scroller.columnconfigure(1, weight=1)
+        self.scroller.columnconfigure(0, weight=1)
         self.bind("<<ThemeChanged>>", self._update_theme, add="+")
         self._update_theme()
 
@@ -25,6 +25,11 @@ class CardReferenceRows(ttk.Frame):
         style_name = "ReferenceAction.secondary.Outline.TButton"
         style.configure(style_name, foreground="#ffffff")
         style.map(style_name, foreground=[("disabled", "#ffffff"), ("active", "#ffffff"), ("!disabled", "#ffffff")])
+        background = style.lookup("CardSamples.Treeview", "background", state=("selected",)) or style.colors.selectbg
+        foreground = style.lookup("CardSamples.Treeview", "foreground", state=("selected",)) or style.colors.selectfg
+        style.configure("SelectedReference.TFrame", background=background)
+        style.configure("SelectedReference.TLabel", background=background, foreground=foreground)
+        self.select(self.selected)
 
     def render(self, references):
         signature = tuple(
@@ -51,21 +56,21 @@ class CardReferenceRows(ttk.Frame):
         for index, (identifier, sources) in enumerate(references.items()):
             sample = sources[0]
             stats = sample.review.get("library_runtime", {})
-            image = ttk.Label(self.scroller, text="无图", width=5, anchor="center")
-            image.grid(row=index, column=0, sticky="ns", padx=(0, 10), pady=4)
+            row_frame = ttk.Frame(self.scroller, padding=(4, 4))
+            row_frame.grid(row=index, column=0, sticky="ew", pady=2)
+            row_frame.columnconfigure(1, weight=1)
+            image = ttk.Label(row_frame, text="无图", width=5, anchor="center")
+            image.grid(row=0, column=0, sticky="ns", padx=(0, 10))
             text = (
                 f"参考 {index + 1}  ·  补足识别 {stats.get('assists', 0)} 次  ·  {stats.get('assist_battles', 0)} 个对局"
                 f"  ·  {sample.review.get('formal_status', '暂不建议')}\n{sample.key}"
             )
-            label = ttk.Label(self.scroller, text=text, justify="left", wraplength=320)
-            label.grid(row=index, column=1, sticky="w", pady=4)
-            actions = ttk.Frame(self.scroller)
-            actions.grid(row=index, column=2, sticky="e", padx=(8, 0), pady=4)
+            label = ttk.Label(row_frame, text=text, justify="left", wraplength=320)
+            label.grid(row=0, column=1, sticky="nsew")
+            actions = ttk.Frame(row_frame)
+            actions.grid(row=0, column=2, sticky="ns", padx=(8, 0))
             buttons = {}
-            for action, title, callback in (
-                ("rename", "修改卡名", self._rename),
-                ("delete", "删除", self._delete),
-            ):
+            for action, title, callback in (("delete", "删除", self._delete),):
                 button = ttk.Button(
                     actions,
                     text=title,
@@ -74,23 +79,34 @@ class CardReferenceRows(ttk.Frame):
                 )
                 button.pack(side="left", padx=(0, 4))
                 buttons[action] = button
-            for widget in (image, label):
+            for widget in (row_frame, actions, image, label):
                 widget.configure(cursor="hand2", takefocus=True)
                 for event in ("<Button-1>", "<Return>", "<space>"):
                     widget.bind(event, lambda _event, key=identifier: self._select(key))
-            self.rows[identifier] = {"sample": sample, "image": image, "label": label, "text": text, **buttons}
+            self.rows[identifier] = {
+                "sample": sample,
+                "frame": row_frame,
+                "actions": actions,
+                "image": image,
+                "label": label,
+                "text": text,
+                **buttons,
+            }
         self.select(self.selected)
         return True
 
     def select(self, identifier):
         self.selected = identifier if identifier in self.rows else None
         for key, row in self.rows.items():
-            row["label"].configure(text=("▶ " if key == self.selected else "") + row["text"])
+            selected = key == self.selected
+            for part in ("frame", "actions"):
+                row[part].configure(style="SelectedReference.TFrame" if selected else "TFrame")
+            for part in ("image", "label"):
+                row[part].configure(style="SelectedReference.TLabel" if selected else "TLabel")
 
     def set_running(self, running, busy):
         for row in self.rows.values():
-            for key in ("rename", "delete"):
-                row[key].configure(state="disabled" if busy or key == "delete" and running else "normal")
+            row["delete"].configure(state="disabled" if busy or running else "normal")
 
     def set_image(self, identifier, preview):
         if identifier in self.rows:
