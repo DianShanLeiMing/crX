@@ -20,7 +20,12 @@ from crX.bot.coords import (
     START_FIGHT_BUTTON_COORD,
 )
 from crX.bot.find import find_collect_all_button, find_popup_close
-from crX.bot.state_detect import detect_post_battle_reward, is_clash_main_menu_image, is_generic_post_battle_reward
+from crX.bot.state_detect import (
+    detect_post_battle_reward,
+    is_clash_main_menu_image,
+    is_generic_post_battle_reward,
+    is_item_distribution_image,
+)
 from crX.utils.logger import Logger
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -90,6 +95,7 @@ def test_non_reward_screens_and_plain_backgrounds_are_not_clickable():
             "failure-reward-coins.png",
             "reward-coins-native-01.png",
             "reward-coins-native-02.png",
+            "failure-item-distribution-intro-native.png",  # Distribution navigation must wait instead of tapping.
         ):
             assert detect_post_battle_reward(cv2.imread(str(path))) is None, path.name
     for color in ((20, 140, 235), (160, 15, 110), (100, 60, 30)):
@@ -955,3 +961,100 @@ def test_distribution_waits_for_claim_button_before_any_generic_tap(clock, monke
         result = nav.get_to_main_after_fight(screen, Logger(), timeout=10)
     assert result
     assert screen.clicks == [(1, 180, 583)]
+
+
+def test_native_distribution_intro_is_recognized_without_a_claim_button():
+    frame = image("failure-item-distribution-intro-native.png")
+    assert is_item_distribution_image(frame)
+    assert find_collect_all_button(frame) is None
+    without_title = frame.copy()
+    without_title[290:375, 120:240] = 0
+    assert not is_item_distribution_image(without_title)
+
+
+def test_other_screens_are_not_distribution_intros():
+    distribution_files = {
+        "failure-item-distribution-intro-native.png",
+        "item-distribution-collect-all-360.png",
+        "item-distribution-collect-all-native.png",
+    }
+    for path in FIXTURES.glob("*.png"):
+        if path.name not in distribution_files:
+            assert not is_item_distribution_image(cv2.imread(str(path))), path.name
+
+
+@pytest.mark.parametrize("entry", ("startup", "post_battle", "before_match"))
+def test_native_distribution_intro_waits_then_claims_without_recounting(clock, entry):
+    screen = RewardSequence(
+        clock,
+        [
+            (image("failure-item-distribution-intro-native.png"), 2),
+            (image("item-distribution-collect-all-native.png"), None),
+            (image("card-received-popup-360.png"), None),
+            (image("failure-main-recovered.png"), None),
+        ],
+    )
+    logger = Logger()
+    if entry == "startup":
+        result = nav.wait_for_clash_main_menu(screen, logger, timeout=15)
+    elif entry == "before_match":
+        result = nav.finish_pending_battle_rewards(screen, logger)
+    else:
+        result = nav.get_to_main_after_fight(screen, logger, timeout=15)
+    assert result
+    assert [index for index, _, _ in screen.clicks] == [1, 2]
+    assert screen.clicks[0][1:] == (180, 583)
+    assert logger.stats["completed_fights"] == logger.stats["wins"] == logger.stats["losses"] == 0
+
+
+def test_matchmaking_waits_for_transition_then_claims_and_starts_once(clock, monkeypatch):
+    screen = RewardSequence(
+        clock,
+        [
+            (image("loading-native-360.png"), 1),
+            (image("failure-item-distribution-intro-native.png"), 2),
+            (image("item-distribution-collect-all-native.png"), None),
+            (image("failure-main-recovered.png"), None),
+        ],
+    )
+    original_click = screen.click
+    starts = []
+
+    def click(x, y):
+        if (x, y) == START_FIGHT_BUTTON_COORD:
+            assert is_clash_main_menu_image(screen.last_frame)
+            starts.append((x, y))
+        else:
+            original_click(x, y)
+
+    monkeypatch.setattr(screen, "click", click)
+    logger = Logger()
+    assert fight.start_fight(screen, logger, "Classic 1v1")
+    assert screen.clicks == [(2, 180, 583)]
+    assert starts == [START_FIGHT_BUTTON_COORD]
+    assert logger.stats["completed_fights"] == 0
+
+
+def test_matchmaking_unknown_timeout_keeps_actual_last_frame(clock):
+    first = image("loading-native-360.png")
+    last = np.zeros_like(first)
+    screen = RewardSequence(clock, [(first, 1), (last, None)])
+    logger = Logger()
+    assert not nav.finish_pending_battle_rewards(screen, logger)
+    assert not screen.clicks
+    assert 1 <= clock[0] <= 4
+    assert logger.failure_frame is not None
+    assert np.array_equal(logger.failure_frame["image"], last)
+    assert logger.failure_frame["details"]["stage"] == "before_match_unknown"
+
+
+def test_distribution_intro_stuck_times_out_without_any_tap(clock):
+    frame = image("failure-item-distribution-intro-native.png")
+    screen = RewardSequence(clock, [(frame, None)])
+    logger = Logger()
+    assert not nav.finish_pending_battle_rewards(screen, logger)
+    assert not screen.clicks
+    assert clock[0] <= 45
+    assert logger.failure_frame is not None
+    assert np.array_equal(logger.failure_frame["image"], frame)
+    assert logger.failure_frame["details"]["actions"] == 0

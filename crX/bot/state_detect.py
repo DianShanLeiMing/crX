@@ -25,6 +25,7 @@ from crX.bot.coords import (
     DECK_CARD_COST_REGIONS,
     GAME_SCREEN_SIZE,
     ITEM_DISTRIBUTION_COLLECT_ALL_SIZE,
+    ITEM_DISTRIBUTION_INTRO_TITLE_REGION,
     ITEM_DISTRIBUTION_TITLE_REGION,
     MAIN_BATTLE_BUTTON_REGION,
     MAIN_BATTLE_TAB_REGION,
@@ -53,11 +54,12 @@ from crX.detection.image_rec import all_pixels_are_equal, check_line_for_color, 
 
 
 def is_item_distribution_image(image) -> bool:
-    """Identify the distribution page even while its claim button is animating."""
+    """Identify the centered intro or settled page; neither implies a claim button."""
     if image is None or image.shape != (*GAME_SCREEN_SIZE[::-1], 3):
         return False
-    return (
-        find_image(image, "item_distribution_title", tolerance=0.93, subcrop=ITEM_DISTRIBUTION_TITLE_REGION) is not None
+    return any(
+        find_image(image, "item_distribution_title", tolerance=0.93, subcrop=region) is not None
+        for region in (ITEM_DISTRIBUTION_TITLE_REGION, ITEM_DISTRIBUTION_INTRO_TITLE_REGION)
     )
 
 

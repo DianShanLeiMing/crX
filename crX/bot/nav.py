@@ -67,6 +67,7 @@ POST_BATTLE_GENERIC_MAX_ACTIONS = 5
 POST_BATTLE_GENERIC_CONFIRM_S = 1.0
 POST_BATTLE_GENERIC_CLICK_INTERVAL_S = 1.5
 POPUP_CLOSE_MAX_ACTIONS = 5
+PENDING_REWARD_TRANSITION_WAIT_S = 3.0
 
 
 def wait_for_battle_start(emulator, logger, timeout: int = 120) -> bool:
@@ -511,11 +512,14 @@ def get_to_main_after_fight(
             break
         if is_item_distribution_image(image):
             generic_since = None
-            last_stage = "collect_all"
             collect_all = find_collect_all_button(image)
             if collect_all is None:
+                if last_stage != "distribution_wait":
+                    logger.change_status("已识别道具发放动画，等待领取全部按钮，不点击开场画面")
+                last_stage = "distribution_wait"
                 time.sleep(0.5)
                 continue
+            last_stage = "collect_all"
             logger.change_status("正在领取道具发放页面的全部奖励")
             emulator.click(*collect_all)
             actions += 1
@@ -625,21 +629,40 @@ def get_to_main_after_fight(
 
 def finish_pending_battle_rewards(emulator, logger) -> bool:
     """Catch a late reward overlay before matchmaking without recounting a battle."""
-    image = emulator.screenshot()
-    if is_clash_main_menu_image(image):
-        return True
-    if detect_post_battle_reward(image) is None and not (
-        is_generic_post_battle_reward(image)
-        or is_trophy_reward_image(image)
-        or is_reward_choice_image(image)
-        or find_popup_close(image) is not None
-        or is_item_distribution_image(image)
-    ):
-        return False
-    if logger is None:
-        logger = Logger()
-    logger.change_status("开战前发现残留奖励，先完成领取")
-    return get_to_main_after_fight(emulator, logger, timeout=45, allow_result_button=False)
+    started = time.monotonic()
+    deadline = started + 45
+    waiting = False
+    while True:
+        image = emulator.screenshot()
+        if is_clash_main_menu_image(image):
+            return True
+        if logger is None:
+            logger = Logger()
+        if (
+            is_item_distribution_image(image)
+            or detect_post_battle_reward(image) is not None
+            or is_generic_post_battle_reward(image)
+            or is_trophy_reward_image(image)
+            or is_reward_choice_image(image)
+            or find_popup_close(image) is not None
+        ):
+            logger.change_status("开战前发现残留奖励，先完成领取")
+            return get_to_main_after_fight(
+                emulator, logger, timeout=max(0, deadline - time.monotonic()), allow_result_button=False
+            )
+        if time.monotonic() - started >= PENDING_REWARD_TRANSITION_WAIT_S:
+            remember_failure_frame(
+                logger,
+                image,
+                reason="开战前未确认主界面或可处理奖励",
+                stage="before_match_unknown",
+                timeout_s=PENDING_REWARD_TRANSITION_WAIT_S,
+            )
+            return False
+        if not waiting:
+            logger.change_status("开战前画面尚未识别，等待过渡动画，不点击未知页面")
+            waiting = True
+        time.sleep(0.5)
 
 
 if __name__ == "__main__":
