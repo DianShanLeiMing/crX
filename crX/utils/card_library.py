@@ -28,6 +28,11 @@ MAX_LIBRARY_BYTES = 2 * 1024 * 1024
 _LOCK = threading.Lock()
 _cache: tuple[Path | None, float, list[dict]] = (None, 0, [])
 MAX_MATCH_OBSERVATIONS = 100000
+ASSIST_FIELDS = ("assists", "assist_battles", "assist_distance_total", "assist_margin_total")
+
+
+def empty_match_stats() -> dict[str, int]:
+    return dict.fromkeys(("matches", "distance_total", "margin_total", *ASSIST_FIELDS), 0)
 
 
 def read_match_stats(root: Path) -> dict:
@@ -44,6 +49,13 @@ def read_match_stats(root: Path) -> dict:
             limit = MAX_MATCH_OBSERVATIONS if field == "matches" else MAX_MATCH_OBSERVATIONS * 10000
             if type(values.get(field)) is not int or not 0 <= values[field] <= limit:
                 raise ValueError("运行匹配计数无效")
+        if any(field in values for field in ASSIST_FIELDS):
+            for field in ASSIST_FIELDS:
+                limit = MAX_MATCH_OBSERVATIONS * (10000 if field.endswith("total") else 1)
+                if type(values.get(field)) is not int or not 0 <= values[field] <= limit:
+                    raise ValueError("补足识别计数无效")
+            if values["assist_battles"] > values["assists"]:
+                raise ValueError("补足识别对局数无效")
     return records
 
 
@@ -55,14 +67,21 @@ def merge_match_stats(root: Path, observations: dict) -> None:
     for identifier, values in observations.items():
         if identifier not in live_ids:
             continue
-        current = records.setdefault(identifier, {"matches": 0, "distance_total": 0, "margin_total": 0})
+        current = records.setdefault(identifier, empty_match_stats())
+        for field in ASSIST_FIELDS:
+            current.setdefault(field, 0)  # Old raw hits cannot be converted into new evidence.
         remaining = MAX_MATCH_OBSERVATIONS - current["matches"]
         count = min(remaining, values["matches"])
-        if not count:
-            continue
-        for field in ("distance_total", "margin_total"):
-            current[field] += round(values[field] * count / values["matches"])
+        if count:
+            for field in ("distance_total", "margin_total"):
+                current[field] += round(values[field] * count / values["matches"])
         current["matches"] += count
+        assists = min(MAX_MATCH_OBSERVATIONS - current["assists"], values.get("assists", 0))
+        if assists:
+            for field in ("assist_distance_total", "assist_margin_total"):
+                current[field] += round(values[field] * assists / values["assists"])
+            current["assists"] += assists
+            current["assist_battles"] += min(assists, values["assist_battles"])
     root.mkdir(parents=True, exist_ok=True)
     atomic_json(sample_file(root, "runtime-matches.json"), {"entries": records})
 

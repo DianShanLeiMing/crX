@@ -16,6 +16,7 @@ from crX.bot.card_data import CARD_FINGERPRINT_VARIANTS, CARD_NAMES_ZH, card_col
 from crX.utils.card_review import atomic_json, load_card_thumbnail, sample_file
 
 MIN_MATCHES = 100
+MIN_BATTLES = 3
 MIN_MARGIN = 100
 MAX_BYTES = 2 * 1024 * 1024
 MAX_ENTRIES = 2048
@@ -132,14 +133,18 @@ def assess_references(root: Path, *, samples=None, refresh=True) -> dict[str, di
     stats = read_match_stats(root)
     results = {}
     for entry in read_library(root):
-        matches = stats.get(entry["id"], {}).get("matches", 0)
-        margin = stats.get(entry["id"], {}).get("margin_total", 0) / matches if matches else 0
-        distance = stats.get(entry["id"], {}).get("distance_total", 0) / matches if matches else 0
+        observations = stats.get(entry["id"], {})
+        matches = observations.get("assists", 0)
+        battles = observations.get("assist_battles", 0)
+        margin = observations.get("assist_margin_total", 0) / matches if matches else 0
+        distance = observations.get("assist_distance_total", 0) / matches if matches else 0
         result = {
             **entry,
             "status": "暂不建议",
+            "covered": False,
             "reason": "需要先确认卡名并加入本地补库",
             "matches": matches,
+            "battles": battles,
             "average_margin": margin,
             "average_distance": distance,
         }
@@ -152,7 +157,7 @@ def assess_references(root: Path, *, samples=None, refresh=True) -> dict[str, di
             result["reason"] = "存在人工卡名冲突，请在全部列表更正卡名"
             continue
         if any(references[index][0] == entry["card_id"] for index in near):
-            result.update(status="已纳入", reason="内置库已包含相同或近似的同卡参考")
+            result.update(covered=True, reason="正式库已包含相同或近似参考，不再作为待补库候选")
             continue
         if entry["status"] != "active" or entry.get("manual_disabled") or entry.get("disabled_reason"):
             continue
@@ -174,12 +179,26 @@ def assess_references(root: Path, *, samples=None, refresh=True) -> dict[str, di
         except (OSError, ValueError, TypeError) as error:
             result["reason"] = str(error)
             continue
-        if matches < MIN_MATCHES:
-            result["reason"] = f"运行命中 {matches} 次，建议至少 {MIN_MATCHES} 次"
+        disagreements = [
+            sample
+            for sample in samples
+            if sample.record.get("reason") == "builtin_disagreement"
+            and sample.record.get("source") in (f"local_active:{entry['id']}", f"local_trial:{entry['id']}")
+            and sample.card_id != entry["card_id"]
+        ]
+        if disagreements:
+            result["reason"] = "正式库与本地样本识别不一致，请在待确认／全部列表核对卡名"
+        elif matches < MIN_MATCHES:
+            result["reason"] = f"补足识别 {matches} 次，建议至少 {MIN_MATCHES} 次；已覆盖 {battles} 个对局"
+        elif battles < MIN_BATTLES:
+            result["reason"] = f"补足识别来自 {battles} 个对局，建议至少 {MIN_BATTLES} 个对局"
         elif margin < MIN_MARGIN:
             result["reason"] = f"平均候选差距 {margin:.1f}，小于 {MIN_MARGIN}，易与其他卡牌混淆"
         else:
-            result.update(status="建议纳入", reason=f"命中 {matches} 次，平均候选差距 {margin:.1f}；请人工核对识别结果")
+            result.update(
+                status="建议纳入",
+                reason=f"补足识别 {matches} 次，覆盖 {battles} 个对局，平均候选差距 {margin:.1f}；请人工核对识别结果",
+            )
     return results
 
 
@@ -188,7 +207,11 @@ def annotate_references(root, samples):
     for sample in samples:
         assessment = assessments.get(sample.review.get("library_id"))
         if assessment:
-            sample.review.update(formal_status=assessment["status"], formal_reason=assessment["reason"])
+            sample.review.update(
+                formal_status=assessment["status"],
+                formal_reason=assessment["reason"],
+                formal_covered=assessment["covered"],
+            )
 
 
 def prepare_promotion(root: Path, cards: set[str]) -> list[dict]:
@@ -250,7 +273,7 @@ def confirm_promotion(root: Path, approved: list[dict]) -> str:
                 or current["fingerprint"] != selection["fingerprint"]
             ):
                 raise ValueError("样本已变化，请刷新后重新核对")
-            if current["status"] == "已纳入":
+            if current["covered"]:
                 continue
             if current["status"] != "建议纳入":
                 raise ValueError(f"{CARD_NAMES_ZH[current['card_id']]}：{current['reason']}")

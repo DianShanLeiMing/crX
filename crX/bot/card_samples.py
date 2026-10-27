@@ -67,6 +67,8 @@ class CardSampleCollector:
         self._stop = threading.Event()
         self._match_lock = threading.Lock()
         self._match_pending: dict[str, dict[str, int]] = {}
+        self._hand_episodes: dict[int, tuple[str, bool]] = {}
+        self._assisted_in_fight: set[str] = set()
         self._next_match_flush = 0.0
         self._seen: list[tuple[str, int]] = []
         self._records: list[dict[str, Any]] = []
@@ -81,8 +83,16 @@ class CardSampleCollector:
         self.last_observation = now
         return True
 
-    def observe_library_match(self, recognition: dict) -> None:
-        """Accumulate similarity telemetry, without claiming the predicted card is correct."""
+    def observe_library_match(self, recognition: dict, slot: int) -> None:
+        """Count only baseline-unknown rescues, once per continuous card in a slot."""
+        from crX.utils.card_library import empty_match_stats
+
+        if type(slot) is not int or not 0 <= slot < 4 or self._stop.is_set():
+            return
+        card = recognition.get("card_id", "UNKNOWN")
+        # Unknown/temporarily unavailable frames do not establish a replacement card.
+        if card != "UNKNOWN" and self._hand_episodes.get(slot, (None, False))[0] != card:
+            self._hand_episodes[slot] = (card, False)
         source = recognition.get("source", "")
         if not source.startswith(("local_trial:", "local_active:")) or self._stop.is_set():
             return
@@ -97,11 +107,23 @@ class CardSampleCollector:
         with self._match_lock:
             if identifier not in self._match_pending and len(self._match_pending) >= 256:
                 return
-            record = self._match_pending.setdefault(identifier, {"matches": 0, "distance_total": 0, "margin_total": 0})
+            record = self._match_pending.setdefault(identifier, empty_match_stats())
             if record["matches"] < 100000:
                 record["matches"] += 1
                 record["distance_total"] += distance
                 record["margin_total"] += max(0, min(10000, margin))
+            if (
+                card != "UNKNOWN"
+                and recognition.get("builtin_result", {}).get("card_id") == "UNKNOWN"
+                and not self._hand_episodes[slot][1]
+                and record["assists"] < 100000
+            ):
+                record["assists"] += 1
+                record["assist_distance_total"] += distance
+                record["assist_margin_total"] += max(0, min(10000, margin))
+                record["assist_battles"] += int(identifier not in self._assisted_in_fight)
+                self._assisted_in_fight.add(identifier)
+                self._hand_episodes[slot] = (card, True)
 
     def _flush_match_stats(self):
         from crX.utils.card_library import merge_match_stats
@@ -238,6 +260,21 @@ class CardSampleCollector:
 
         if type(record.get("slot")) is not int or record.get("available") is not True:
             return True
+        if record.get("reason") == "builtin_disagreement":
+            # A confirmed source image must not swallow a new disagreement report.
+            # Retain one report per reference / baseline card for human review.
+            from crX.utils.card_review import scan_samples
+
+            existing, errors = scan_samples(self.root)
+            if errors:
+                return False
+            return not any(
+                sample.record.get("reason") == "builtin_disagreement"
+                and sample.record.get("source") == record.get("source")
+                and sample.record.get("builtin_result", {}).get("card_id")
+                == record.get("builtin_result", {}).get("card_id")
+                for sample in existing
+            )
         if self._groups is None:
             samples, _, groups = scan_grouped_samples(self.root)
             by_key = {sample.key: sample for sample in samples}

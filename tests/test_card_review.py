@@ -26,11 +26,11 @@ from crX.utils.card_review import (
 @pytest.mark.parametrize(
     ("status", "matches", "expected"),
     [
-        ("pending", 0, ("待确认", "补库尚未命中", "未使用")),
-        ("confirmed", 0, ("未启用", "补库尚未命中", "未使用")),
-        ("included", 0, ("已启用", "补库尚未命中", "当前使用")),
-        ("included", 8, ("已启用", "补库命中 8 次", "当前使用")),
-        ("conflict", 0, ("需复核", "补库尚未命中", "未使用")),
+        ("pending", 0, ("待确认", "尚无补足识别记录", "未使用")),
+        ("confirmed", 0, ("未启用", "尚无补足识别记录", "未使用")),
+        ("included", 0, ("已启用", "尚无补足识别记录", "当前使用")),
+        ("included", 8, ("已启用", "补足识别 8 次", "当前使用")),
+        ("conflict", 0, ("需复核", "尚无补足识别记录", "未使用")),
     ],
 )
 def test_progress_distinguishes_activation_from_match_observations(tmp_path, status, matches, expected):
@@ -38,7 +38,7 @@ def test_progress_distinguishes_activation_from_match_observations(tmp_path, sta
     sample.review = {
         "status": status if status in ("pending", "confirmed") else "confirmed",
         "library_status": status,
-        "library_runtime": {"matches": matches},
+        "library_runtime": {"assists": matches},
     }
     assert sample_progress(sample) == expected
 
@@ -70,7 +70,7 @@ def test_library_summary_aggregates_unique_ids_and_keeps_versions_distinct(tmp_p
                 "confirmed_card_id": card,
                 "library_status": status,
                 "library_id": identifier,
-                "library_runtime": {"matches": matches},
+                "library_runtime": {"assists": matches},
             },
         )
         for i, (card, status, identifier, matches) in enumerate(rows)
@@ -103,6 +103,41 @@ def test_summary_excludes_unconfirmed_samples_without_changing_their_status(tmp_
     assert len(summaries) == 1 and summaries[0].card_id == "knight"
     assert summaries[0].review["summary_enabled"] == 1
     assert uncertain.status == unknown.status == "pending"
+
+
+def test_formal_reference_never_contributes_to_new_candidate_summary(tmp_path):
+    source = make_sample(tmp_path)
+    archived = replace(
+        source,
+        review={
+            "confirmed_card_id": "knight",
+            "library_status": "included",
+            "library_id": "old",
+            "formal_covered": True,
+            "formal_status": "暂不建议",
+            "library_runtime": {"assists": 1000},
+        },
+    )
+    assert not library_card_summaries([archived])
+    pending = replace(
+        source,
+        name="sample-001",
+        review={
+            "confirmed_card_id": "knight",
+            "library_status": "included",
+            "library_id": "new",
+            "formal_covered": False,
+            "formal_status": "暂不建议",
+            "library_runtime": {"assists": 0},
+        },
+    )
+    summary = library_card_summaries([archived, pending])[0]
+    assert summary.key == pending.key and summary.review["summary_enabled"] == 1
+    assert summary.review["summary_matches"] == 0 and summary.review["formal_status"] == "暂不建议"
+    assert "old" not in summary.review["formal_detail"]
+    assert validation_reason(summary) == "本地试用中"
+    pending.review["formal_status"] = "建议纳入"
+    assert library_card_summaries([archived, pending])[0].review["formal_status"] == "建议纳入"
 
 
 def make_sample(root, *, slot=0, available=True):
@@ -180,11 +215,24 @@ def test_confirm_ignore_reset_preserve_source_and_other_reviews(tmp_path):
     save_review(sample, "ignored", note="切牌动画")
     sample = scan_samples(tmp_path)[0][0]
     assert sample.status == "ignored"
+    assert sample_progress(sample)[0] == "已忽略，切牌动画"
+    assert validation_reason(sample) == "切牌动画"
     save_review(sample, "pending")
     sample = scan_samples(tmp_path)[0][0]
     assert sample.status == "pending" and sample.card_id == ""
     assert (sample.directory / "samples.jsonl").read_bytes() == original
     assert not list(sample.directory.glob("*.tmp"))
+
+
+def test_ignored_labels_explain_coverage_and_manual_omission_without_changing_state(tmp_path):
+    sample = make_sample(tmp_path)
+    sample.review = {"library_status": "included", "formal_covered": True}
+    assert sample_progress(sample)[0] == "已忽略，正式库已有相同或近似参考"
+    assert sample.status == "included"
+    save_review(sample, "ignored")
+    record = scan_samples(tmp_path)[0][0]
+    assert sample_progress(record)[0] == "已忽略，手动忽略，未填写原因"
+    assert record.status == "ignored"
 
 
 def test_confirm_requires_known_id_and_corrupt_annotations_are_not_overwritten(tmp_path):

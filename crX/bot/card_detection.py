@@ -109,6 +109,15 @@ def recognize_card_fingerprint(collected_data):
         distances = numpy.concatenate((distances, formal_distances))
         names += tuple(entry["card_id"] for entry in formal)
         sources += tuple(f"builtin:{entry['id']}" for entry in formal)
+    # Compare the very same frame with the complete shipped library, before locals.
+    builtin_index = int(distances.argmin())
+    builtin_distance = int(distances[builtin_index])
+    builtin_card = CARD_DETECTION_ALIASES.get(names[builtin_index], names[builtin_index])
+    builtin_result = {
+        "card_id": builtin_card if builtin_distance <= CARD_MATCH_THRESHOLD else "UNKNOWN",
+        "distance": builtin_distance,
+        "source": sources[builtin_index],
+    }
     local = runtime_entries()
     if local:
         local_distances = numpy.abs(numpy.array([entry["fingerprint"] for entry in local]) - collected).sum(axis=(1, 2))
@@ -142,6 +151,7 @@ def recognize_card_fingerprint(collected_data):
         "candidates": candidates,
         "candidate_margin": candidates[1]["distance"] - best["distance"],
         "match_threshold": CARD_MATCH_THRESHOLD,
+        "builtin_result": builtin_result,
     }
 
 
@@ -306,9 +316,13 @@ def _record_match_sample(image, slot, fingerprint, recognition, *, trigger, purp
     collector = active_card_samples()
     if collector is None:
         return
-    collector.observe_library_match(recognition)
+    collector.observe_library_match(recognition, slot)
     if recognition["card_id"] == "UNKNOWN":
         reason = "unknown"
+    elif recognition.get("source", "").startswith(("local_trial:", "local_active:")) and recognition.get(
+        "builtin_result", {}
+    ).get("card_id", "UNKNOWN") not in ("UNKNOWN", recognition["card_id"]):
+        reason = "builtin_disagreement"
     elif recognition.get("source", "").startswith("local_trial:"):
         reason = "trial_match"
     elif recognition["candidate_margin"] < DIAGNOSTIC_MIN_MARGIN:

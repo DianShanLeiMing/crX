@@ -183,14 +183,24 @@ def test_review_tab_confirmation_automatically_adds_reference_without_library_ac
         assert ui.notebook.tab(tab, "text") == "卡牌样本"
         tab.filter_var.set("补库")
         tab._render_list()
+        assert not tab.tree.get_children()
+        assert tab.samples[source.key].review["formal_covered"]
+        assert not tab.stage_buttons["confirm"].winfo_manager()
+        assert tab.tree.heading("enabled", "text") == "样本参考数"
+        tab.filter_var.set("全部")
+        tab._render_list()
         assert tab.selected is not None
+        assert tab.tree.set(source.key, "status") == "已忽略，正式库已有相同或近似参考"
+        from tkinter.font import Font
+
+        assert tab.tree.column("status", "width") >= Font(root=tab, font="TkDefaultFont").measure(
+            tab.tree.set(source.key, "status")
+        )
         assert tab.selected.card_id == "evo_cannon"
         assert tab.note_var.get() == "人工核对"
         assert tab.selected.status == "included"
         assert not (source.directory / "sample-000-candidate.json").exists()
         assert set(tab.stage_buttons) == {"confirm", "formal"}
-        assert not tab.stage_buttons["confirm"].winfo_manager()
-        assert tab.tree.heading("enabled", "text") == "样本参考数"
         assert not errors
     finally:
         ui.set_button_state("idle")
@@ -478,6 +488,7 @@ def test_card_samples_clear_confirmation_running_guard_and_refresh(desktop_ui, m
 
 def test_stage_buttons_and_clearing_preserve_other_stages(desktop_ui, monkeypatch):
     monkeypatch.setattr("crX.utils.card_library.base_match", lambda _: ("UNKNOWN", 10000))
+    monkeypatch.setattr("crX.utils.formal_library._bundled_references", lambda: [("giant", [[891] + [0] * 15] * 4)])
     ui, root = desktop_ui
     source = add_group_sample(root, "simple-a", "sample-000")
     other = add_group_sample(root, "simple-b", "sample-000")
@@ -518,8 +529,8 @@ def test_stage_buttons_and_clearing_preserve_other_stages(desktop_ui, monkeypatc
     assert tab.tree.set(source.key, "enabled") == "1"
     assert tab.tree.set(source.key, "runtime") == "0"
     assert "pending" not in tab.tree.cget("columns")
-    assert tab.tree.set(source.key, "validation_reason") == "内置参考使用中"
-    assert "内置参考使用中" in tab.description_var.get()
+    assert tab.tree.set(source.key, "validation_reason") == "本地试用中"
+    assert "本地试用中" in tab.description_var.get()
     prompts = []
     monkeypatch.setattr(
         "crX.interface.card_review.messagebox.askyesno",
@@ -954,7 +965,8 @@ def test_legacy_confirmed_records_retry_by_reconfirming_from_all(desktop_ui, tmp
         assert tab.samples[source.key].review["note"] == "历史确认记录"
         tab.filter_var.set("补库")
         tab._render_list()
-        assert tab.tree.set(source.key, "enabled") == "1"
+        assert not tab.tree.get_children()
+        assert tab.samples[source.key].review["formal_covered"]
         assert tab.tree.heading("enabled", "text") == "样本参考数"
         tab.refresh()
         _wait_ui(ui, lambda: not tab._scan_busy)
@@ -1008,12 +1020,27 @@ def test_formal_promotion_preview_cancel_confirm_and_running_guard(desktop_ui, t
     monkeypatch.setattr(formal, "card_color_data", {})
     monkeypatch.setattr(formal, "CARD_FINGERPRINT_VARIANTS", {"giant": [fingerprint(15).tolist()]})
     monkeypatch.setattr(formal, "_runtime_cache", (None, 0.0, []))
-    monkeypatch.setattr(local, "sample_fingerprint", lambda _sample: fingerprint())
+    monkeypatch.setattr(
+        local, "sample_fingerprint", lambda sample: fingerprint(4 if sample.name == "sample-001" else 0)
+    )
     sample = add_group_sample(tmp_path, "promote-ui", "sample-000")
     save_review(sample, "confirmed", "knight")
     local.update_library(tmp_path, [sample], "enable")
     entry = local.read_library(tmp_path)[0]
-    local.merge_match_stats(tmp_path, {entry["id"]: {"matches": 100, "distance_total": 4000, "margin_total": 20000}})
+    local.merge_match_stats(
+        tmp_path,
+        {
+            entry["id"]: {
+                "matches": 100,
+                "distance_total": 4000,
+                "margin_total": 20000,
+                "assists": 100,
+                "assist_battles": 3,
+                "assist_distance_total": 4000,
+                "assist_margin_total": 20000,
+            }
+        },
+    )
     ui, _root = desktop_ui
     window = tk.Toplevel(ui)
     window.geometry("760x700")
@@ -1060,17 +1087,38 @@ def test_formal_promotion_preview_cancel_confirm_and_running_guard(desktop_ui, t
         next(button for button in buttons if button.cget("text") == "确认加入内置库").invoke()
         _wait_ui(ui, lambda: not tab.formalizing and not tab._scan_busy)
         assert len(formal._read_entries(destination)) == 1
-        assert tab.tree.set(sample.key, "formal") == "已纳入"
-        assert tab.tree.set(sample.key, "validation_reason") == "内置参考使用中"
-        assert "已纳入 1 份" in tab.detail_var.get()
+        assert not tab.tree.get_children()
+        assert tab.samples[sample.key].review["formal_covered"]
+        assert "补库 0 种卡牌" in tab.summary_var.get()
         assert str(tab.stage_buttons["formal"].cget("state")) == "disabled"
         assert str(ui.main_btn.cget("state")) == "normal"
+        assert str(tab.clear_button.cget("state")) == "disabled"
         before = destination.read_bytes()
         prompts = []
         monkeypatch.setattr(
             "crX.interface.card_review.messagebox.askyesno",
             lambda _title, message, **_kwargs: prompts.append(message) or True,
         )
+        newer = add_group_sample(tmp_path, "promote-ui", "sample-001")
+        save_review(newer, "confirmed", "knight")
+        local.update_library(tmp_path, [newer], "enable")
+        tab.refresh()
+        _wait_ui(ui, lambda: not tab._scan_busy and newer.key in tab.tree.get_children())
+        assert tab.tree.get_children() == (newer.key,)
+        assert tab.tree.set(newer.key, "formal") == "暂不建议"
+        assert tab.tree.set(newer.key, "enabled") == "1" and tab.tree.set(newer.key, "runtime") == "0"
+        assert tab.tree.set(newer.key, "validation_reason") == "本地试用中"
+        tab.select_all_button.invoke()
+        assert tab._selected_clear_keys() == {newer.key}
+        assert {row.key for row in tab._action_samples()} == {newer.key}
+        tab.clear_button.invoke()
+        _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy)
+        assert sample.key in tab.samples and newer.key not in tab.samples
+        assert sample.file("frame").exists() and not newer.file("frame").exists(), tab.message_var.get()
+        assert not tab.tree.get_children() and destination.read_bytes() == before
+        tab.filter_var.set("全部")
+        tab._render_list()
+        tab.select_all_button.invoke()
         tab.clear_button.invoke()
         _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy)
         assert not tab.samples and "正式内置参考保留" in prompts[0]
@@ -1126,7 +1174,7 @@ def test_summary_clear_selected_card_warns_and_keeps_unselected_card(desktop_ui,
         assert str(tab.clear_button.cget("state")) == "normal"  # Current use is not silently exempted.
         before = library.library_path(tmp_path).read_bytes()
         tab.clear_button.invoke()
-        assert "1 种卡牌，共 2 张样本" in prompts[0]
+        assert "1 种卡牌，共 2 张待补库样本" in prompts[0]
         assert "后台候选" in prompts[0] and "正在使用" in prompts[0]
         assert library.library_path(tmp_path).read_bytes() == before
         approve = True

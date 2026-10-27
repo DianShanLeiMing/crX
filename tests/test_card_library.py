@@ -7,7 +7,7 @@ import pytest
 
 from crX.bot import card_detection
 from crX.utils import card_library as library
-from crX.utils.card_review import save_review, scan_samples
+from crX.utils.card_review import sample_progress, save_review, scan_samples, validation_reason
 from tests.test_card_review import add_group_sample
 
 
@@ -73,8 +73,15 @@ def test_near_duplicates_merge_without_requiring_other_fights(tmp_path, samples)
     entries = library.read_library(tmp_path)
     assert len(entries) == 1 and len(entries[0]["sources"]) == 2
     assert entries[0]["status"] == "active"
+    records = {record.key: record for record in scan_samples(tmp_path)[0]}
+    assert sample_progress(records[duplicate.key])[0] == "已忽略，已合并到同卡近似参考"
+    assert first.key in validation_reason(records[duplicate.key])
+    assert records[duplicate.key].status == "included"
     save_review(first, "ignored")
     assert library.read_library(tmp_path)[0]["status"] == "active"  # Another confirmed source remains.
+    records = {record.key: record for record in scan_samples(tmp_path)[0]}
+    assert sample_progress(records[duplicate.key])[0] == "已启用"
+    assert sample_progress(records[first.key])[0] == "已忽略，手动忽略，未填写原因"
 
 
 def test_distinct_appearances_are_retained_without_extra_coverage(tmp_path, samples):

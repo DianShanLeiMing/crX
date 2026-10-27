@@ -21,6 +21,7 @@ from crX.utils.card_review import (
     CARD_THUMBNAIL_SIZE,
     REASON_LABELS,
     STATUS_LABELS,
+    is_library_candidate,
     library_card_summaries,
     load_card_thumbnail,
     load_previews,
@@ -45,7 +46,7 @@ COLUMN_SPECS = {
     "status": ("处理状态", 100),
     "card": ("确认卡名", 200),
     "enabled": ("样本参考数", 100),
-    "runtime": ("补库命中次数", 100),
+    "runtime": ("补足识别次数", 100),
     "formal": ("正式补库", 100),
     "validation_reason": ("说明", 210),
 }
@@ -296,7 +297,9 @@ class CardReviewTab(ttk.Frame):
         }
         self.stage_help = tk.StringVar()
         ttk.Label(self, textvariable=self.stage_help, wraplength=700).grid(row=7, column=0, sticky="w", pady=2)
-        self.message_var = tk.StringVar(value="确认卡名后自动补库；同卡不同外观共同识别。运行命中仅是观察记录。")
+        self.message_var = tk.StringVar(
+            value="确认卡名后自动补库；只统计正式库未识别、本地样本补足的次数，连续重复识别只计一次。"
+        )
         message = ttk.Label(self, textvariable=self.message_var, wraplength=640)
         message.grid(row=8, column=0, sticky="ew", pady=(4, 0))
         message.bind("<Configure>", lambda event: message.configure(wraplength=max(200, event.width - 8)))
@@ -493,8 +496,7 @@ class CardReviewTab(ttk.Frame):
             return {
                 sample.key
                 for sample in self.samples.values()
-                if sample.card_id in cards
-                and sample.status in ("confirmed", "trial", "covered", "included", "conflict")
+                if sample.card_id in cards and is_library_candidate(sample)
             }
         return {sample.key for sample in selected}
 
@@ -510,7 +512,7 @@ class CardReviewTab(ttk.Frame):
         active_cards = {sample.card_id for sample in targets if sample_progress(sample)[2] == "当前使用"}
         names = "、".join(sorted(CARD_NAMES_ZH.get(card, card) for card in cards)[:8])
         scope = (
-            f"补库汇总中选中的 {len(cards)} 种卡牌，共 {len(keys)} 张样本（包含这些卡牌的后台候选）"
+            f"补库汇总中选中的 {len(cards)} 种卡牌，共 {len(keys)} 张待补库样本（包含这些卡牌的后台候选）"
             if self.filter_var.get() == "补库"
             else f"当前列表中选中的 {len(keys)} 张样本"
         )
@@ -726,8 +728,6 @@ class CardReviewTab(ttk.Frame):
             if self.filter_var.get() != "待确认":
                 verification, runtime, _ = sample_progress(sample)
                 description = validation_reason(sample)
-                if sample.status == "included" and not sample.review.get("library_issue"):
-                    description = "内置参考使用中" if sample.review.get("formal_status") == "已纳入" else "本地试用中"
                 row.update(
                     status=verification,
                     card=CARD_NAMES_ZH.get(sample.card_id, "—"),
@@ -747,6 +747,9 @@ class CardReviewTab(ttk.Frame):
             self.tree.column("session", width=max(220, text_width + 24), minwidth=220)
             reason_width = max((font.measure(self.tree.set(key, "reason")) for key in desired), default=0)
             self.tree.column("reason", width=max(80, reason_width + 24), minwidth=80)
+            if "status" in columns:
+                status_width = max((font.measure(self.tree.set(key, "status")) for key in desired), default=0)
+                self.tree.column("status", width=max(100, status_width + 24), minwidth=100)
         self._layout_rows()
         self._render_thumbnails(desired)
         remaining = tuple(key for key in selection if key in desired)
@@ -847,12 +850,22 @@ class CardReviewTab(ttk.Frame):
         self.detail_var.set(
             f"{captured}  |  {MODE_LABELS.get(record.get('mode'), record.get('mode', '未知模式'))}  |  第 {slot + 1 if type(slot) is int else '—'} 张手牌  |  对局 {record.get('elapsed_s', '?')} 秒\n{REASON_LABELS.get(record.get('reason'), '识别异常')}  ·  {verification}\n候选仅供参考（距离越小越接近，阈值 {record.get('match_threshold', '—')}）：\n{candidates or '无卡名候选，此样本用于手牌可用性诊断'}"
         )
+        if record.get("builtin_result"):
+            builtin = record["builtin_result"]
+            card = builtin.get("card_id", "UNKNOWN")
+            self.detail_var.set(
+                self.detail_var.get()
+                + f"\n仅正式库：{CARD_NAMES_ZH.get(card, '未知卡牌')}，距离 {builtin.get('distance', '?')}"
+                + f"；加入本地样本：{CARD_NAMES_ZH.get(record.get('card_id'), '未知卡牌')}"
+            )
         if sample.review.get("library_id"):
             self.detail_var.set(
                 self.detail_var.get()
                 + f"\n补库 {sample.review['library_id']} · {validation_reason(sample)}"
                 + f"\n运行记录：{runtime_text}；{verification}。"
-                + "\n命中次数只统计该指纹参与识别的次数，不代表自动核验卡名正确。"
+                + f"\n补足记录覆盖 {sample.review.get('library_runtime', {}).get('assist_battles', 0)} 个对局。"
+                + "\n只计正式库未识别、本地样本补足；连续重复识别只计一次，仍需人工核对卡名。"
+                + "历史命中记录不折算为补足次数。"
             )
         if self.filter_var.get() == "补库":
             summary = next(
@@ -975,7 +988,7 @@ class CardReviewTab(ttk.Frame):
         stage = self.filter_var.get()
         self.stage_buttons["confirm"].configure(text="确认" if stage == "待确认" else "更正卡名")
         self.selection_var.set(
-            f"共 {len(self.tree.get_children())} 种卡牌，已选 {count} 种；清空选中会删除所选卡牌的全部候选，包含当前使用项。"
+            f"共 {len(self.tree.get_children())} 种卡牌，已选 {count} 种；清空选中只删除待补库候选，包含本地试用项。"
             if stage == "补库"
             else f"已选 {count} 张；Ctrl / Shift 多选，卡名和备注应用于全部选中样本。"
         )
@@ -1001,7 +1014,7 @@ class CardReviewTab(ttk.Frame):
         self.stage_help.set(
             {
                 "待确认": "确认卡名后自动补库并启用；清空只处理选中样本，全选只作用于当前列表。",
-                "补库": "样本参考数为去重后参与识别的外观数量；正式补库需人工核对。清空选中清理本地样本，已纳入的内置参考保留。",
+                "补库": "仅展示尚未正式补库的新参考；正式补库完成或重复参考退出候选。清空只处理待补库样本。",
             }.get(stage, "可选择具体样本确认或更正卡名，也可多选后清空；未知样本不自动继承预测卡名。")
         )
         self.select_group_button.configure(
@@ -1012,7 +1025,9 @@ class CardReviewTab(ttk.Frame):
         selected = [self.samples[key] for key in self.tree.selection() if key in self.samples]
         if self.filter_var.get() == "补库":
             cards = {sample.card_id for sample in selected}
-            return [sample for sample in self.samples.values() if sample.card_id in cards]
+            return [
+                sample for sample in self.samples.values() if sample.card_id in cards and is_library_candidate(sample)
+            ]
         return selected
 
     def _prepare_formal(self):
@@ -1067,7 +1082,7 @@ class CardReviewTab(ttk.Frame):
         dialog.rowconfigure(1, weight=1)
         ttk.Label(
             dialog,
-            text=f"共 {len(entries)} 份参考。请核对卡名、版本及实际识别结果；命中次数不代表自动验证通过。",
+            text=f"共 {len(entries)} 份参考。请核对卡名、版本及实际识别结果；补足次数不代表自动验证通过。",
             wraplength=600,
             padding=12,
         ).grid(row=0, column=0, sticky="ew")
@@ -1080,7 +1095,8 @@ class CardReviewTab(ttk.Frame):
             self._formal_images.append(photo)
             ttk.Label(previews, image=photo).grid(row=index, column=0, padx=(0, 12), pady=6)
             text = (
-                f"{CARD_NAMES_ZH[entry['card_id']]}\n命中 {entry['matches']} 次 · 平均匹配距离 {entry['average_distance']:.1f}"
+                f"{CARD_NAMES_ZH[entry['card_id']]}\n补足识别 {entry['matches']} 次 · {entry['battles']} 个对局"
+                f" · 平均匹配距离 {entry['average_distance']:.1f}"
                 f" · 平均候选差距 {entry['average_margin']:.1f}\n参考 {entry['id']}"
             )
             ttk.Label(previews, text=text, justify="left", wraplength=490).grid(row=index, column=1, sticky="w", pady=6)

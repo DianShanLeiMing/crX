@@ -31,6 +31,7 @@ REASON_LABELS = {
     "low_margin": "候选接近",
     "no_available_cards_high_elixir": "手牌可用性异常",
     "trial_match": "试用指纹命中",
+    "builtin_disagreement": "正式库与本地识别不一致",
 }
 SAMPLE_NAME = re.compile(r"sample-\d{3,}")
 GROUP_HASH_DISTANCE = 8
@@ -96,6 +97,18 @@ class ReviewSample:
         return sample_file(self.directory, self.record["files"][kind])
 
 
+def ignored_reason(sample: ReviewSample) -> str:
+    """Explain omitted candidates without changing human labels or shared references."""
+    if sample.status == "ignored":
+        note = sample.review.get("note", "")
+        return note.strip() if isinstance(note, str) and note.strip() else "手动忽略，未填写原因"
+    if sample.review.get("formal_covered"):
+        return "正式库已有相同或近似参考"
+    if sample.status == "included" and sample.review.get("library_merged_into"):
+        return "已合并到同卡近似参考"
+    return ""
+
+
 def validation_reason(sample: ReviewSample) -> str:
     """Explain activation or human-label conflicts, without offline score claims."""
     issue = sample.review.get("library_issue", "")
@@ -106,10 +119,14 @@ def validation_reason(sample: ReviewSample) -> str:
         return "达到单卡8份上限，请清理后在全部列表重新确认卡名"
     if issue == "source":
         return "来源已撤销或更正，请检查人工标注"
+    omission = ignored_reason(sample)
+    if omission:
+        target = sample.review.get("library_merged_into")
+        return f"{omission}：{target}" if target and not sample.review.get("formal_covered") else omission
     if sample.status == "pending":
         return "确认准确卡名及版本后自动启用"
     if sample.status == "included":
-        return "内置参考使用中" if sample.review.get("formal_status") == "已纳入" else "本地试用中"
+        return "正式库已有参考" if sample.review.get("formal_covered") else "本地试用中"
     return (
         "已停用，请在全部列表重新确认卡名"
         if sample.review.get("library_id")
@@ -119,28 +136,47 @@ def validation_reason(sample: ReviewSample) -> str:
 
 def sample_progress(sample: ReviewSample) -> tuple[str, str, str]:
     """A match is an observation, never evidence that the prediction was correct."""
-    matches = sample.review.get("library_runtime", {}).get("matches", 0)
-    runtime = f"补库命中 {matches} 次" if type(matches) is int and matches > 0 else "补库尚未命中"
+    matches = sample.review.get("library_runtime", {}).get("assists", 0)
+    runtime = f"补足识别 {matches} 次" if type(matches) is int and matches > 0 else "尚无补足识别记录"
     enabled = sample.status == "included"
-    return STATUS_LABELS[sample.status], runtime, "当前使用" if enabled else "未使用"
+    label = STATUS_LABELS[sample.status]
+    omission = " ".join(ignored_reason(sample).split())
+    if omission:
+        label = f"已忽略，{omission[:30]}{'…' if len(omission) > 30 else ''}"
+    return label, runtime, "当前使用" if enabled else "未使用"
+
+
+def is_library_candidate(sample: ReviewSample) -> bool:
+    """Completed/duplicate references stay in history, outside the candidate workflow."""
+    return (
+        sample.card_id in CARD_NAMES_ZH
+        and sample.status not in ("pending", "ignored")
+        and not sample.review.get("formal_covered", False)
+    )
 
 
 def library_card_summaries(samples: list[ReviewSample]) -> list[ReviewSample]:
-    """Aggregate fingerprints by card/version, counting each library ID once."""
+    """Aggregate only pending references by card/version, counting each ID once."""
     by_card: dict[str, list[ReviewSample]] = {}
     for sample in samples:
-        if sample.card_id in CARD_NAMES_ZH and sample.status not in ("pending", "ignored"):
+        if is_library_candidate(sample):
             by_card.setdefault(sample.card_id, []).append(sample)
     summaries = []
     for card, candidates in by_card.items():
-        representative = min(candidates, key=lambda sample: (sample.status != "included", sample.key))
+        representative = min(
+            candidates,
+            key=lambda sample: (
+                sample.status != "included",
+                bool(sample.review.get("library_merged_into")),
+                sample.key,
+            ),
+        )
         entries = {sample.review["library_id"]: sample for sample in candidates if sample.review.get("library_id")}
         enabled = sum(sample.status == "included" for sample in entries.values())
-        matches = sum(sample.review.get("library_runtime", {}).get("matches", 0) for sample in entries.values())
+        matches = sum(sample.review.get("library_runtime", {}).get("assists", 0) for sample in entries.values())
         recommended = sum(sample.review.get("formal_status") == "建议纳入" for sample in entries.values())
-        incorporated = sum(sample.review.get("formal_status") == "已纳入" for sample in entries.values())
-        formal_status = "建议纳入" if recommended else "已纳入" if incorporated else "暂不建议"
-        formal_detail = f"正式补库：建议纳入 {recommended} 份，已纳入 {incorporated} 份，其余暂不建议。"
+        formal_status = "建议纳入" if recommended else "暂不建议"
+        formal_detail = f"待补库参考：建议纳入 {recommended} 份，其余暂不建议。"
         formal_detail += "\n" + "\n".join(
             f"{identifier}：{sample.review.get('formal_status', '暂不建议')}；{sample.review.get('formal_reason', '暂无可用运行记录')}"
             for identifier, sample in entries.items()
@@ -223,6 +259,11 @@ def scan_samples(root: Path) -> tuple[list[ReviewSample], int]:
         entries = []
         errors += 1
     library_sources = {(source, entry["card_id"]): entry for entry in entries for source in entry["sources"]}
+    confirmed = {(sample.key, sample.card_id) for sample in samples if sample.status not in ("pending", "ignored")}
+    representatives = {
+        entry["id"]: next((key for key in entry["sources"] if (key, entry["card_id"]) in confirmed), "")
+        for entry in entries
+    }
     for sample in samples:
         entry = library_sources.get((sample.key, sample.card_id))
         if entry and sample.status not in ("pending", "ignored"):
@@ -238,6 +279,9 @@ def scan_samples(root: Path) -> tuple[list[ReviewSample], int]:
                 "library_issue": entry.get("disabled_reason", ""),
                 "library_conflicts": entry.get("conflicts", []),
                 "library_runtime": entry.get("runtime", {}),
+                "library_merged_into": (
+                    representatives[entry["id"]] if representatives[entry["id"]] != sample.key else ""
+                ),
             }
     return samples, errors
 

@@ -99,11 +99,17 @@ def test_collector_flushes_telemetry_without_creating_labels_or_images(tmp_path,
     try:
         for _ in range(3):
             collector.observe_library_match(
-                {"source": f"local_active:{identifier}", "candidates": [{"distance": 30}], "candidate_margin": 150}
+                {"source": f"local_active:{identifier}", "candidates": [{"distance": 30}], "candidate_margin": 150},
+                0,
             )
     finally:
         assert collector.close()
-    assert library.read_match_stats(tmp_path)[identifier] == {"matches": 3, "distance_total": 90, "margin_total": 450}
+    assert library.read_match_stats(tmp_path)[identifier] == {
+        **library.empty_match_stats(),
+        "matches": 3,
+        "distance_total": 90,
+        "margin_total": 450,
+    }
     assert not collector.directory.exists()
     assert len(scan_samples(tmp_path)[0]) == 1
 
