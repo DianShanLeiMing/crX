@@ -33,6 +33,7 @@ logs/
 recordings/
 var/
 scripts/capture_output/
+/crX/bot/card_reference_library.json.lock
 docs/reference/
 
 # Keep the application's version resource

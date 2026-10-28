@@ -334,7 +334,7 @@ def test_card_thumbnail_reads_only_crop_and_preserves_source(tmp_path):
     sample.file("hand").unlink()
     image = load_card_thumbnail(sample)
     assert image is not None and image.mode == "RGB"
-    assert 0 < image.width <= 16 and 0 < image.height <= 20
+    assert 0 < image.width <= 32 and 0 < image.height <= 40
     assert sample.file("card").read_bytes() == original
 
 

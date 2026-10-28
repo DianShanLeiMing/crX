@@ -8,6 +8,7 @@ import os
 import sys
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
@@ -235,6 +236,44 @@ def prepare_promotion(root: Path, cards: set[str]) -> list[dict]:
     return candidates
 
 
+@contextmanager
+def writer_lock(path):
+    """An OS-owned lock is released even if a writer exits before journal recovery."""
+    if path.is_symlink() or path.is_junction():
+        raise ValueError("写入锁不能使用链接")
+    descriptor = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+    locked = False
+    try:
+        if os.fstat(descriptor).st_size == 0:
+            os.write(descriptor, b"0")
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as error:
+            raise ValueError("另一个窗口正在更新记录，请稍后重试") from error
+        locked = True
+        yield
+    finally:
+        if locked:
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
+
+
 def _write_entries(path, entries, expected):
     if len(entries) > MAX_ENTRIES:
         raise ValueError("正式参考库数量已达上限")
@@ -243,17 +282,10 @@ def _write_entries(path, entries, expected):
         raise ValueError("正式参考库过大")
     path = sample_file(path.parent, path.name)
     lock_path = sample_file(path.parent, path.name + ".lock")
-    try:
-        descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    except FileExistsError as error:
-        raise ValueError("另一个窗口正在更新正式参考库，请稍后重试") from error
-    try:
-        os.close(descriptor)
+    with writer_lock(lock_path):
         if _read_entries(path) != expected:
             raise ValueError("正式参考库已变化，请刷新后重新确认")
         atomic_json(path, value)
-    finally:
-        lock_path.unlink(missing_ok=True)
 
 
 def confirm_promotion(root: Path, approved: list[dict]) -> str:

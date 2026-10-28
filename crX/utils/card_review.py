@@ -36,7 +36,7 @@ REASON_LABELS = {
 SAMPLE_NAME = re.compile(r"sample-\d{3,}")
 GROUP_HASH_DISTANCE = 8
 GROUP_PIXEL_DIFFERENCE = 12
-CARD_THUMBNAIL_SIZE = (16, 20)
+CARD_THUMBNAIL_SIZE = (32, 40)
 
 
 def sample_file(directory: Path, filename: str) -> Path:
@@ -80,6 +80,8 @@ class ReviewSample:
 
     @property
     def status(self) -> str:
+        if self.review.get("work_result") in ("pending", "included", "covered", "ignored"):
+            return self.review["work_result"]
         if self.review.get("library_status") in ("trial", "included", "covered", "conflict"):
             return self.review["library_status"]
         status = self.review.get("status")
@@ -99,6 +101,8 @@ class ReviewSample:
 
 def ignored_reason(sample: ReviewSample) -> str:
     """Explain omitted candidates without changing human labels or shared references."""
+    if sample.review.get("work_result"):
+        return sample.review.get("work_reason", "") if sample.status == "ignored" else ""
     if sample.status == "ignored":
         note = sample.review.get("note", "")
         return note.strip() if isinstance(note, str) and note.strip() else "手动忽略，未填写原因"
@@ -111,6 +115,8 @@ def ignored_reason(sample: ReviewSample) -> str:
 
 def validation_reason(sample: ReviewSample) -> str:
     """Explain activation or human-label conflicts, without offline score claims."""
+    if sample.review.get("work_result"):
+        return sample.review.get("work_reason", "")
     issue = sample.review.get("library_issue", "")
     if issue == "conflict":
         names = "、".join(CARD_NAMES_ZH.get(card, card) for card in sample.review.get("library_conflicts", []))
@@ -136,6 +142,11 @@ def validation_reason(sample: ReviewSample) -> str:
 
 def sample_progress(sample: ReviewSample) -> tuple[str, str, str]:
     """A match is an observation, never evidence that the prediction was correct."""
+    if sample.review.get("work_result"):
+        label = {"pending": "待确认", "included": "已入库", "covered": "已有覆盖", "ignored": "已忽略"}[sample.status]
+        if sample.status == "pending" and "复核" in sample.review.get("work_reason", ""):
+            label = "需复核"
+        return label, "历史运行记录仅供观察", "当前使用" if sample.status == "included" else "未使用"
     matches = sample.review.get("library_runtime", {}).get("assists", 0)
     runtime = f"补足识别 {matches} 次" if type(matches) is int and matches > 0 else "尚无补足识别记录"
     enabled = sample.status == "included"
@@ -258,6 +269,14 @@ def scan_samples(root: Path) -> tuple[list[ReviewSample], int]:
                     raise ValueError("标注格式无效")
                 if not isinstance(review.get("confirmed_card_id") or "", str):
                     raise ValueError("标注卡名无效")
+                if "work_result" in review and (
+                    review["work_result"] not in ("pending", "included", "covered", "ignored")
+                    or not isinstance(review.get("formal_id", ""), str)
+                    or len(review.get("formal_id", "")) > 128
+                    or type(review.get("owns_reference", False)) is not bool
+                    or not isinstance(review.get("work_reason", ""), str)
+                ):
+                    raise ValueError("样本处理结果无效")
                 samples.append(ReviewSample(directory, name, record, review))
                 seen.add(name)
             except (ValueError, KeyError, TypeError, AttributeError):

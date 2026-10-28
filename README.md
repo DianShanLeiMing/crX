@@ -89,7 +89,8 @@ ADB 路径可指向 Android SDK 的 `adb.exe`，或留空使用 PATH 中的 ADB�
 流程、超时边界及验证记录见 [战后奖励处理](docs/post-battle-rewards.md)。
 
 战斗会自动记录未知／候选分数接近的手牌，战后生成待标注清单，
-不改变配置的战斗次数。样本目录、限制与首批补库记录见 [卡牌采样与识别](docs/card-recognition.md)。
+不改变配置的战斗次数。卡牌样本使用“待确认、已入库、已有覆盖、已忽略”四个标签，人工核对后一次确认入库。
+操作见 [卡牌样本确认与入库](docs/card-trial-library.md)；采样限制与首批记录见 [卡牌采样与识别](docs/card-recognition.md)。
 
 已移除卡牌养成、公主塔升级、部落操作、部落战、多账号、Discord，
 以及 MEmu、BlueStacks、Google Play Games 的专用适配。

@@ -258,7 +258,8 @@ def test_atomic_write_failure_and_concurrent_change_preserve_library(tmp_path, p
     with pytest.raises(OSError, match="disk full"):
         formal.confirm_promotion(tmp_path, candidates)
     assert destination.read_bytes() == before
-    assert not list(tmp_path.glob("*.lock"))
+    with formal.writer_lock(destination.with_name(destination.name + ".lock")):
+        pass  # Failed writes release the OS lock for a retry.
     with pytest.raises(ValueError, match="已变化"):
         formal._write_entries(destination, [], [{"other": "version"}])
     assert destination.read_bytes() == before
@@ -284,7 +285,6 @@ def test_existing_writer_lock_blocks_without_overwriting(tmp_path, promotion_sam
     candidates = formal.prepare_promotion(tmp_path, {"knight"})
     before = destination.read_bytes()
     lock = destination.with_name(destination.name + ".lock")
-    lock.write_text("another writer", encoding="utf-8")
-    with pytest.raises(ValueError, match="另一个窗口"):
+    with formal.writer_lock(lock), pytest.raises(ValueError, match="另一个窗口"):
         formal.confirm_promotion(tmp_path, candidates)
-    assert destination.read_bytes() == before and lock.read_text(encoding="utf-8") == "another writer"
+    assert destination.read_bytes() == before
