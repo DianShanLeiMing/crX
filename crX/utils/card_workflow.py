@@ -22,7 +22,14 @@ from crX.utils.card_review import (
     scan_samples,
 )
 
-REVIEW_TABS = {"待确认": "pending", "已入库": "included", "已有覆盖": "covered", "已忽略": "ignored"}
+REVIEW_TABS = {
+    "待确认": "pending",
+    "待上传": "included",
+    "样本库": "catalog",
+    "已被覆盖": "covered",
+    "已忽略": "ignored",
+}
+COVERAGE_POLICY = 2
 MAX_STATE_BYTES = 16 * 1024 * 1024
 _LOCK = threading.RLock()
 
@@ -139,6 +146,7 @@ def _result(result, card_id, reason, *, reference="", owned=False, note=None):
         "work_reason": reason,
         "formal_id": reference,
         "owns_reference": owned,
+        "coverage_policy": COVERAGE_POLICY,
         "reviewed_at": time.time(),
     }
     if note is not None:
@@ -194,6 +202,27 @@ def _near(fingerprint, references):
     return result
 
 
+def _recognized_reference(fingerprint, references, card_id):
+    """Reuse a correct formal prediction with the existing diagnostic margin."""
+    from crX.bot.card_detection import CARD_MATCH_THRESHOLD, DIAGNOSTIC_MIN_MARGIN
+
+    if not references:
+        return None
+    distances = np.abs(np.array([value for _, value, _ in references], dtype=np.int64) - fingerprint).sum(axis=(1, 2))
+    index = int(distances.argmin())
+    card, _, identifier = references[index]
+    distance = int(distances[index])
+    if card != card_id or distance > CARD_MATCH_THRESHOLD:
+        return None
+    other_distance = min(
+        (int(value) for (other, _, _), value in zip(references, distances, strict=True) if other != card_id),
+        default=float("inf"),
+    )
+    if other_distance - distance < DIAGNOSTIC_MIN_MARGIN:
+        return None
+    return card, identifier, distance
+
+
 def _evidence(samples, excluded):
     result = []
     for sample in samples:
@@ -206,8 +235,70 @@ def _evidence(samples, excluded):
     return result
 
 
-def scan_review(root, *, refresh_library=False):
-    """Migrate once, retaining human choices without promoting legacy trials."""
+def _remember(updates, sample, changes):
+    previous = updates.get(sample.key, (sample, {}))[1]
+    sample.review = {**sample.review, **changes}
+    updates[sample.key] = (sample, {**previous, **changes})
+
+
+def _coverage_match(value, references, card_id):
+    near = _near(value, references)
+    if any(card != card_id for card, _, _ in near):
+        return None
+    return next((item for item in near if item[0] == card_id), None) or _recognized_reference(
+        value, references, card_id
+    )
+
+
+def _reassess_history(samples, entries, candidates, updates):
+    """Apply the admission rule once, retaining a replacement for every source."""
+    remaining = list(entries)
+    values = {}
+    for entry in entries:
+        if entry["id"] not in candidates:
+            continue
+        sources = [sample for sample in samples if sample.review.get("formal_id") == entry["id"]]
+        if not sources:
+            continue
+        references = _references([item for item in remaining if item["id"] != entry["id"]])
+        replacements = []
+        for sample in sources:
+            if sample.card_id != entry["card_id"]:
+                break
+            try:
+                if sample.key not in values:
+                    if load_card_thumbnail(sample) is None:
+                        break
+                    values[sample.key] = local.sample_fingerprint(sample)
+                match = _coverage_match(values[sample.key], references, sample.card_id)
+            except (OSError, ValueError):
+                break
+            if match is None:
+                break
+            replacements.append(
+                (
+                    sample,
+                    _result("covered", sample.card_id, "正式库已能正确识别当前样本，无需新增参考", reference=match[1]),
+                )
+            )
+        else:
+            remaining = [item for item in remaining if item["id"] != entry["id"]]
+            for sample, changes in replacements:
+                _remember(updates, sample, changes)
+    for sample in samples:
+        if (
+            sample.review.get("coverage_policy") != COVERAGE_POLICY
+            or sample.review.get("work_reason") == "历史参考已加入正式库"
+        ):
+            changes: dict[str, object] = {"coverage_policy": COVERAGE_POLICY}
+            if sample.status == "included":
+                changes["work_reason"] = "已加入正式库"
+            _remember(updates, sample, changes)
+    return remaining
+
+
+def scan_review(root, *, refresh_library=False, reassess_history=True):
+    """Migrate old approvals once using the same coverage rule as new approvals."""
     if not root.exists():
         return [], 0, {}
     with _locked(root):
@@ -216,7 +307,19 @@ def scan_review(root, *, refresh_library=False):
             return samples, errors, group_review_samples(samples)
         entries = formal._read_entries(formal.formal_path())
         references = _references(entries)
-        updates = []
+        updates = {}
+        protected = {
+            sample.review.get("formal_id")
+            for sample in samples
+            if sample.review.get("work_reason") == "历史参考已加入正式库"
+        }
+        candidates = {
+            sample.review.get("formal_id")
+            for sample in samples
+            if sample.review.get("coverage_policy") != COVERAGE_POLICY
+            and sample.review.get("work_result") == "included"
+            and sample.review.get("owns_reference") is True
+        } - protected
         for sample in samples:
             if sample.review.get("work_result") in REVIEW_TABS.values():
                 identifier = sample.review.get("formal_id")
@@ -225,7 +328,28 @@ def scan_review(root, *, refresh_library=False):
                     and identifier
                     and identifier not in {entry["id"] for entry in entries}
                 ):
-                    updates.append((sample, _result("pending", sample.card_id, "关联正式参考已移出，请重新核对")))
+                    _remember(updates, sample, _result("pending", sample.card_id, "关联正式参考已移出，请重新核对"))
+                elif (
+                    reassess_history
+                    and sample.review.get("coverage_policy") != COVERAGE_POLICY
+                    and sample.status in ("pending", "covered")
+                    and sample.card_id in CARD_NAMES_ZH
+                ):
+                    try:
+                        match = _coverage_match(local.sample_fingerprint(sample), references, sample.card_id)
+                    except (OSError, ValueError):
+                        match = None
+                    if match:
+                        _remember(
+                            updates,
+                            sample,
+                            _result(
+                                "covered",
+                                sample.card_id,
+                                "正式库已能正确识别当前样本，无需新增参考",
+                                reference=match[1],
+                            ),
+                        )
                 continue
             result, reason, identifier, owned = "pending", "请核对卡名及版本后确认并入库", "", False
             if sample.status == "ignored":
@@ -236,7 +360,7 @@ def scan_review(root, *, refresh_library=False):
                     value = local.sample_fingerprint(sample)
                     identifier = formal._signature(sample.card_id, value.tolist())
                     if any(entry["id"] == identifier for entry in entries):
-                        result, reason, owned = "included", "历史参考已加入正式库", True
+                        result, reason, owned = "included", "已加入正式库", True
                     else:
                         near = _near(value, references)
                         if any(card != sample.card_id for card, _, _ in near):
@@ -244,13 +368,38 @@ def scan_review(root, *, refresh_library=False):
                             identifier = ""
                         elif match := next((item for item in near if item[0] == sample.card_id), None):
                             result, reason, identifier = "covered", "正式库已有同卡近似参考", match[1]
+                        elif match := _recognized_reference(value, references, sample.card_id):
+                            result, reason, identifier = "covered", "正式库已能正确识别当前样本，无需新增参考", match[1]
                         else:
                             identifier = ""
                 except (OSError, ValueError) as error:
                     reason, identifier = f"历史标注已保留；样本检查失败：{error}", ""
-            updates.append((sample, _result(result, sample.card_id, reason, reference=identifier, owned=owned)))
+            _remember(updates, sample, _result(result, sample.card_id, reason, reference=identifier, owned=owned))
+        remaining = (
+            _reassess_history(samples, entries, candidates, updates)
+            if reassess_history and formal.source_checkout()
+            else entries
+        )
+        if reassess_history and not formal.source_checkout():
+            # Shipped files are immutable; normalize source records without removal.
+            _reassess_history(samples, entries, set(), updates)
+        for sample in samples:
+            if sample.status == "included" and sample.review.get("work_reason") != "已加入正式库":
+                _remember(updates, sample, {"work_reason": "已加入正式库"})
+        from crX.utils.card_upload import published_reference_ids
+
+        published = published_reference_ids()
+        for sample in samples:
+            identifier = sample.review.get("formal_id")
+            if sample.status == "included" and not sample.uploaded and identifier in published:
+                _remember(
+                    updates, sample, {"published_reference_id": identifier, "published_commit": published[identifier]}
+                )
         if updates:
-            _commit(root, entries, entries, updates)
+            backup = sample_file(root, "formal-before-coverage.json")
+            if remaining != entries and not backup.exists():
+                atomic_json(backup, {"version": 1, "entries": entries})
+            _commit(root, entries, remaining, list(updates.values()))
         if refresh_library:
             local.sync_library(root)
         samples, errors = scan_samples(root)
@@ -275,6 +424,9 @@ def _plan(root, samples, card_id, entries, *, excluded=()):
                 counts["conflict"] += 1
             elif match := next((item for item in _near(value, references) if item[0] == card_id), None):
                 changes = _result("covered", card_id, "正式库已有同卡近似参考", reference=match[1])
+                counts["covered"] += 1
+            elif match := _recognized_reference(value, references, card_id):
+                changes = _result("covered", card_id, "正式库已能正确识别当前样本，无需新增参考", reference=match[1])
                 counts["covered"] += 1
             else:
                 identifier = formal._signature(card_id, value.tolist())
@@ -321,7 +473,7 @@ def confirm_samples(root, selected, card_id, note=""):
                 )
             raise
         local.sync_library(root)
-        labels = {"included": "已入库", "covered": "已有覆盖", "conflict": "需复核", "failed": "检查失败"}
+        labels = {"included": "已入库", "covered": "已被覆盖", "conflict": "需复核", "failed": "检查失败"}
         return "；".join(f"{labels[key]} {counts[key]} 张" for key in labels if counts[key])
 
 

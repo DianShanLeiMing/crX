@@ -3,6 +3,7 @@
 import subprocess
 import sys
 
+import numpy as np
 import pytest
 
 from crX.bot import card_detection as detection
@@ -43,9 +44,11 @@ def test_approval_adds_without_runtime_evidence_and_batch_duplicates_are_covered
     add, destination = review_store
     first, duplicate, appearance = add("first"), add("duplicate", shift=5), add("appearance", channel=4)
     result = workflow.confirm_samples(tmp_path, [first, duplicate, appearance], "knight", "人工核对")
-    assert "已入库 2 张" in result and "已有覆盖 1 张" in result
+    assert "已入库 2 张" in result and "已被覆盖 1 张" in result
     current = records(tmp_path)
     assert current[first.key].status == current[appearance.key].status == "included"
+    assert current[first.key].review["work_reason"] == "已加入正式库"
+    assert current[appearance.key].review["work_reason"] == "已加入正式库"
     assert current[duplicate.key].status == "covered"
     assert all(sample.review["note"] == "人工核对" for sample in current.values())
     assert len(formal._read_entries(destination)) == 2
@@ -53,6 +56,86 @@ def test_approval_adds_without_runtime_evidence_and_batch_duplicates_are_covered
     assert records(tmp_path)[first.key].status == "included"  # Never reclassify its own reference as covered.
     assert not local.read_match_stats(tmp_path)
     assert all(set(entry) == {"id", "card_id", "fingerprint"} for entry in formal._read_entries(destination))
+
+
+@pytest.mark.parametrize(("shift", "expected"), [(120, "covered"), (125, "covered"), (126, "included")])
+def test_later_appearance_only_adds_when_existing_reference_cannot_recognize_it(
+    tmp_path, review_store, shift, expected
+):
+    add, destination = review_store
+    source = add("source")
+    later = add("later", shift=shift)
+    workflow.confirm_samples(tmp_path, [source], "knight")
+    original = formal._read_entries(destination)
+    workflow.confirm_samples(tmp_path, [later], "knight", "新画面")
+    current = records(tmp_path)
+    assert current[later.key].status == expected
+    assert current[source.key].status == "included"
+    assert current[later.key].review["note"] == "新画面"
+    if expected == "covered":
+        assert formal._read_entries(destination) == original
+        assert current[later.key].review["formal_id"] == current[source.key].review["formal_id"]
+        assert "正确识别" in current[later.key].review["work_reason"]
+    else:
+        assert len(formal._read_entries(destination)) == 2
+
+
+def test_original_formal_reference_can_cover_without_creating_a_supplement(tmp_path, review_store, monkeypatch):
+    add, destination = review_store
+    monkeypatch.setattr(detection, "_REFERENCE_NAMES", ("knight",))
+    monkeypatch.setattr(detection, "_REFERENCE_MATRIX", fingerprint()[None, ...])
+    source = add("source", shift=50)
+    workflow.confirm_samples(tmp_path, [source], "knight")
+    assert records(tmp_path)[source.key].status == "covered"
+    assert not formal._read_entries(destination)
+
+
+def test_misrecognized_sample_still_adds_its_human_confirmed_card(tmp_path, review_store):
+    add, destination = review_store
+    original = add("original")
+    source = add("source", shift=40)
+    workflow.confirm_samples(tmp_path, [original], "archers")
+    workflow.confirm_samples(tmp_path, [source], "knight")
+    assert records(tmp_path)[source.key].status == "included"
+    assert {entry["card_id"] for entry in formal._read_entries(destination)} == {"archers", "knight"}
+
+
+def test_correct_but_ambiguous_prediction_still_gets_a_new_reference(tmp_path, review_store, monkeypatch):
+    add, destination = review_store
+    monkeypatch.setattr(detection, "_REFERENCE_NAMES", ("knight", "archers"))
+    monkeypatch.setattr(detection, "_REFERENCE_MATRIX", np.stack((fingerprint(), fingerprint(shift=30))))
+    source = add("source", shift=15)
+    workflow.confirm_samples(tmp_path, [source], "knight")
+    assert records(tmp_path)[source.key].status == "included"
+    assert len(formal._read_entries(destination)) == 1
+    assert records(tmp_path)[source.key].review["work_reason"] == "已加入正式库"
+
+
+def test_existing_included_reasons_are_normalized_without_changing_references(tmp_path, review_store):
+    add, destination = review_store
+    first, supplement = add("first"), add("supplement", channel=4)
+    workflow.confirm_samples(tmp_path, [first, supplement], "knight", "保留人工备注")
+    before = destination.read_bytes()
+    supplement = records(tmp_path)[supplement.key]
+    entries = formal._read_entries(destination)
+    workflow._commit(tmp_path, entries, entries, [(supplement, {"work_reason": "补充参考入库"})])
+    current = records(tmp_path)
+    assert destination.read_bytes() == before
+    assert current[first.key].review["work_reason"] == "已加入正式库"
+    assert current[supplement.key].review["work_reason"] == "已加入正式库"
+    assert current[supplement.key].review["note"] == "保留人工备注"
+
+
+def test_same_card_appearances_do_not_reduce_the_different_card_margin(tmp_path, review_store, monkeypatch):
+    add, destination = review_store
+    monkeypatch.setattr(detection, "_REFERENCE_NAMES", ("knight", "knight", "giant"))
+    monkeypatch.setattr(
+        detection, "_REFERENCE_MATRIX", np.stack((fingerprint(), fingerprint(shift=10), fingerprint(15)))
+    )
+    source = add("source", shift=50)
+    workflow.confirm_samples(tmp_path, [source], "knight")
+    assert records(tmp_path)[source.key].status == "covered"
+    assert not formal._read_entries(destination)
 
 
 def test_formal_and_manual_label_conflicts_keep_human_choice_pending(tmp_path, review_store):
@@ -145,6 +228,113 @@ def test_legacy_formal_and_ignored_records_are_classified_separately(tmp_path, r
     current = records(tmp_path)
     assert [current[sample.key].status for sample in (included, covered, ignored)] == ["included", "covered", "ignored"]
     assert current[ignored.key].review["work_reason"] == "切牌动画"
+    assert current[included.key].review["work_reason"] == "已加入正式库"
+
+
+def seed_old_approvals(root, add, destination, shifts, *, protected=False):
+    sources, entries = [], []
+    for index, shift in enumerate(shifts):
+        source = add(f"old-{index}", shift=shift)
+        value = fingerprint(shift=shift).tolist()
+        identifier = formal._signature("knight", value)
+        entries.append({"id": identifier, "card_id": "knight", "fingerprint": value})
+        atomic_json(
+            source.directory / "annotations.json",
+            {
+                source.name: {
+                    "status": "confirmed",
+                    "confirmed_card_id": "knight",
+                    "work_result": "included",
+                    "formal_id": identifier,
+                    "owns_reference": True,
+                    "note": f"原备注{index}",
+                    "work_reason": "历史参考已加入正式库" if protected and index == 0 else "已加入正式库",
+                }
+            },
+        )
+        sources.append(source)
+    atomic_json(destination, {"version": 1, "entries": entries})
+    return sources
+
+
+def test_previous_approvals_use_new_coverage_rule_once_and_preserve_sources(tmp_path, review_store):
+    add, destination = review_store
+    sources = seed_old_approvals(tmp_path, add, destination, [0, 100, 225])
+    current = records(tmp_path)
+    entries = formal._read_entries(destination)
+    assert len(entries) == 1  # Do not remove mutually covering references together.
+    assert len(formal._read_entries(tmp_path / "formal-before-coverage.json")) == 3
+    assert sorted(sample.status for sample in current.values()) == ["covered", "covered", "included"]
+    assert {sample.review["formal_id"] for sample in current.values()} == {entries[0]["id"]}
+    for index, source in enumerate(sources):
+        assert current[source.key].review["note"] == f"原备注{index}"
+        assert current[source.key].review["coverage_policy"] == workflow.COVERAGE_POLICY
+        assert source.file("frame").exists()
+    before = {source.key: (source.directory / "annotations.json").read_bytes() for source in sources}
+    library_before = destination.read_bytes()
+    records(tmp_path)
+    assert destination.read_bytes() == library_before
+    assert all((source.directory / "annotations.json").read_bytes() == before[source.key] for source in sources)
+
+
+def test_preexisting_formal_reference_is_kept_without_a_special_history_note(tmp_path, review_store):
+    add, destination = review_store
+    first, other = seed_old_approvals(tmp_path, add, destination, [0, 50], protected=True)
+    original = formal._read_entries(destination)[0]
+    current = records(tmp_path)
+    assert formal._read_entries(destination) == [original]
+    assert current[first.key].status == "included" and current[first.key].review["work_reason"] == "已加入正式库"
+    assert current[other.key].status == "covered"
+
+
+def test_history_only_removes_references_that_can_be_replaced(tmp_path, review_store):
+    add, destination = review_store
+    sources = seed_old_approvals(tmp_path, add, destination, [0, 200])
+    before = destination.read_bytes()
+    current = records(tmp_path)
+    assert all(current[source.key].status == "included" for source in sources)
+    assert destination.read_bytes() == before
+
+
+def test_history_reassessment_can_be_deferred_until_worker_stops(tmp_path, review_store):
+    add, destination = review_store
+    seed_old_approvals(tmp_path, add, destination, [0, 50])
+    before = destination.read_bytes()
+    workflow.scan_review(tmp_path, refresh_library=True, reassess_history=False)
+    assert destination.read_bytes() == before
+    records(tmp_path)
+    assert len(formal._read_entries(destination)) == 1
+
+
+def test_older_label_without_formal_reference_can_be_classified_as_covered(tmp_path, review_store):
+    add, destination = review_store
+    seed_old_approvals(tmp_path, add, destination, [0], protected=True)
+    source = add("labelled", shift=80)
+    save_review(source, "confirmed", "knight", "历史标注备注")
+    current = records(tmp_path)[source.key]
+    assert current.status == "covered" and current.review["note"] == "历史标注备注"
+    assert len(formal._read_entries(destination)) == 1
+
+
+def test_partial_history_migration_recovers_linked_classification(tmp_path, review_store, monkeypatch):
+    add, destination = review_store
+    seed_old_approvals(tmp_path, add, destination, [0, 50])
+    write = workflow.atomic_json
+
+    def fail_after_removal(path, value):
+        if path.name == "annotations.json" and len(formal._read_entries(destination)) == 1:
+            raise OSError("migration interrupted")
+        write(path, value)
+
+    monkeypatch.setattr(workflow, "atomic_json", fail_after_removal)
+    with pytest.raises(OSError, match="migration interrupted"):
+        records(tmp_path)
+    monkeypatch.setattr(workflow, "atomic_json", write)
+    current = records(tmp_path)
+    entries = formal._read_entries(destination)
+    assert len(entries) == 1
+    assert {sample.review["formal_id"] for sample in current.values()} == {entries[0]["id"]}
+    assert not (tmp_path / "card-review-transaction.json").exists()
 
 
 def test_correction_updates_shared_sources_and_remove_retains_images(tmp_path, review_store):

@@ -95,6 +95,13 @@ class ReviewSample:
     def card_id(self) -> str:
         return self.review.get("confirmed_card_id") or ""
 
+    @property
+    def uploaded(self) -> bool:
+        identifier = self.review.get("formal_id")
+        return (
+            self.status == "included" and bool(identifier) and self.review.get("published_reference_id") == identifier
+        )
+
     def file(self, kind: str) -> Path:
         return sample_file(self.directory, self.record["files"][kind])
 
@@ -143,7 +150,12 @@ def validation_reason(sample: ReviewSample) -> str:
 def sample_progress(sample: ReviewSample) -> tuple[str, str, str]:
     """A match is an observation, never evidence that the prediction was correct."""
     if sample.review.get("work_result"):
-        label = {"pending": "待确认", "included": "已入库", "covered": "已有覆盖", "ignored": "已忽略"}[sample.status]
+        label = {
+            "pending": "待确认",
+            "included": "已上传" if sample.uploaded else "待上传",
+            "covered": "已被覆盖",
+            "ignored": "已忽略",
+        }[sample.status]
         if sample.status == "pending" and "复核" in sample.review.get("work_reason", ""):
             label = "需复核"
         return label, "历史运行记录仅供观察", "当前使用" if sample.status == "included" else "未使用"
@@ -274,7 +286,12 @@ def scan_samples(root: Path) -> tuple[list[ReviewSample], int]:
                     or not isinstance(review.get("formal_id", ""), str)
                     or len(review.get("formal_id", "")) > 128
                     or type(review.get("owns_reference", False)) is not bool
+                    or type(review.get("coverage_policy", 0)) is not int
                     or not isinstance(review.get("work_reason", ""), str)
+                    or not isinstance(review.get("published_reference_id", ""), str)
+                    or len(review.get("published_reference_id", "")) > 128
+                    or not isinstance(review.get("published_commit", ""), str)
+                    or len(review.get("published_commit", "")) > 128
                 ):
                     raise ValueError("样本处理结果无效")
                 samples.append(ReviewSample(directory, name, record, review))
