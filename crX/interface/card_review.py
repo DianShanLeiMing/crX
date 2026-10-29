@@ -43,7 +43,6 @@ STAGE_ACTIONS = {
     "待确认": ("confirm", "ignore"),
     "待上传": ("rename", "remove"),
     "样本库": (),
-    "已被覆盖": ("restore",),
     "已忽略": ("restore",),
 }
 COLUMN_SPECS = {
@@ -57,7 +56,6 @@ COLUMN_SPECS = {
 FILTER_COLUMNS = {
     "待确认": ("group", "card", "reason", "status"),
     "待上传": ("card", "references", "status"),
-    "已被覆盖": ("card", "status", "validation_reason"),
     "已忽略": ("card", "status", "validation_reason"),
 }
 THUMBNAIL_CACHE_SIZE = 128
@@ -133,8 +131,15 @@ class CardReviewTab(ttk.Frame):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(2, weight=1)
         self.summary_var = tk.StringVar(value="正在读取卡牌样本……")
-        ttk.Label(self, textvariable=self.summary_var).grid(row=0, column=0, sticky="w")
+        header = ttk.Frame(self)
+        header.grid(row=0, column=0, sticky="ew")
+        ttk.Label(header, textvariable=self.summary_var).pack(side="left")
+        self.catalog_button = ttk.Button(
+            header, text="样本库", bootstyle="link", padding=(6, 0), command=self._toggle_catalog
+        )
+        self.catalog_button.pack(side="right")
         tools = ttk.Frame(self)
+        self.review_tools = tools
         tools.grid(row=1, column=0, sticky="ew", pady=4)
         filters = ttk.Frame(tools)
         filters.pack(fill="x")
@@ -271,7 +276,7 @@ class CardReviewTab(ttk.Frame):
         self.thumbnail_tree.bind("<Button-5>", lambda _: self._thumbnail_scroll(1))
         self.thumbnail_tree.bind("<Map>", lambda _: self._queue_thumbnails())
         self.details = ttk.Notebook(self.review_panes)
-        self.review_panes.add(self.details, minsize=0, height=120, stretch="never")
+        self.review_panes.add(self.details, minsize=0, height=60, stretch="never")
         self.reference_panel = ttk.Labelframe(self.details, text="同卡正式参考", padding=4)
         self.reference_panel.columnconfigure(0, weight=1)
         self.reference_panel.rowconfigure(0, weight=1)
@@ -422,7 +427,7 @@ class CardReviewTab(ttk.Frame):
         height = self.controls.winfo_reqheight()
         if self._controls_request != height:
             self._controls_request = height
-            self.body_panes.paneconfigure(self.controls.container, height=height)
+            self.body_panes.paneconfigure(self.controls.container, height=min(height, 140))
 
     def _begin_bottom_resize(self, event):
         if self.body_panes.identify(event.x, event.y):
@@ -615,6 +620,13 @@ class CardReviewTab(ttk.Frame):
         self._selection_cleared = False
         self._render_list()
 
+    def _toggle_catalog(self):
+        if self.filter_var.get() == "样本库":
+            self._switch_tab()
+        else:
+            self.filter_var.set("样本库")
+            self._render_list()
+
     def set_running(self, running):
         self._running = running
         self._set_action_state()
@@ -713,20 +725,12 @@ class CardReviewTab(ttk.Frame):
                         "  |  ".join(
                             f"{label} {included_cards} 种卡牌"
                             if result == "included"
-                            else f"{label} {len(catalog)} 种卡牌"
-                            if result == "catalog"
                             else f"{label} {counts[result]} 张"
                             for label, result in REVIEW_TABS.items()
                         )
                     )
                     for label, page in self.stage_pages.items():
-                        count = (
-                            included_cards
-                            if label == "待上传"
-                            else len(catalog)
-                            if label == "样本库"
-                            else counts[REVIEW_TABS[label]]
-                        )
+                        count = included_cards if label == "待上传" else counts[REVIEW_TABS[label]]
                         self.stage_tabs.tab(page, text=f"{label}（{count}）")
                     if self.count_callback:
                         self.count_callback(counts["pending"])
@@ -816,6 +820,8 @@ class CardReviewTab(ttk.Frame):
     def _render_list(self):
         if self.filter_var.get() == "样本库":
             self.body_panes.grid_remove()
+            self.review_tools.grid_remove()
+            self.catalog_button.configure(text="返回样本管理")
             self.filters_panel.pack_forget()
             self.selection_tools.pack_forget()
             self.library_view.grid(row=2, column=0, sticky="nsew")
@@ -823,6 +829,8 @@ class CardReviewTab(ttk.Frame):
             self._set_action_state()
             return
         self.library_view.grid_remove()
+        self.review_tools.grid()
+        self.catalog_button.configure(text="样本库")
         self.filters_panel.pack(fill="x")
         self.selection_tools.pack(fill="x", pady=(4, 0))
         self.body_panes.grid()
@@ -1281,10 +1289,9 @@ class CardReviewTab(ttk.Frame):
         )
         self.stage_help.set(
             {
-                "待确认": "核对卡名与版本后确认并入库；重复归入已被覆盖，冲突保留待确认。任务停止后可操作。",
+                "待确认": "核对卡名与版本后确认并入库；正式库已覆盖时无需新增，冲突保留待确认。任务停止后可操作。",
                 "待上传": "在下方选择具体参考更正或移出；上传共享上方选中卡牌的全部正式参考。截图和备注留在本机。",
                 "样本库": "查询全部卡牌的正式参考；选择两份参考可并排对比。",
-                "已被覆盖": "该样本已被现有正式参考覆盖，无需新增；可恢复待确认后重新核对。",
                 "已忽略": "人工忽略的样本；可恢复待确认。",
             }[stage]
         )

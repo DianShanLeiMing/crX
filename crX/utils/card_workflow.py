@@ -25,8 +25,6 @@ from crX.utils.card_review import (
 REVIEW_TABS = {
     "待确认": "pending",
     "待上传": "included",
-    "样本库": "catalog",
-    "已被覆盖": "covered",
     "已忽略": "ignored",
 }
 COVERAGE_POLICY = 2
@@ -321,7 +319,7 @@ def scan_review(root, *, refresh_library=False, reassess_history=True):
             and sample.review.get("owns_reference") is True
         } - protected
         for sample in samples:
-            if sample.review.get("work_result") in REVIEW_TABS.values():
+            if sample.review.get("work_result") in {"pending", "included", "covered", "ignored"}:
                 identifier = sample.review.get("formal_id")
                 if (
                     sample.review["work_result"] in ("included", "covered")

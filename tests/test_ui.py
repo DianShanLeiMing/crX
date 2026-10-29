@@ -385,7 +385,7 @@ def test_review_details_expand_scroll_and_restore_without_resizing_window(deskto
         window.geometry("760x820")
         ui.update()
         assert tab.sample_table.winfo_height() > table_height + 100
-        for stage in ("待确认", "待上传", "已被覆盖", "已忽略"):
+        for stage in ("待确认", "待上传", "已忽略"):
             tab.filter_var.set(stage)
             tab._render_list()
             ui.update()
@@ -629,10 +629,10 @@ def finish(ui, tab):
     _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy)
 
 
-def test_five_tabs_single_approval_routes_and_keeps_owned_status(review_ui):
+def test_three_tabs_single_approval_routes_and_keeps_owned_status(review_ui):
     ui, tab, add, destination = review_ui
     first, duplicate, conflict = add("first"), add("duplicate", shift=5), add("conflict", channel=15)
-    assert len(tab.stage_tabs.tabs()) == 5 and not hasattr(tab, "filter_combo")
+    assert tuple(tab.stage_pages) == ("待确认", "待上传", "已忽略") and not hasattr(tab, "filter_combo")
     assert not {"session", "formal", "runtime"}.intersection(tab.tree.cget("columns"))
     select(tab, first)
     assert tab.card_var.get() == ""  # Candidate hints never become human labels.
@@ -650,6 +650,9 @@ def test_five_tabs_single_approval_routes_and_keeps_owned_status(review_ui):
     tab.stage_buttons["confirm"].invoke()
     finish(ui, tab)
     assert tab.samples[duplicate.key].status == "covered"
+    assert duplicate.key not in tab.tree.get_children()
+    assert "覆盖" in tab.message_var.get()
+    assert "覆盖" not in tab.summary_var.get()
     select(tab, conflict)
     tab.card_var.set("knight")
     tab.stage_buttons["confirm"].invoke()
@@ -657,7 +660,7 @@ def test_five_tabs_single_approval_routes_and_keeps_owned_status(review_ui):
     assert tab.tree.set(conflict.key, "status") == "需复核"
     assert "巨人" in tab.description_var.get()
     assert len(formal._read_entries(destination)) == 1
-    for label, sample in (("待上传", first), ("已被覆盖", duplicate), ("待确认", conflict)):
+    for label, sample in (("待上传", first), ("待确认", conflict)):
         switch(ui, tab, label)
         assert tab.tree.get_children() == (sample.key,)
         assert tab.stage_tabs.tab(tab.stage_pages[label], "text") == f"{label}（1）"
@@ -924,7 +927,11 @@ def test_catalog_search_comparison_and_upload_archive_preserve_images(review_ui,
         tab.card_var.set("knight")
         tab.stage_buttons["confirm"].invoke()
         finish(ui, tab)
-    switch(ui, tab, "样本库")
+    tab.catalog_button.invoke()
+    ui.update()
+    assert tab.filter_var.get() == "样本库"
+    assert not tab.review_tools.winfo_ismapped()
+    assert tab.catalog_button.cget("text") == "返回样本管理"
     view = tab.library_view
     assert len(view.cards.get_children()) >= len(CARD_NAMES_ZH)
     assert not tab.body_panes.winfo_ismapped() and not tab.selection_tools.winfo_ismapped()
@@ -960,6 +967,10 @@ def test_catalog_search_comparison_and_upload_archive_preserve_images(review_ui,
     view._sort_counts()
     assert view.cards.get_children()[-1] == "knight"
     before = destination.read_bytes()
+    tab.catalog_button.invoke()
+    ui.update()
+    assert tab.filter_var.get() == "待确认"
+    assert tab.review_tools.winfo_ismapped()
     switch(ui, tab, "待上传")
     assert tab.tree.get_children() and tab.body_panes.winfo_ismapped()
 
@@ -977,7 +988,9 @@ def test_catalog_search_comparison_and_upload_archive_preserve_images(review_ui,
     assert all(tab.samples[sample.key].uploaded for sample in (first, second))
     assert destination.read_bytes() == before
     assert all(sample.file("card").is_file() for sample in (first, second))
-    switch(ui, tab, "样本库")
+    tab.catalog_button.invoke()
+    ui.update()
+    assert tab.filter_var.get() == "样本库"
     view.query.set("knight")
     ui.update()
     assert view.cards.set("knight", "count") == "2"
@@ -995,6 +1008,13 @@ def test_catalog_search_comparison_and_upload_archive_preserve_images(review_ui,
     assert view._comparison_photos == [None]
     assert view.image_labels[0].cget("text") == "暂无原图"
     tab.set_running(False)
+    tab.refresh()
+    _wait_ui(ui, lambda: not tab._scan_busy)
+    assert tab.filter_var.get() == "样本库" and not tab.review_tools.winfo_ismapped()
+    tab.catalog_button.invoke()
+    ui.update()
+    assert tab.filter_var.get() == "待上传" and tab.body_panes.winfo_ismapped()
+    assert tab.catalog_button.cget("text") == "样本库"
 
 
 def test_legacy_trial_is_visible_pending_and_can_be_approved(review_ui):
