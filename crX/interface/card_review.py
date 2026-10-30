@@ -113,6 +113,10 @@ class CardReviewTab(ttk.Frame):
         self._images = {}
         self._thumbnail_images = OrderedDict()
         self._bottom_resize_stretch = None
+        self._pane_drag = None
+        self._pane_grab_owned = False
+        self._frame_resize_pending = False
+        self._frame_resize_key = None
         self._panes_resized = False
         self._controls_request = None
         self._thumbnail_busy = False
@@ -195,7 +199,6 @@ class CardReviewTab(ttk.Frame):
         )
         self.body_panes.grid(row=2, column=0, sticky="nsew")
         self.body_panes.bind("<ButtonPress-1>", self._begin_bottom_resize, add="+")
-        self.body_panes.bind("<ButtonRelease-1>", self._end_bottom_resize, add="+")
         self.review_panes = tk.PanedWindow(
             self.body_panes,
             orient="vertical",
@@ -209,6 +212,12 @@ class CardReviewTab(ttk.Frame):
             background=ttk.Style().colors.border,
         )
         self.review_panes.bind("<ButtonPress-1>", self._begin_review_resize, add="+")
+        for panes in (self.body_panes, self.review_panes):
+            panes.bind("<B1-Motion>", self._drag_pane, add="+")
+            panes.bind("<ButtonRelease-1>", self._end_pane_resize, add="+")
+            panes.bind("<Escape>", self._end_pane_resize, add="+")
+            panes.bind("<FocusOut>", self._end_pane_resize, add="+")
+            panes.bind("<Unmap>", self._end_pane_resize, add="+")
         self.bind(
             "<<ThemeChanged>>",
             self._update_review_theme,
@@ -330,6 +339,7 @@ class CardReviewTab(ttk.Frame):
         self.frame_image = ttk.Label(frame, anchor="center")
         self.frame_image.pack(fill="both", expand=True)
         self.frame_image.bind("<Configure>", lambda _: self._resize_frame())
+        self.frame_image.bind("<Map>", lambda _: self._resize_frame())
         self.controls = ScrolledFrame(self.body_panes, padding=0, autohide=True, height=160)
         self.controls.columnconfigure(0, weight=1)
         self.body_panes.add(self.controls.container, minsize=24, height=160, stretch="never")
@@ -424,6 +434,8 @@ class CardReviewTab(ttk.Frame):
             self.text_frame.configure(width=width)
 
     def _fit_controls(self, _event=None):
+        if self._pane_drag is not None:
+            return
         height = self.controls.winfo_reqheight()
         if self._controls_request != height:
             self._controls_request = height
@@ -431,12 +443,11 @@ class CardReviewTab(ttk.Frame):
                 self.body_panes.paneconfigure(self.controls.container, height=min(height, 140))
 
     def _begin_review_resize(self, event):
-        if self.review_panes.identify(event.x, event.y):
-            self._panes_resized = True
+        return self._begin_pane_resize(self.review_panes, event)
 
     def _begin_bottom_resize(self, event):
         if self.body_panes.identify(event.x, event.y):
-            self._panes_resized = True
+            self._end_pane_resize()
             self._bottom_resize_stretch = self.review_panes.panecget(self.details, "stretch")
             details_height = self.details.winfo_height()
             if not self._details_expanded:
@@ -444,8 +455,49 @@ class CardReviewTab(ttk.Frame):
                     self.sample_table, height=self.sample_table.winfo_height(), stretch="never"
                 )
             self.review_panes.paneconfigure(self.details, height=details_height, stretch="always")
+        return self._begin_pane_resize(self.body_panes, event)
 
-    def _end_bottom_resize(self, _event):
+    def _begin_pane_resize(self, panes, event):
+        identified = panes.identify(event.x, event.y)
+        if not identified:
+            return "break"
+        if self._pane_drag is not None:
+            self._end_pane_resize()
+        self._panes_resized = True
+        index = int(identified[0])
+        x, y = panes.sash_coord(index)
+        self._pane_drag = (panes, index, event.y_root, x, y)
+        if panes.grab_current() is None:
+            panes.grab_set()
+            self._pane_grab_owned = True
+        panes.focus_set()
+        return "break"
+
+    def _drag_pane(self, event):
+        if self._pane_drag is not None:
+            panes, index, root_y, x, y = self._pane_drag
+            if event.widget is panes:
+                panes.sash_place(index, x, y + event.y_root - root_y)
+        return "break"
+
+    def _end_pane_resize(self, event=None):
+        if self._pane_drag is None:
+            return "break"
+        panes = self._pane_drag[0]
+        if event is not None and event.widget is not panes:
+            return None
+        self._pane_drag = None
+        if self._pane_grab_owned:
+            if panes.grab_current() is panes:
+                panes.grab_release()
+            self._pane_grab_owned = False
+        self._end_bottom_resize()
+        self._queue_thumbnails()
+        if self._frame_resize_pending:
+            self._later(0, self._resize_frame)
+        return "break"
+
+    def _end_bottom_resize(self, _event=None):
         if self._bottom_resize_stretch is not None:
             if not self._details_expanded:
                 self.review_panes.paneconfigure(
@@ -504,6 +556,8 @@ class CardReviewTab(ttk.Frame):
 
     def _load_visible_thumbnails(self):
         self._thumbnail_after = None
+        if self._pane_drag is not None:
+            return
         if self._thumbnail_busy or not (self.sample_table.winfo_ismapped() or self.reference_tree.winfo_ismapped()):
             return
         targets = {}
@@ -598,6 +652,8 @@ class CardReviewTab(ttk.Frame):
         threading.Thread(target=run, name=f"card-review-{kind}", daemon=True).start()
 
     def refresh(self):
+        if self._pane_drag is not None:
+            return
         if not self._scan_busy and not self._action_busy:
             self._scan_busy = True
             history = self._history_pending and not self._running
@@ -743,6 +799,9 @@ class CardReviewTab(ttk.Frame):
         self._later(5000, self._auto_refresh)
 
     def _poll(self):
+        if self._pane_drag is not None:
+            self._later(50, self._poll)
+            return
         while True:
             try:
                 kind, token, result, error = self._results.get_nowait()
@@ -1193,12 +1252,22 @@ class CardReviewTab(ttk.Frame):
             )
 
     def _resize_frame(self):
+        if self._pane_drag is not None or not self.frame_image.winfo_ismapped():
+            self._frame_resize_pending = True
+            return
+        self._frame_resize_pending = False
         if self._frame_preview is None:
+            self._frame_resize_key = None
             self.frame_image.configure(image="", text="图片缺失或损坏" if self.selected else "暂无此类样本")
             return
+        width, height = max(1, self.frame_image.winfo_width() - 12), max(1, self.frame_image.winfo_height() - 12)
+        key = (self._selection_version, id(self._frame_preview), width, height)
+        if self._frame_resize_key == key and "frame" in self._images:
+            return
         preview = self._frame_preview.copy()
-        preview.thumbnail((max(1, self.frame_image.winfo_width() - 12), max(1, self.frame_image.winfo_height() - 12)))
+        preview.thumbnail((width, height))
         self._images["frame"] = ImageTk.PhotoImage(preview, master=self)
+        self._frame_resize_key = key
         self.frame_image.configure(image=self._images["frame"], text="")
 
     def _search_cards(self, *_trace_args, opening=False):

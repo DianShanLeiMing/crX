@@ -764,6 +764,81 @@ def test_manual_pane_sizes_survive_content_changes_and_refresh(review_ui, stage)
     assert tab.body_panes.sash_coord(0)[1] <= sizes[0] - 40
 
 
+@pytest.mark.parametrize("pane_name", ["review_panes", "body_panes"])
+def test_pane_drag_defers_queued_refresh_and_preview_work(review_ui, pane_name, monkeypatch):
+    ui, tab, add, _destination = review_ui
+    sample = add("continuous-resize")
+    select(tab, sample)
+    tab.note_var.set("拖动期间保留输入")
+    tab.details.select(tab.frame_panel)
+    _wait_ui(ui, lambda: "frame" in tab._images)
+    photo = tab._images["frame"]
+    panes = getattr(tab, pane_name)
+    sash = panes.sash_coord(0)[1]
+    y = sash + 2
+    panes.event_generate("<ButtonPress-1>", x=20, y=y)
+    ui.update()
+    assert tab._pane_drag is not None and panes.grab_current() is panes
+    # Other Tk widgets can replace the global native sash state. Our active
+    # separator keeps its own anchor and continues moving independently.
+    panes.tk.call("unset", "-nocomplain", "::tk::Priv(sash)", "::tk::Priv(dx)", "::tk::Priv(dy)")
+    scans = []
+    background = tab._background
+    monkeypatch.setattr(tab, "_background", lambda *args, **kwargs: scans.append(args))
+    tab.refresh()
+    assert not scans
+    monkeypatch.setattr(tab, "_background", background)
+    marker = "拖动结束后处理后台结果"
+    tab._results.put(("progress", None, marker, None))
+    heartbeat = []
+    tab._later(180, lambda: heartbeat.append(True))
+    for offset in (-20, -40, -60):
+        panes.event_generate("<B1-Motion>", x=20, y=y + offset, state=0x0100)
+        ui.update()
+    _wait_ui(ui, lambda: heartbeat)
+    assert panes.sash_coord(0)[1] <= sash - 50
+    assert tab._images["frame"] is photo
+    assert tab.message_var.get() != marker and not tab._results.empty()
+    panes.event_generate("<ButtonRelease-1>", x=20, y=y - 60)
+    _wait_ui(ui, lambda: tab.message_var.get() == marker)
+    assert tab._pane_drag is None and panes.grab_current() is not panes
+    assert tab.note_var.get() == "拖动期间保留输入"
+    # Switching away before releasing the mouse must not leave the page captured.
+    y = panes.sash_coord(0)[1] + 2
+    panes.event_generate("<ButtonPress-1>", x=20, y=y)
+    ui.update()
+    assert tab._pane_drag is not None
+    panes.event_generate("<FocusOut>")
+    ui.update()
+    assert tab._pane_drag is None and panes.grab_current() is not panes
+
+
+def test_frame_resize_skips_hidden_and_unchanged_previews(review_ui, monkeypatch):
+    ui, tab, add, _destination = review_ui
+    sample = add("preview-resize")
+    select(tab, sample)
+    _wait_ui(ui, lambda: tab._frame_preview is not None)
+    photos = []
+    from crX.interface import card_review
+
+    photo_image = card_review.ImageTk.PhotoImage
+
+    def render(*args, **kwargs):
+        photos.append(True)
+        return photo_image(*args, **kwargs)
+
+    monkeypatch.setattr(card_review.ImageTk, "PhotoImage", render)
+    tab._resize_frame()
+    assert not photos  # The battle-image tab is still hidden.
+    tab.details.select(tab.frame_panel)
+    _wait_ui(ui, lambda: "frame" in tab._images)
+    ui.update()
+    before = len(photos)
+    tab._resize_frame()
+    tab._resize_frame()
+    assert len(photos) == before
+
+
 def test_included_cards_merge_and_reference_selection_scopes_edits(review_ui, monkeypatch):
     ui, tab, add, destination = review_ui
     first, supplement, other = add("first"), add("supplement", channel=4), add("other", channel=8)
