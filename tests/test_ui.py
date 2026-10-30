@@ -804,12 +804,15 @@ def test_pane_drag_defers_queued_refresh_and_preview_work(review_ui, pane_name, 
     _wait_ui(ui, lambda: tab.message_var.get() == marker)
     assert tab._pane_drag is None and panes.grab_current() is not panes
     assert tab.note_var.get() == "拖动期间保留输入"
-    # Switching away before releasing the mouse must not leave the page captured.
+    # Keyboard focus can change without releasing the physical mouse button.
     y = panes.sash_coord(0)[1] + 2
     panes.event_generate("<ButtonPress-1>", x=20, y=y)
     ui.update()
     assert tab._pane_drag is not None
     panes.event_generate("<FocusOut>")
+    ui.update()
+    assert tab._pane_drag is not None
+    panes.event_generate("<ButtonRelease-1>", x=20, y=y)
     ui.update()
     assert tab._pane_drag is None and panes.grab_current() is not panes
 
@@ -838,6 +841,90 @@ def test_frame_resize_skips_hidden_and_unchanged_previews(review_ui, monkeypatch
     tab._resize_frame()
     tab._resize_frame()
     assert len(photos) == before
+
+
+@pytest.mark.parametrize("pane_name", ["review_panes", "body_panes"])
+@pytest.mark.parametrize("target_name", ["tree", "details"])
+def test_sash_drag_receives_motion_and_release_from_child_widgets(review_ui, pane_name, target_name):
+    ui, tab, add, _destination = review_ui
+    sample = add("child-resize")
+    select(tab, sample)
+    panes = getattr(tab, pane_name)
+    target = getattr(tab, target_name)
+    ui.update()
+    before = panes.sash_coord(0)[1]
+    root_y = panes.winfo_rooty() + before + 2
+    original_tags = target.bindtags()
+    selection = tab.tree.selection()
+    panes.event_generate("<ButtonPress-1>", x=20, y=before + 2, rooty=root_y)
+    ui.update()
+    # A local Tk grab can deliver events to children of the grabbed pane.
+    # Motion/release must reach the active sash before child class bindings.
+    for distance in (15, 30, 45):
+        target.event_generate("<B1-Motion>", x=20, y=5, rooty=root_y - distance, state=0x0100)
+        ui.update()
+    position = panes.sash_coord(0)[1]
+    target.event_generate("<ButtonRelease-1>", x=20, y=5, rooty=root_y - 45)
+    ui.update()
+    assert position <= before - 35
+    assert tab._pane_drag is None and panes.grab_current() is not panes
+    assert target.bindtags() == original_tags
+    assert tab.tree.selection() == selection
+
+
+@pytest.mark.parametrize("pane_name", ["review_panes", "body_panes"])
+def test_quick_sash_drag_keeps_last_position_without_intermediate_redraw(review_ui, pane_name):
+    ui, tab, add, _destination = review_ui
+    add("quick-resize")
+    panes = getattr(tab, pane_name)
+    ui.update()
+    before = panes.sash_coord(0)[1]
+    y = before + 2
+    panes.event_generate("<ButtonPress-1>", x=20, y=y)
+    ui.update()
+    direction = -1 if pane_name == "review_panes" else 1
+    for distance in range(2, 62, 2):
+        panes.event_generate("<B1-Motion>", x=20, y=y + direction * distance, state=0x0100)
+    panes.event_generate("<ButtonRelease-1>", x=20, y=y + direction * 60)
+    ui.update()
+    assert direction * (panes.sash_coord(0)[1] - before) >= 50
+
+
+def test_sash_drag_continues_when_keyboard_focus_changes(review_ui):
+    ui, tab, add, _destination = review_ui
+    add("focus-resize")
+    panes = tab.review_panes
+    ui.update()
+    before = panes.sash_coord(0)[1]
+    y = before + 2
+    panes.event_generate("<ButtonPress-1>", x=20, y=y)
+    ui.update()
+    panes.event_generate("<FocusOut>")
+    panes.event_generate("<B1-Motion>", x=20, y=y - 50, state=0x0100)
+    panes.event_generate("<ButtonRelease-1>", x=20, y=y - 50)
+    ui.update()
+    assert panes.sash_coord(0)[1] <= before - 40
+
+
+@pytest.mark.parametrize("pane_name", ["review_panes", "body_panes"])
+@pytest.mark.parametrize("direction", [-1, 1])
+def test_sash_drag_reverses_immediately_after_hitting_boundary(review_ui, pane_name, direction):
+    ui, tab, add, _destination = review_ui
+    add("boundary-resize")
+    panes = getattr(tab, pane_name)
+    ui.update()
+    y = panes.sash_coord(0)[1] + 2
+    panes.event_generate("<ButtonPress-1>", x=20, y=y)
+    ui.update()
+    panes.event_generate("<B1-Motion>", x=20, y=y + direction * 2000, state=0x0100)
+    ui.update()
+    boundary = panes.sash_coord(0)[1]
+    panes.event_generate("<B1-Motion>", x=20, y=y + direction * 1980, state=0x0100)
+    ui.update()
+    position = panes.sash_coord(0)[1]
+    panes.event_generate("<ButtonRelease-1>", x=20, y=y + direction * 1980)
+    ui.update()
+    assert direction * (boundary - position) >= 15
 
 
 def test_included_cards_merge_and_reference_selection_scopes_edits(review_ui, monkeypatch):

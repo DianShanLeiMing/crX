@@ -123,6 +123,8 @@ class CardReviewTab(ttk.Frame):
         self._bottom_resize_stretch = None
         self._pane_drag = None
         self._pane_grab_owned = False
+        self._pane_drag_tag = f"SashDrag:{self}"
+        self._pane_drag_widgets = []
         self._frame_resize_pending = False
         self._frame_resize_key = None
         self._panes_resized = False
@@ -220,11 +222,12 @@ class CardReviewTab(ttk.Frame):
             background=ttk.Style().colors.border,
         )
         self.review_panes.bind("<ButtonPress-1>", self._begin_review_resize, add="+")
+        self._pane_drag_bindings = {
+            "<B1-Motion>": self.bind_class(self._pane_drag_tag, "<B1-Motion>", self._drag_pane),
+            "<ButtonRelease-1>": self.bind_class(self._pane_drag_tag, "<ButtonRelease-1>", self._end_pane_resize),
+        }
         for panes in (self.body_panes, self.review_panes):
-            panes.bind("<B1-Motion>", self._drag_pane, add="+")
-            panes.bind("<ButtonRelease-1>", self._end_pane_resize, add="+")
             panes.bind("<Escape>", self._end_pane_resize, add="+")
-            panes.bind("<FocusOut>", self._end_pane_resize, add="+")
             panes.bind("<Unmap>", self._end_pane_resize, add="+")
         self.bind(
             "<<ThemeChanged>>",
@@ -466,15 +469,23 @@ class CardReviewTab(ttk.Frame):
         return self._begin_pane_resize(self.body_panes, event)
 
     def _begin_pane_resize(self, panes, event):
+        if self._pane_drag is not None:
+            self._end_pane_resize()
         identified = panes.identify(event.x, event.y)
         if not identified:
             return "break"
-        if self._pane_drag is not None:
-            self._end_pane_resize()
         self._panes_resized = True
         index = int(identified[0])
         x, y = panes.sash_coord(index)
         self._pane_drag = (panes, index, event.y_root, x, y)
+        # A local grab still sends events to descendants under the pointer.
+        # Intercept these before Treeview/Notebook class bindings during drag.
+        widgets = [panes]
+        while widgets:
+            widget = widgets.pop()
+            widget.bindtags((self._pane_drag_tag, *widget.bindtags()))
+            self._pane_drag_widgets.append(widget)
+            widgets.extend(widget.winfo_children())
         if panes.grab_current() is None:
             panes.grab_set()
             self._pane_grab_owned = True
@@ -484,17 +495,24 @@ class CardReviewTab(ttk.Frame):
     def _drag_pane(self, event):
         if self._pane_drag is not None:
             panes, index, root_y, x, y = self._pane_drag
-            if event.widget is panes:
-                panes.sash_place(index, x, y + event.y_root - root_y)
+            panes.sash_place(index, x, y + event.y_root - root_y)
+            # Re-anchor at the actual clamped position on every move. Mouse
+            # travel past either boundary must not accumulate a dead zone.
+            x, y = panes.sash_coord(index)
+            self._pane_drag = (panes, index, event.y_root, x, y)
         return "break"
 
     def _end_pane_resize(self, event=None):
         if self._pane_drag is None:
             return "break"
         panes = self._pane_drag[0]
-        if event is not None and event.widget is not panes:
+        if event is not None and event.type == tk.EventType.Unmap and event.widget is not panes:
             return None
         self._pane_drag = None
+        for widget in self._pane_drag_widgets:
+            if widget.winfo_exists():
+                widget.bindtags(tuple(tag for tag in widget.bindtags() if tag != self._pane_drag_tag))
+        self._pane_drag_widgets.clear()
         if self._pane_grab_owned:
             if panes.grab_current() is panes:
                 panes.grab_release()
@@ -642,6 +660,10 @@ class CardReviewTab(ttk.Frame):
     def _on_destroy(self, event):
         if event.widget is self:
             self._closed = True
+            for sequence, identifier in self._pane_drag_bindings.items():
+                self.unbind_class(self._pane_drag_tag, sequence)
+                self._root().deletecommand(identifier)
+            self._pane_drag_widgets.clear()
             self._search_toplevel.unbind("<Button-1>", self._search_click_binding)
             self._search_toplevel.unbind("<Configure>", self._search_move_binding)
             for identifier in self._after_ids:
