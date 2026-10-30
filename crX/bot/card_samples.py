@@ -101,8 +101,10 @@ class CardSampleCollector:
             and len(identifier) == 16
             and all(char in "0123456789abcdef" for char in identifier)
             and candidates
-            and type(candidates[0].get("distance")) is int
-            and 0 <= candidates[0]["distance"] <= recognition.get("match_threshold", 1000)
+            and type(recognition.get("reference_distance", candidates[0].get("distance"))) is int
+            and 0
+            <= recognition.get("reference_distance", candidates[0]["distance"])
+            <= recognition.get("match_threshold", 1000)
         ):
             with self._match_lock:
                 if identifier in self._hit_pending or len(self._hit_pending) < 256:
@@ -122,7 +124,7 @@ class CardSampleCollector:
         candidates = recognition.get("candidates", [])
         if len(identifier) != 16 or any(char not in "0123456789abcdef" for char in identifier) or not candidates:
             return
-        distance = candidates[0].get("distance")
+        distance = recognition.get("reference_distance", candidates[0].get("distance"))
         margin = recognition.get("candidate_margin")
         if type(distance) is not int or type(margin) is not int or not 0 <= distance <= 10000:
             return

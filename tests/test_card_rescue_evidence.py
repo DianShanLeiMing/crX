@@ -35,7 +35,9 @@ def test_baseline_uses_same_fingerprint_and_canonical_card_names(monkeypatch, ba
     result = detection.recognize_card_fingerprint(
         [dict(zip(detection.COLORS_KEYS, row, strict=True)) for row in base.tolist()]
     )
-    assert result["card_id"] == "knight" and result["source"].startswith("local_active:")
+    assert result["card_id"] == "knight"
+    assert result["candidates"][0]["source"].startswith("local_active:")
+    assert result["source"] == "upstream" if baseline == "knight" else result["source"].startswith("local_active:")
     assert result["builtin_result"]["card_id"] == baseline
     assert (result["builtin_result"]["distance"] > 1000) == (baseline == "UNKNOWN")
 

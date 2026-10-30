@@ -12,7 +12,7 @@ from crX.utils import card_upload as upload
 from crX.utils import card_workflow as workflow
 from crX.utils import formal_library as formal
 from crX.utils import reference_hits as hits
-from crX.utils.card_catalog import build_catalog, set_preferred_reference
+from crX.utils.card_catalog import build_catalog, reorder_references, set_preferred_reference
 from crX.utils.card_review import atomic_json
 from tests.test_card_library import fingerprint
 from tests.test_card_review import add_group_sample
@@ -177,6 +177,17 @@ def test_upload_settings_and_hits_only_when_explicitly_selected(upload_store):
     upload.upload_references(root, [], cards={"knight"}, update_hits=True)
     reset = json.loads(git(remote, "show", f"main:{upload.HITS_FILE}"))
     assert reset["epoch"] != counts["epoch"] and not any(reset["nodes"].values())
+
+
+def test_manual_reference_order_is_published_with_the_selected_card(upload_store):
+    _repo, remote, root, add, _checks = upload_store
+    first, second = add("first"), add("second", 4)
+    refs = build_catalog(workflow.scan_review(root)[0], root=root)["knight"]
+    original = tuple(ref.identifier for ref in refs)
+    reorder_references(root, "knight", original[::-1], original)
+    upload.upload_references(root, [first, second])
+    document = json.loads(git(remote, "show", f"main:{upload.PREFERENCES_FILE}"))
+    assert document["cards"]["knight"]["order"] == list(original[::-1])
 
 
 def test_history_cleanup_recovers_after_interruption_and_requires_valid_published_fingerprint(

@@ -69,7 +69,7 @@ def build_catalog(samples, *, root=None):
             reference.number = value.get("numbers", {}).get(reference.identifier, 0)
             reference.hits = hits.get(reference.identifier, 0)
             reference.cleared = cleared
-        references.sort(key=lambda ref: (not ref.preferred, -ref.hits if not ref.preferred else 0, ref.number))
+        reference_preferences.sort_references(references, value)
     return cards
 
 
@@ -79,3 +79,11 @@ def set_preferred_reference(root, card, identifier):
     with _locked(root):
         data = build_catalog(_scan(root), root=root)
         return reference_preferences.set_preferred(card, identifier, data.get(card, []))
+
+
+def reorder_references(root, card, ordered, expected):
+    from crX.utils.card_workflow import _locked, _scan
+
+    with _locked(root):
+        data = build_catalog(_scan(root), root=root)
+        return reference_preferences.set_reference_order(card, ordered, expected, data.get(card, []))

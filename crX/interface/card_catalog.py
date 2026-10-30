@@ -10,10 +10,12 @@ from crX.bot.card_data import CARD_NAMES_ZH
 
 
 class CardCatalogView(ttk.Frame):
-    def __init__(self, parent, *, refresh, action=lambda _operation: None, status=None):
+    def __init__(self, parent, *, refresh, action=lambda _operation: None, reorder=lambda *_args: None, status=None):
         super().__init__(parent)
         self.data = {}
         self._action = action
+        self._reorder = reorder
+        self._drag = None
         self._disabled = False
         self._allow_reorder = True
         self._refresh = refresh
@@ -92,6 +94,10 @@ class CardCatalogView(ttk.Frame):
         self.references.heading("hits", text="命中数")
         self.references.column("hits", width=80, minwidth=60, stretch=False, anchor="e")
         self.references.grid(row=0, column=0, sticky="nsew")
+        self.references.bind("<ButtonPress-1>", self._begin_drag, add="+")
+        self.references.bind("<B1-Motion>", self._drag_reference, add="+")
+        self.references.bind("<ButtonRelease-1>", self._end_drag, add="+")
+        self.references.bind("<Escape>", self._cancel_drag, add="+")
         reference_scroll = ttk.Scrollbar(gallery, orient="vertical", command=self.references.yview)
         reference_scroll.grid(row=0, column=1, sticky="ns")
 
@@ -106,6 +112,8 @@ class CardCatalogView(ttk.Frame):
             ttk.Label(self, textvariable=status, wraplength=680).grid(row=3, column=0, sticky="ew", pady=(4, 0))
 
     def set_data(self, data):
+        if self._drag is not None:
+            return
         if not self._allow_reorder:
             for card, refs in data.items():
                 old_order = {ref.identifier: index for index, ref in enumerate(self.data.get(card, []))}
@@ -198,6 +206,8 @@ class CardCatalogView(ttk.Frame):
         if not selection:
             return
         card = selection[0]
+        if card != self._card:
+            self._cancel_drag()
         previous = self.references.selection() if card == self._card else ()
         self._card = card
         refs = self.data.get(card, [])
@@ -220,12 +230,70 @@ class CardCatalogView(ttk.Frame):
             if cleared
             else "本次上传包含命中统计；清空本地命中数作用于全部卡牌。"
             if self.update_hits.get()
-            else "首选由你设置，其余按命中数排序；命中数代表使用频率。上传默认不包含统计。"
+            else "拖动普通参考可保存顺序；首选固定在第一行。命中数代表使用频率，上传默认不包含统计。"
         )
 
     def set_disabled(self, disabled):
         self._disabled = disabled
+        if disabled:
+            self._cancel_drag()
         for button in (self.preferred_button, self.upload_button):
             button.configure(state="disabled" if disabled or not self._references else "normal")
         self.clear_button.configure(state="disabled" if disabled else "normal")
         self.hits_check.configure(state="disabled" if disabled else "normal")
+
+    def _begin_drag(self, event):
+        self._cancel_drag()
+        if self._disabled or self.references.identify_region(event.x, event.y) not in ("cell", "tree"):
+            return
+        identifier = self.references.identify_row(event.y)
+        ref = self._references.get(identifier)
+        if ref is not None and not ref.preferred:
+            self._drag = (self._card, identifier, self.references.get_children(), event.y, False)
+
+    def _drag_reference(self, event):
+        if self._drag is None or self._disabled:
+            return
+        card, identifier, original, start_y, moved = self._drag
+        if card != self._card:
+            self._cancel_drag()
+            return
+        if not moved and abs(event.y - start_y) < 4:
+            return
+        self._drag = (card, identifier, original, start_y, True)
+        if event.y < 24:
+            self.references.yview_scroll(-1, "units")
+        elif event.y > self.references.winfo_height() - 20:
+            self.references.yview_scroll(1, "units")
+        target = self.references.identify_row(event.y)
+        rows = self.references.get_children()
+        if not target:
+            target = rows[-1] if event.y >= self.references.winfo_height() - 20 else rows[0] if event.y < 24 else ""
+        if target:
+            first = int(bool(rows) and self._references[rows[0]].preferred)
+            self.references.move(identifier, "", max(first, self.references.index(target)))
+            self.references.selection_set(identifier)
+            self.references.focus(identifier)
+            self.references.configure(cursor="sb_v_double_arrow")
+        return "break"
+
+    def _end_drag(self, _event=None):
+        if self._drag is None:
+            return
+        card, _identifier, original, _start_y, moved = self._drag
+        ordered = self.references.get_children()
+        self._cancel_drag()
+        if moved and ordered != original and not self._disabled and card == self._card:
+            self._allow_reorder = True
+            self._reorder(card, ordered, original)
+        return "break" if moved else None
+
+    def _cancel_drag(self, _event=None):
+        if self._drag is not None:
+            card, _identifier, original, _start_y, _moved = self._drag
+            if card == self._card:
+                for index, key in enumerate(original):
+                    if self.references.exists(key):
+                        self.references.move(key, "", index)
+        self._drag = None
+        self.references.configure(cursor="")

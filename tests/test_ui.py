@@ -1139,6 +1139,58 @@ def test_catalog_first_choice_and_clear_require_explicit_stats_upload(review_ui)
     assert "本次上传将同步清空结果" in view.message.get()
 
 
+def test_catalog_drag_persists_order_keeps_labels_and_pins_first_choice(review_ui):
+    from crX.utils import reference_hits as hits
+    from crX.utils import reference_preferences as preferences
+
+    ui, tab, add, _destination = review_ui
+    samples = [add("first"), add("second", channel=4), add("third", channel=8)]
+    for sample in samples:
+        select(tab, sample)
+        tab.card_var.set("knight")
+        tab.stage_buttons["confirm"].invoke()
+        finish(ui, tab)
+    tab.catalog_button.invoke()
+    _wait_ui(ui, lambda: not tab._scan_busy)
+    view = tab.library_view
+    view.query.set("knight")
+    view.cards.selection_set("knight")
+    ui.update()
+    preferred, one, two = view.references.get_children()
+    view.references.selection_set(preferred)
+    view.preferred_button.invoke()
+    finish(ui, tab)
+    labels = {key: view.references.set(key, "name") for key in (preferred, one, two)}
+
+    def drag(source, target, *, cancel=False):
+        x, y, _width, height = view.references.bbox(source)
+        _x, target_y, _width, target_height = view.references.bbox(target)
+        view.references.event_generate("<ButtonPress-1>", x=x + 10, y=y + height // 2)
+        view.references.event_generate("<B1-Motion>", x=x + 10, y=target_y + target_height // 2)
+        if cancel:
+            view._cancel_drag()
+        view.references.event_generate("<ButtonRelease-1>", x=x + 10, y=target_y + target_height // 2)
+        finish(ui, tab)
+
+    drag(one, two)
+    assert view.references.get_children() == (preferred, two, one)
+    assert {key: view.references.set(key, "name") for key in (preferred, one, two)} == labels
+    value = preferences.read_document(preferences.preferences_path())["cards"]["knight"]
+    assert value["order"] == [preferred, two, one]
+    hits.record_hits(tab.root, {one: 100})
+    view.refresh_order()
+    _wait_ui(ui, lambda: not tab._scan_busy)
+    assert view.references.get_children() == (preferred, two, one)
+    drag(one, two, cancel=True)
+    assert view.references.get_children() == (preferred, two, one)
+    drag(preferred, one)
+    assert view.references.get_children() == (preferred, two, one)
+    tab.set_running(True)
+    drag(one, two)
+    assert view.references.get_children() == (preferred, two, one)
+    tab.set_running(False)
+
+
 def test_sample_deletion_preserves_formal_and_only_deletes_selected_rows(review_ui, monkeypatch):
     ui, tab, add, destination = review_ui
     source, other = add("source"), add("other", channel=4)

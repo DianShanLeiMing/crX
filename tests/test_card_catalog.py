@@ -1,5 +1,7 @@
 """Catalog counts effective references rather than source screenshots."""
 
+import pytest
+
 from crX.bot import card_detection as detection
 from crX.bot.card_data import CARD_NAMES_ZH
 from crX.utils import card_catalog as catalog
@@ -81,3 +83,28 @@ def test_no_original_reference_requires_manual_first_choice_and_stable_numbers(t
     assert preferred[0].name == "首选" and preferred[1].name == "参考1"
     value = preferences.read_document(preferences.preferences_path())["cards"]["knight"]
     assert value["preferred"] == refs[1].identifier and len(value["numbers"]) == 2
+
+
+def test_manual_order_survives_counts_refresh_and_first_choice_exchange(tmp_path, review_store):
+    add, _destination = review_store
+    first, second, third = add("first"), add("second", channel=4), add("third", channel=8)
+    workflow.confirm_samples(tmp_path, [first, second, third], "knight")
+    samples = list(records(tmp_path).values())
+    refs = catalog.build_catalog(samples, root=tmp_path)["knight"]
+    preferred, one, two = (ref.identifier for ref in refs)
+    catalog.set_preferred_reference(tmp_path, "knight", preferred)
+    original = (preferred, one, two)
+    reordered = (preferred, two, one)
+    catalog.reorder_references(tmp_path, "knight", reordered, original)
+    hits.record_hits(tmp_path, {one: 50, two: 1})
+    actual = catalog.build_catalog(samples, root=tmp_path)["knight"]
+    assert tuple(ref.identifier for ref in actual) == reordered
+    assert [ref.name for ref in actual] == ["首选", "参考3", "参考2"]
+    with pytest.raises(ValueError, match="顺序已经变化"):
+        catalog.reorder_references(tmp_path, "knight", original, original)
+    with pytest.raises(ValueError, match="首选固定"):
+        catalog.reorder_references(tmp_path, "knight", (two, preferred, one), reordered)
+    catalog.set_preferred_reference(tmp_path, "knight", one)
+    actual = catalog.build_catalog(samples, root=tmp_path)["knight"]
+    assert [ref.identifier for ref in actual] == [one, two, preferred]
+    assert [ref.hits for ref in actual] == [50, 1, 0]

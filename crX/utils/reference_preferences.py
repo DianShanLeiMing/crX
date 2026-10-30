@@ -43,7 +43,11 @@ def read_document(path):
         raise ValueError("参考配置格式无效")
     total = 0
     for card, value in cards.items():
-        if card not in formal.CARD_NAMES_ZH or not isinstance(value, dict) or set(value) != {"preferred", "numbers"}:
+        if (
+            card not in formal.CARD_NAMES_ZH
+            or not isinstance(value, dict)
+            or set(value) not in ({"preferred", "numbers"}, {"preferred", "numbers", "order"})
+        ):
             raise ValueError("参考配置卡名无效")
         numbers = value.get("numbers")
         if (
@@ -60,6 +64,17 @@ def read_document(path):
             raise ValueError("首选参考配置无效")
         if any(n == 0 and key != preferred for key, n in numbers.items()):
             raise ValueError("首选参考只能有一份")
+        if "order" in value:
+            order = value["order"]
+            if (
+                not isinstance(order, list)
+                or len(order) > len(numbers)
+                or any(not isinstance(key, str) or key not in numbers for key in order)
+                or len(set(order)) != len(order)
+                or preferred in order
+                and order[0] != preferred
+            ):
+                raise ValueError("参考排序配置无效")
         total += len(numbers)
     if total > formal.MAX_ENTRIES * 2:
         raise ValueError("参考编号配置过多")
@@ -91,7 +106,27 @@ def card_preferences(references, saved=None):
             numbers[ref.identifier] = 0 if ref.identifier == preferred else next_number
             if ref.identifier != preferred:
                 next_number += 1
-    return {"preferred": preferred, "numbers": numbers}
+    result = {"preferred": preferred, "numbers": numbers}
+    if "order" in saved:
+        active = {ref.identifier for ref in references}
+        order = [key for key in saved["order"] if key in active]
+        order.extend(ref.identifier for ref in references if ref.identifier not in order)
+        if preferred in order:
+            order.remove(preferred)
+            order.insert(0, preferred)
+        result["order"] = order
+    return result
+
+
+def sort_references(references, value):
+    ranks = {key: index for index, key in enumerate(value.get("order", []))}
+    references.sort(
+        key=lambda ref: (
+            not ref.preferred,
+            ranks.get(ref.identifier, len(ranks)) if "order" in value else -ref.hits,
+            ref.number,
+        )
+    )
 
 
 def register_references(cards):
@@ -127,6 +162,42 @@ def set_preferred(card, identifier, references):
             value["numbers"][previous] = number
         value["numbers"][identifier] = 0
         value["preferred"] = identifier
+        if "order" in value:
+            order = value["order"]
+            index = order.index(identifier)
+            if previous in order:
+                previous_index = order.index(previous)
+                order[previous_index], order[index] = identifier, previous
+            else:
+                order.pop(index)
+                order.insert(0, identifier)
         document["cards"][card] = value
         atomic_json(path, document)
     return "已设置首选；命中数及来源备注保留，上传该卡牌后其他电脑生效"
+
+
+def set_reference_order(card, ordered, expected, references):
+    """Save an exact permutation, never silently replace a stale card selection."""
+    if not formal.source_checkout():
+        raise ValueError("修改参考顺序需要可写的源码项目")
+    if card not in formal.CARD_NAMES_ZH or not references:
+        raise ValueError("请选择有参考样本的有效卡牌")
+    active = {ref.identifier for ref in references}
+    if len(ordered) != len(active) or len(set(ordered)) != len(ordered) or set(ordered) != active:
+        raise ValueError("参考已经变化，请刷新后重新排序")
+    path = preferences_path()
+    with _LOCK, formal.writer_lock(path.with_suffix(".json.lock")):
+        document = read_document(path)
+        value = card_preferences(references, document["cards"].get(card))
+        for ref in references:
+            ref.preferred = ref.identifier == value["preferred"]
+            ref.number = value["numbers"][ref.identifier]
+        sort_references(references, value)
+        if tuple(ref.identifier for ref in references) != tuple(expected):
+            raise ValueError("参考顺序已经变化，请刷新后重新排序")
+        if value["preferred"] in active and ordered[0] != value["preferred"]:
+            raise ValueError("首选固定在第一行，请使用交换首选调整")
+        value["order"] = list(ordered)
+        document["cards"][card] = value
+        atomic_json(path, document)
+    return "已保存参考顺序；编号与命中数保留，上传该卡牌后其他电脑生效"

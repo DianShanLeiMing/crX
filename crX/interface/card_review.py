@@ -18,7 +18,7 @@ from crX.bot.card_data import CARD_NAMES_ZH
 from crX.bot.card_samples import get_card_samples_dir
 from crX.interface.card_catalog import CardCatalogView
 from crX.utils import reference_hits
-from crX.utils.card_catalog import build_catalog, set_preferred_reference
+from crX.utils.card_catalog import build_catalog, reorder_references, set_preferred_reference
 from crX.utils.card_review import (
     REASON_LABELS,
     ReviewSample,
@@ -387,6 +387,7 @@ class CardReviewTab(ttk.Frame):
             self,
             refresh=self.refresh,
             action=self._catalog_action,
+            reorder=self._reorder_catalog,
             status=self.message_var,
         )
         self._later(0, self.refresh)
@@ -708,6 +709,12 @@ class CardReviewTab(ttk.Frame):
                     progress=lambda message: results.put(("progress", None, message, None)),
                 )
             )
+
+    def _reorder_catalog(self, card, ordered, expected):
+        if self._running or self._action_busy:
+            return
+        root = self.root
+        self._start_action(lambda: reorder_references(root, card, ordered, expected))
 
     def _upload(self):
         if self._running or self._action_busy:

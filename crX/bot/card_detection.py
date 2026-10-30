@@ -128,27 +128,51 @@ def recognize_card_fingerprint(collected_data):
         sources += tuple(f"builtin:{entry['id']}" for entry in formal)
         identifiers += tuple(entry["id"] for entry in formal)
     preferences = runtime_preferences()
+    order_ranks = {
+        card: {key: rank for rank, key in enumerate(value.get("order", []))} for card, value in preferences.items()
+    }
 
-    def tie_order(index):
+    def reference_order(index):
         card = CARD_DETECTION_ALIASES.get(names[index], names[index])
         value = preferences.get(card, {})
         identifier = identifiers[index]
+        ranks = order_ranks.get(card, {})
         return (
-            int(distances[index]),
             0 if value.get("preferred") == identifier else 1,
-            -reference_hits._runtime_counts.get(identifier, 0),
+            ranks.get(identifier, len(ranks))
+            if "order" in value
+            else -reference_hits._runtime_counts.get(identifier, 0),
             value.get("numbers", {}).get(identifier, index + 1),
             index,
         )
+
+    def tie_order(index):
+        return (int(distances[index]), *reference_order(index))
+
+    def adopted_reference(best_index, limit):
+        """Determine the card by similarity, then use its first passing reference."""
+        card = CARD_DETECTION_ALIASES.get(names[best_index], names[best_index])
+        if distances[best_index] > CARD_MATCH_THRESHOLD:
+            return best_index
+        eligible = (
+            index
+            for index in range(limit)
+            if CARD_DETECTION_ALIASES.get(names[index], names[index]) == card
+            and distances[index] <= CARD_MATCH_THRESHOLD
+        )
+        return min(eligible, key=reference_order)
 
     # Compare the very same frame with the complete shipped library, before locals.
     builtin_index = min(range(len(distances)), key=tie_order)
     builtin_distance = int(distances[builtin_index])
     builtin_card = CARD_DETECTION_ALIASES.get(names[builtin_index], names[builtin_index])
+    builtin_reference = adopted_reference(builtin_index, len(distances))
     builtin_result = {
         "card_id": builtin_card if builtin_distance <= CARD_MATCH_THRESHOLD else "UNKNOWN",
         "distance": builtin_distance,
-        "source": sources[builtin_index],
+        "source": sources[builtin_reference],
+        "reference_id": identifiers[builtin_reference],
+        "reference_distance": int(distances[builtin_reference]),
     }
     local = runtime_entries()
     if local:
@@ -159,7 +183,10 @@ def recognize_card_fingerprint(collected_data):
         identifiers += tuple(entry["id"] for entry in local)
     candidates = []
     canonical_seen = set()
+    best_index = None
     for index in sorted(range(len(distances)), key=tie_order):
+        if best_index is None:
+            best_index = index
         raw_id = names[index]
         canonical_id = CARD_DETECTION_ALIASES.get(raw_id, raw_id)
         if canonical_id in canonical_seen:
@@ -178,11 +205,13 @@ def recognize_card_fingerprint(collected_data):
             break
     best = candidates[0]
     accepted = int(best["distance"]) <= CARD_MATCH_THRESHOLD
+    reference = adopted_reference(best_index, len(distances))
     return {
         "card_id": best["card_id"] if accepted else "UNKNOWN",
         "fingerprint_id": best["fingerprint_id"] if accepted else "UNKNOWN",
-        "source": best["source"] if accepted else "",
-        "reference_id": best["reference_id"] if accepted else "",
+        "source": sources[reference] if accepted else "",
+        "reference_id": identifiers[reference] if accepted else "",
+        "reference_distance": int(distances[reference]) if accepted else None,
         "candidates": candidates,
         "candidate_margin": int(candidates[1]["distance"]) - int(best["distance"]),
         "match_threshold": CARD_MATCH_THRESHOLD,
