@@ -84,6 +84,14 @@ def _is_subsequence(query: str, text: str) -> bool:
     return all(char in remaining for char in query)
 
 
+def sample_card_choice(sample: ReviewSample) -> str:
+    if sample.card_id in CARD_NAMES_ZH:
+        return sample.card_id
+    candidates = sample.record.get("candidates", [])
+    candidate = candidates[0].get("card_id", "") if candidates else ""
+    return candidate if candidate in CARD_NAMES_ZH else ""
+
+
 class CardReviewTab(ttk.Frame):
     def __init__(self, parent, *, root=None, count_callback=None, clear_busy_callback=None):
         super().__init__(parent, padding=12)
@@ -977,9 +985,11 @@ class CardReviewTab(ttk.Frame):
         if tuple(self.tree.get_children()) != desired:
             self.tree.delete(*self.tree.get_children())
         for sample in visible:
-            candidates = sample.record.get("candidates", [])
-            suggestion = CARD_NAMES_ZH.get(candidates[0].get("card_id"), "") if candidates else ""
-            card = CARD_NAMES_ZH.get(sample.card_id, "") or (f"候选：{suggestion}" if suggestion else "待选择")
+            choice = sample_card_choice(sample)
+            card = CARD_NAMES_ZH.get(choice, "")
+            if card and sample.card_id not in CARD_NAMES_ZH:
+                card = f"候选：{card}"
+            card = card or "待选择"
             row = {
                 "group": self.group_labels.get(self.sample_groups[sample.key], ""),
                 "card": card,
@@ -1134,7 +1144,7 @@ class CardReviewTab(ttk.Frame):
         self._selected_keys = selection
         self.selected = sample
         self._selection_version += 1
-        card_ids = {self.samples[key].card_id for key in selection}
+        card_ids = {sample_card_choice(self.samples[key]) for key in selection}
         card_id = next(iter(card_ids)) if len(card_ids) == 1 else ""
         self.card_var.set(next((label for label, value in self.card_choices.items() if value == card_id), ""))
         self.card_combo.configure(values=sorted(self.card_choices))

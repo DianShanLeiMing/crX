@@ -632,7 +632,8 @@ def test_two_tabs_single_approval_routes_and_keeps_owned_status(review_ui):
     assert legacy.key not in tab.tree.get_children() and legacy.file("card").is_file()
     assert not {"session", "formal", "runtime"}.intersection(tab.tree.cget("columns"))
     select(tab, first)
-    assert tab.card_var.get() == ""  # Candidate hints never become human labels.
+    assert tab._chosen_card() == first.record["candidates"][0]["card_id"]
+    assert not tab.samples[first.key].card_id and not formal._read_entries(destination)
     tab.card_var.set("knight")
     tab.note_var.set("人工核对")
     tab.refresh()
