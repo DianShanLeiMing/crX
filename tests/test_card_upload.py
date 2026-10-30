@@ -11,6 +11,8 @@ from crX.utils import card_library as local
 from crX.utils import card_upload as upload
 from crX.utils import card_workflow as workflow
 from crX.utils import formal_library as formal
+from crX.utils import reference_hits as hits
+from crX.utils.card_catalog import build_catalog, set_preferred_reference
 from crX.utils.card_review import atomic_json
 from tests.test_card_library import fingerprint
 from tests.test_card_review import add_group_sample
@@ -151,6 +153,66 @@ def test_uploaded_samples_archive_per_reference_and_keep_sources(upload_store):
     assert recovered[first.key].uploaded and not recovered[later.key].uploaded
 
 
+def test_upload_settings_and_hits_only_when_explicitly_selected(upload_store):
+    repo, remote, root, add, _checks = upload_store
+    sample = add("first")
+    refs = build_catalog(workflow.scan_review(root)[0], root=root)["knight"]
+    set_preferred_reference(root, "knight", refs[0].identifier)
+    hits.record_hits(root, {refs[0].identifier: 4})
+    upload.upload_references(root, [sample])
+    prefs = json.loads(git(remote, "show", f"main:{upload.PREFERENCES_FILE}"))
+    assert set(prefs["cards"]) == {"knight"}
+    assert prefs["cards"]["knight"]["preferred"] == refs[0].identifier
+    assert not git(remote, "ls-tree", "main", "--", upload.HITS_FILE)
+    # Catalog publication works after source images have been archived/removed.
+    upload.upload_references(root, [], cards={"knight"}, update_hits=True)
+    counts = json.loads(git(remote, "show", f"main:{upload.HITS_FILE}"))
+    assert sum(node.get(refs[0].identifier, 0) for node in counts["nodes"].values()) == 4
+    head = git(repo, "rev-parse", "HEAD")
+    upload.upload_references(root, [], cards={"knight"}, update_hits=True)
+    assert git(repo, "rev-parse", "HEAD") == head
+    hits.clear_local(root)
+    upload.upload_references(root, [], cards={"knight"})
+    assert json.loads(git(remote, "show", f"main:{upload.HITS_FILE}")) == counts
+    upload.upload_references(root, [], cards={"knight"}, update_hits=True)
+    reset = json.loads(git(remote, "show", f"main:{upload.HITS_FILE}"))
+    assert reset["epoch"] != counts["epoch"] and not any(reset["nodes"].values())
+
+
+def test_history_cleanup_recovers_after_interruption_and_requires_valid_published_fingerprint(
+    upload_store, monkeypatch
+):
+    _repo, _remote, root, add, _checks = upload_store
+    sample, unpublished = add("first"), add("second", 4)
+    entries = formal._read_entries(formal.formal_path())
+    # Publication markers represent already successful historic uploads.
+    workflow._commit(
+        root,
+        entries,
+        entries,
+        [(sample, {"published_reference_id": sample.review["formal_id"], "published_commit": "a" * 40})],
+    )
+    original_unlink = type(root).unlink
+
+    def locked_image(path, *args, **kwargs):
+        if path.name == "sample-000-hand.png" and path.parent == sample.directory:
+            raise PermissionError("image is open")
+        return original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(type(root), "unlink", locked_image)
+    with pytest.raises(PermissionError):
+        workflow.scan_review(root)
+    current = {item.key: item for item in workflow._scan(root)}
+    assert not current[sample.key].review.get("images_cleaned")
+    assert sample.file("frame").exists()
+    assert all(unpublished.file(kind).exists() for kind in ("card", "hand", "frame"))
+    monkeypatch.setattr(type(root), "unlink", original_unlink)
+    current = {item.key: item for item in workflow.scan_review(root)[0]}
+    assert current[sample.key].review["images_cleaned"]
+    assert all(not sample.file(kind).exists() for kind in ("card", "hand", "frame"))
+    assert formal._read_entries(formal.formal_path()) == entries
+
+
 def test_unpublished_code_commit_is_never_pushed(upload_store):
     repo, remote, root, add, checks = upload_store
     sample = add("first")
@@ -223,37 +285,3 @@ def test_git_commit_hook_is_respected_and_index_is_preserved(upload_store):
     assert git(repo, "rev-parse", "HEAD") == git(remote, "rev-parse", "main") == before
     assert git(repo, "diff", "--cached", "--name-only") == ""
     assert not (repo / ".git" / "index.lock").exists()
-
-
-def test_history_cleanup_recovers_after_interruption_and_requires_valid_published_fingerprint(
-    upload_store, monkeypatch
-):
-    _repo, _remote, root, add, _checks = upload_store
-    sample, unpublished = add("first"), add("second", 4)
-    entries = formal._read_entries(formal.formal_path())
-    # Publication markers represent already successful historic uploads.
-    workflow._commit(
-        root,
-        entries,
-        entries,
-        [(sample, {"published_reference_id": sample.review["formal_id"], "published_commit": "a" * 40})],
-    )
-    original_unlink = type(root).unlink
-
-    def locked_image(path, *args, **kwargs):
-        if path.name == "sample-000-hand.png" and path.parent == sample.directory:
-            raise PermissionError("image is open")
-        return original_unlink(path, *args, **kwargs)
-
-    monkeypatch.setattr(type(root), "unlink", locked_image)
-    with pytest.raises(PermissionError):
-        workflow.scan_review(root)
-    current = {item.key: item for item in workflow._scan(root)}
-    assert not current[sample.key].review.get("images_cleaned")
-    assert sample.file("frame").exists()
-    assert all(unpublished.file(kind).exists() for kind in ("card", "hand", "frame"))
-    monkeypatch.setattr(type(root), "unlink", original_unlink)
-    current = {item.key: item for item in workflow.scan_review(root)[0]}
-    assert current[sample.key].review["images_cleaned"]
-    assert all(not sample.file(kind).exists() for kind in ("card", "hand", "frame"))
-    assert formal._read_entries(formal.formal_path()) == entries

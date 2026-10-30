@@ -51,6 +51,9 @@ datas = [
     (str(ROOT_DIR / "assets" / "crX.ico"), "assets"),
     (str(version_file), "crX"),
     (str(ROOT_DIR / "crX" / "bot" / "card_reference_library.json"), "."),
+    (str(ROOT_DIR / "crX" / "bot" / "card_builtin_references.json"), "."),
+    (str(ROOT_DIR / "crX" / "bot" / "card_reference_preferences.json"), "."),
+    (str(ROOT_DIR / "crX" / "bot" / "card_reference_hits.json"), "."),
 ]
 
 # Build add-data arguments

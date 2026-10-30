@@ -11,8 +11,13 @@ from pathlib import Path
 
 from crX.utils import card_workflow as workflow
 from crX.utils import formal_library as formal
+from crX.utils import reference_hits as hits
+from crX.utils import reference_preferences as preferences
 
 LIBRARY_FILE = "crX/bot/card_reference_library.json"
+PREFERENCES_FILE = "crX/bot/card_reference_preferences.json"
+HITS_FILE = "crX/bot/card_reference_hits.json"
+UPLOAD_FILES = {LIBRARY_FILE, PREFERENCES_FILE, HITS_FILE}
 COMMIT_TITLE = "data(cards): upload approved references"
 MAX_INDEX_BYTES = 32 * 1024 * 1024
 
@@ -77,7 +82,7 @@ def _lint(repo, progress):
             raise ValueError(f"{' '.join(command)} 未通过，尚未创建提交，请先修复项目检查")
 
 
-def _tracking(repo, head):
+def _tracking(repo, head, *, update_hits=False):
     branch = _text(repo, "branch", "--show-current")
     if not branch:
         raise ValueError("当前处于分离 HEAD，请先切换到有远端跟踪的分支")
@@ -96,8 +101,10 @@ def _tracking(repo, head):
     for commit in ahead:
         title = _text(repo, "show", "-s", "--format=%s", commit)
         paths = _text(repo, "diff-tree", "--no-commit-id", "--name-only", "-r", commit).splitlines()
-        if title != COMMIT_TITLE or paths != [LIBRARY_FILE]:
+        if title != COMMIT_TITLE or not paths or not set(paths).issubset(UPLOAD_FILES):
             raise ValueError("当前分支有未推送的其他提交，请先处理这些提交后再上传参考")
+        if HITS_FILE in paths and not update_hits:
+            raise ValueError("上次命中数提交尚未推送，请勾选更新命中数后重试")
     return remote, target, bool(ahead)
 
 
@@ -112,6 +119,19 @@ def _base_entries(repo, directory, revision="HEAD"):
     path = directory / "base.json"
     path.write_bytes(payload)
     return formal._read_entries(path)
+
+
+def _base_document(repo, directory, filename, reader):
+    path = directory / Path(filename).name
+    if _text(repo, "ls-tree", "HEAD", "--", filename):
+        if int(_text(repo, "cat-file", "-s", f"HEAD:{filename}")) > hits.MAX_BYTES:
+            raise ValueError("已提交的参考配置过大")
+        path.write_bytes(_git(repo, "show", f"HEAD:{filename}").stdout)
+    return reader(path)
+
+
+def _payload(document):
+    return (json.dumps(document, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
 
 def published_reference_ids():
@@ -142,7 +162,7 @@ def _archive_published(root, identifiers, revision):
     workflow._cleanup_uploaded_images(root, workflow._scan(root), entries)
 
 
-def _commit_entries(repo, head, payload, directory):
+def _commit_entries(repo, head, payloads, directory):
     git_dir = Path(_text(repo, "rev-parse", "--absolute-git-dir")).resolve()
     index = git_dir / "index"
     lock = git_dir / "index.lock"
@@ -162,10 +182,11 @@ def _commit_entries(repo, head, payload, directory):
         if _git(repo, "diff", "--cached", "--quiet", check=False).returncode:
             raise ValueError("暂存区已有其他改动，请先处理后上传；未改动原暂存区")
         shutil.copyfile(index, temporary_index)
-        document = directory / "upload.json"
-        document.write_bytes(payload)
-        blob = _text(repo, "hash-object", "-w", str(document))
-        _git(repo, "update-index", "--add", "--cacheinfo", f"100644,{blob},{LIBRARY_FILE}", env=env)
+        for number, (filename, payload) in enumerate(payloads.items()):
+            document = directory / f"upload-{number}.json"
+            document.write_bytes(payload)
+            blob = _text(repo, "hash-object", "-w", str(document))
+            _git(repo, "update-index", "--add", "--cacheinfo", f"100644,{blob},{filename}", env=env)
         tree = _text(repo, "write-tree", env=env)
         try:
             _git(repo, "commit", "-m", COMMIT_TITLE, env=env, timeout=60)
@@ -177,7 +198,7 @@ def _commit_entries(repo, head, payload, directory):
                 os.replace(lock, index)
                 owns_lock = False
         paths = _text(repo, "diff-tree", "--no-commit-id", "--name-only", "-r", committed).splitlines()
-        if paths != [LIBRARY_FILE]:
+        if set(paths) != set(payloads):
             raise ValueError("提交钩子修改了其他文件，本次未推送，请人工检查提交")
         if _text(repo, "rev-parse", f"{committed}^{{tree}}") != tree:
             raise ValueError("提交钩子改变了所选参考，本次未推送，请人工检查提交")
@@ -187,41 +208,73 @@ def _commit_entries(repo, head, payload, directory):
             lock.unlink(missing_ok=True)
 
 
-def upload_references(root, selected, *, progress=lambda _message: None):
+def upload_references(root, selected, *, cards=None, update_hits=False, progress=lambda _message: None):
     """Append selected approved references to HEAD, commit and push the tracked branch."""
     if not formal.source_checkout():
         raise ValueError("上传需要可写的源码 Git 项目，当前安装版不支持")
     repo = _project_root()
     if formal.formal_path().resolve() != repo / LIBRARY_FILE:
         raise ValueError("正式库不属于当前源码项目，不能上传")
+    if cards is not None and (
+        not cards or len(cards) > formal.MAX_BATCH or not set(cards).issubset(formal.CARD_NAMES_ZH)
+    ):
+        raise ValueError("请选择有效卡牌，一次最多上传64种")
     with workflow._locked(root):
-        samples = workflow._fresh(root, selected)
+        samples = workflow._fresh(root, selected) if selected else []
+        if not samples and (
+            not cards or len(cards) > formal.MAX_BATCH or not set(cards).issubset(formal.CARD_NAMES_ZH)
+        ):
+            raise ValueError("请选择需要上传的卡牌")
         entries = {entry["id"]: entry for entry in formal._read_entries(formal.formal_path())}
         chosen = {}
+        chosen_cards = set(cards or ())
         for sample in samples:
             entry = entries.get(sample.review.get("formal_id"))
             if sample.status != "included" or entry is None or sample.card_id != entry["card_id"]:
                 raise ValueError("请选择已入库且仍关联有效正式参考的条目")
             chosen[entry["id"]] = entry
+            chosen_cards.add(entry["card_id"])
+        if cards:
+            chosen.update({key: entry for key, entry in entries.items() if entry["card_id"] in cards})
         head = _text(repo, "rev-parse", "--verify", "HEAD")
         progress("正在检查远端分支……")
-        remote, target, pending_push = _tracking(repo, head)
+        remote, target, pending_push = _tracking(repo, head, update_hits=update_hits)
+        uploaded_stats = None
         with tempfile.TemporaryDirectory(prefix="crx-card-upload-") as name:
             directory = Path(name)
             before = _base_entries(repo, directory)
             merged = {entry["id"]: entry for entry in before}
             merged.update(chosen)
+            payloads = {}
             if list(merged.values()) != before:
-                payload = (
-                    json.dumps({"version": 1, "entries": list(merged.values())}, ensure_ascii=False, indent=2) + "\n"
-                ).encode("utf-8")
+                payload = _payload({"version": 1, "entries": list(merged.values())})
                 path = directory / "validated.json"
                 path.write_bytes(payload)
                 formal._read_entries(path)
+                payloads[LIBRARY_FILE] = payload
+            current_preferences = preferences.read_document(preferences.preferences_path())
+            old_preferences = _base_document(repo, directory, PREFERENCES_FILE, preferences.read_document)
+            new_preferences = {"version": 1, "cards": dict(old_preferences["cards"])}
+            for card in chosen_cards:
+                if card in current_preferences["cards"]:
+                    new_preferences["cards"][card] = current_preferences["cards"][card]
+            if new_preferences != old_preferences:
+                payloads[PREFERENCES_FILE] = _payload(new_preferences)
+            if update_hits:
+                old_stats = _base_document(repo, directory, HITS_FILE, hits.read_shared)
+                uploaded_stats = hits.prepare_upload(root, old_stats)
+                validation = directory / "validated-hits.json"
+                validation.write_bytes(_payload(uploaded_stats))
+                hits.read_shared(validation)
+                if uploaded_stats != old_stats:
+                    payloads[HITS_FILE] = _payload(uploaded_stats)
+            if payloads:
                 _lint(repo, progress)
-                progress("正在提交选中的正式参考……")
-                head = _commit_entries(repo, head, payload, directory)
+                progress("正在提交选中的参考配置……")
+                head = _commit_entries(repo, head, payloads, directory)
             elif not pending_push:
+                if uploaded_stats is not None:
+                    hits.acknowledge_upload(root, uploaded_stats)
                 _archive_published(root, chosen, head)
                 return "所选正式参考已上传，无需重复提交"
         progress("正在推送正式参考……")
@@ -230,7 +283,9 @@ def upload_references(root, selected, *, progress=lambda _message: None):
         except ValueError as error:
             raise ValueError("推送未完成，本地提交已保留；检查网络、登录权限或远端更新后可再次点击上传") from error
         try:
+            if uploaded_stats is not None:
+                hits.acknowledge_upload(root, uploaded_stats)
             _archive_published(root, chosen, head)
         except (OSError, ValueError) as error:
-            raise ValueError("远端已上传，本机归档未完成；刷新或再次上传可恢复，参考和原图保留") from error
-        return f"已上传 {len(chosen)} 份正式参考；其他机器更新代码后生效，来源图片已清理，备注保留"
+            raise ValueError("远端已上传，本机归档或图片清理未完成；刷新后可重试，正式参考保留") from error
+        return f"已上传 {len(chosen)} 份正式参考及所选配置；其他机器更新代码后生效，来源图片已清理，备注保留"

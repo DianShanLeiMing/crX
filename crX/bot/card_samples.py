@@ -67,6 +67,8 @@ class CardSampleCollector:
         self._stop = threading.Event()
         self._match_lock = threading.Lock()
         self._match_pending: dict[str, dict[str, int]] = {}
+        self._hit_pending: dict[str, int] = {}
+        self._hit_episodes: dict[int, str] = {}
         self._hand_episodes: dict[int, tuple[str, bool]] = {}
         self._assisted_in_fight: set[str] = set()
         self._next_match_flush = 0.0
@@ -84,12 +86,32 @@ class CardSampleCollector:
         return True
 
     def observe_library_match(self, recognition: dict, slot: int) -> None:
-        """Count only baseline-unknown rescues, once per continuous card in a slot."""
+        """Count reference hits per card arrival; retain separate legacy rescue stats."""
         from crX.utils.card_library import empty_match_stats
 
         if type(slot) is not int or not 0 <= slot < 4 or self._stop.is_set():
             return
         card = recognition.get("card_id", "UNKNOWN")
+        identifier = recognition.get("reference_id", "")
+        candidates = recognition.get("candidates", [])
+        if (
+            card != "UNKNOWN"
+            and self._hit_episodes.get(slot) != card
+            and isinstance(identifier, str)
+            and len(identifier) == 16
+            and all(char in "0123456789abcdef" for char in identifier)
+            and candidates
+            and type(candidates[0].get("distance")) is int
+            and 0 <= candidates[0]["distance"] <= recognition.get("match_threshold", 1000)
+        ):
+            with self._match_lock:
+                if identifier in self._hit_pending or len(self._hit_pending) < 256:
+                    self._hit_pending[identifier] = self._hit_pending.get(identifier, 0) + 1
+                    self._hit_episodes[slot] = card
+        elif card != "UNKNOWN" and self._hit_episodes.get(slot) != card:
+            # A different accepted card ends the preceding appearance even if it
+            # belongs to a legacy reference without a stable counter identifier.
+            self._hit_episodes.pop(slot, None)
         # Unknown/temporarily unavailable frames do not establish a replacement card.
         if card != "UNKNOWN" and self._hand_episodes.get(slot, (None, False))[0] != card:
             self._hand_episodes[slot] = (card, False)
@@ -127,11 +149,22 @@ class CardSampleCollector:
 
     def _flush_match_stats(self):
         from crX.utils.card_library import merge_match_stats
+        from crX.utils.reference_hits import record_hits, totals
 
         with self._match_lock:
             pending, self._match_pending = self._match_pending, {}
+            hits, self._hit_pending = self._hit_pending, {}
+        if hits:
+            try:
+                record_hits(self.root, hits)
+            except (OSError, ValueError, TypeError):
+                with self._match_lock:
+                    for key, value in hits.items():
+                        self._hit_pending[key] = self._hit_pending.get(key, 0) + value
+                raise
         if pending:
             merge_match_stats(self.root, pending)
+        totals(self.root)
 
     def offer(self, frame, slot: int | None, metadata: dict) -> bool:
         if self._stop.is_set() or frame is None or frame.shape != (*GAME_SCREEN_SIZE[::-1], 3):

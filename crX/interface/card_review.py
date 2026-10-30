@@ -17,7 +17,8 @@ from ttkbootstrap.widgets.scrolled import ScrolledFrame
 from crX.bot.card_data import CARD_NAMES_ZH
 from crX.bot.card_samples import get_card_samples_dir
 from crX.interface.card_catalog import CardCatalogView
-from crX.utils.card_catalog import build_catalog
+from crX.utils import reference_hits
+from crX.utils.card_catalog import build_catalog, set_preferred_reference
 from crX.utils.card_review import (
     REASON_LABELS,
     ReviewSample,
@@ -108,6 +109,7 @@ class CardReviewTab(ttk.Frame):
         self._history_pending = True
         self._maintenance_scan = False
         self._action_busy = False
+        self._upload_action = False
         self._images = {}
         self._thumbnail_images = OrderedDict()
         self._bottom_resize_stretch = None
@@ -171,6 +173,11 @@ class CardReviewTab(ttk.Frame):
         self.clear_selection_button.pack(side="left", padx=(0, 8))
         self.upload_button = ttk.Button(selection_tools, text="上传", command=self._upload, state="disabled")
         self.upload_button.pack(side="left")
+        self.update_hits = tk.BooleanVar(value=False)
+        self.hits_check = ttk.Checkbutton(
+            selection_tools, text="更新命中数（含本地清空结果）", variable=self.update_hits
+        )
+        self.hits_check.pack(side="left", padx=8)
         self.clear_button = ttk.Button(
             selection_tools, text="删除样本", bootstyle="danger-outline", command=self._clear_samples, state="disabled"
         )
@@ -376,7 +383,12 @@ class CardReviewTab(ttk.Frame):
         self._later(30, self._fit_controls)
         self._later(100, self._poll)
         self._later(5000, self._auto_refresh)
-        self.library_view = CardCatalogView(self, background=self._background, later=self._later, refresh=self.refresh)
+        self.library_view = CardCatalogView(
+            self,
+            refresh=self.refresh,
+            action=self._catalog_action,
+            status=self.message_var,
+        )
         self._later(0, self.refresh)
 
     def _update_review_theme(self, _event=None):
@@ -606,7 +618,7 @@ class CardReviewTab(ttk.Frame):
         samples, errors, groups = scan_review(
             root, refresh_library=True, reassess_history=history, cleanup_uploaded=cleanup
         )
-        return samples, errors, groups, build_catalog(samples)
+        return samples, errors, groups, build_catalog(samples, root=root)
 
     def _open_folder(self):
         root = str(self.root)
@@ -622,6 +634,7 @@ class CardReviewTab(ttk.Frame):
         if self.filter_var.get() == "样本库":
             self._switch_tab()
         else:
+            self.library_view.refresh_order()
             self.filter_var.set("样本库")
             self._render_list()
 
@@ -668,6 +681,34 @@ class CardReviewTab(ttk.Frame):
             return []
         return [sample for key in self.tree.selection() for sample in self.row_samples.get(key, [])]
 
+    def _catalog_action(self, operation):
+        if self._running or self._action_busy:
+            return
+        view, root = self.library_view, self.root
+        card = view._card
+        if operation == "clear":
+            self.update_hits.set(False)
+            view.update_hits.set(False)
+            view._allow_reorder = True
+            self._start_action(lambda: reference_hits.clear_local(root))
+        elif operation == "preferred" and card and view.references.selection():
+            view._allow_reorder = True
+            identifier = view.references.selection()[0]
+            self._start_action(lambda: set_preferred_reference(root, card, identifier))
+        elif operation == "upload" and card:
+            update_hits = view.update_hits.get()
+            results = self._results
+            self._upload_action = True
+            self._start_action(
+                lambda: upload_references(
+                    root,
+                    [],
+                    cards={card},
+                    update_hits=update_hits,
+                    progress=lambda message: results.put(("progress", None, message, None)),
+                )
+            )
+
     def _upload(self):
         if self._running or self._action_busy:
             return
@@ -680,7 +721,9 @@ class CardReviewTab(ttk.Frame):
         def progress(message):
             results.put(("progress", None, message, None))
 
-        self._start_action(lambda: upload_references(root, samples, progress=progress))
+        options = {"update_hits": True} if self.update_hits.get() else {}
+        self._upload_action = True
+        self._start_action(lambda: upload_references(root, samples, progress=progress, **options))
 
     def _clear_selection(self):
         if not self._action_busy:
@@ -735,8 +778,6 @@ class CardReviewTab(ttk.Frame):
                     self._render_list()
                     if errors:
                         self.message_var.set(f"有 {errors} 条不完整或无效记录已跳过，可在写入完成后刷新。")
-            elif kind.startswith("catalog_"):
-                self.library_view.deliver(kind, token, result, error)
             elif kind == "preview" and token == self._selection_version:
                 if error is None:
                     for image_kind, widget in (
@@ -781,6 +822,11 @@ class CardReviewTab(ttk.Frame):
                 if error:
                     self._history_pending = True
                 self._action_busy = self.formalizing = self.clearing = False
+                if self._upload_action:
+                    if error is None:
+                        self.update_hits.set(False)
+                        self.library_view.update_hits.set(False)
+                    self._upload_action = False
                 if self.clear_busy_callback:
                     self.clear_busy_callback(False)
                 self._set_action_state()
@@ -825,7 +871,6 @@ class CardReviewTab(ttk.Frame):
             self.filters_panel.pack_forget()
             self.selection_tools.pack_forget()
             self.library_view.grid(row=2, column=0, sticky="nsew")
-            self.library_view._queue_thumbnails()
             self._set_action_state()
             return
         self.library_view.grid_remove()
@@ -1247,6 +1292,8 @@ class CardReviewTab(ttk.Frame):
         return "break"
 
     def _set_action_state(self):
+        self.library_view.set_disabled(self._running or self._action_busy)
+        self.hits_check.configure(state="disabled" if self._running or self._action_busy else "normal")
         self._sync_thumbnail_selection()
         stage = self.filter_var.get()
         selected = self._action_samples()
@@ -1283,7 +1330,7 @@ class CardReviewTab(ttk.Frame):
             {
                 "待确认": "核对卡名与版本后确认并入库；无需保留的样本可选中后删除。正式库已覆盖时无需新增，冲突保留待确认。任务停止后可操作。",
                 "待上传": "在下方选择具体参考更正或移出；上传共享上方选中卡牌的全部正式参考。上传成功后清理来源图片，备注保留。",
-                "样本库": "查询全部卡牌的正式参考，选择参考查看原图。",
+                "样本库": "查询全部卡牌的正式参考数量、名称和编号。",
             }[stage]
         )
 

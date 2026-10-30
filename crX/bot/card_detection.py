@@ -24,8 +24,11 @@ from crX.bot.coords import (
     LEGACY_SCREEN_SIZE,
 )
 from crX.bot.state_detect import image_has_elixir
+from crX.utils import reference_hits
 from crX.utils.card_library import runtime_entries
+from crX.utils.formal_library import _signature as reference_signature
 from crX.utils.formal_library import runtime_formal_entries
+from crX.utils.reference_preferences import runtime_preferences
 
 toplefts = HAND_CARD_TOP_LEFTS
 
@@ -85,6 +88,19 @@ for _card_id, _variants in CARD_FINGERPRINT_VARIANTS.items():
         _REFERENCE_SOURCES += (f"zh_native_{_number}",)
         _REFERENCE_MATRIX = numpy.concatenate((_REFERENCE_MATRIX, numpy.array([_variant], dtype=numpy.int64)))
 DIAGNOSTIC_MIN_MARGIN = 100
+_reference_ids_cache = (None, (), ())
+
+
+def _reference_identifiers():
+    global _reference_ids_cache
+    matrix, names, identifiers = _reference_ids_cache
+    if matrix is not _REFERENCE_MATRIX or names != _REFERENCE_NAMES:
+        identifiers = tuple(
+            reference_signature(CARD_DETECTION_ALIASES.get(name, name), value.tolist())
+            for name, value in zip(_REFERENCE_NAMES, _REFERENCE_MATRIX, strict=True)
+        )
+        _reference_ids_cache = (_REFERENCE_MATRIX, _REFERENCE_NAMES, identifiers)
+    return identifiers
 
 
 def calculate_offset(card_name, card_data, collected_data_array):
@@ -101,6 +117,7 @@ def recognize_card_fingerprint(collected_data):
     distances = numpy.abs(_REFERENCE_MATRIX - collected).sum(axis=(1, 2))
     names = _REFERENCE_NAMES
     sources = _REFERENCE_SOURCES
+    identifiers = _reference_identifiers()
     formal = runtime_formal_entries()
     if formal:
         formal_distances = numpy.abs(numpy.array([entry["fingerprint"] for entry in formal]) - collected).sum(
@@ -109,8 +126,23 @@ def recognize_card_fingerprint(collected_data):
         distances = numpy.concatenate((distances, formal_distances))
         names += tuple(entry["card_id"] for entry in formal)
         sources += tuple(f"builtin:{entry['id']}" for entry in formal)
+        identifiers += tuple(entry["id"] for entry in formal)
+    preferences = runtime_preferences()
+
+    def tie_order(index):
+        card = CARD_DETECTION_ALIASES.get(names[index], names[index])
+        value = preferences.get(card, {})
+        identifier = identifiers[index]
+        return (
+            int(distances[index]),
+            0 if value.get("preferred") == identifier else 1,
+            -reference_hits._runtime_counts.get(identifier, 0),
+            value.get("numbers", {}).get(identifier, index + 1),
+            index,
+        )
+
     # Compare the very same frame with the complete shipped library, before locals.
-    builtin_index = int(distances.argmin())
+    builtin_index = min(range(len(distances)), key=tie_order)
     builtin_distance = int(distances[builtin_index])
     builtin_card = CARD_DETECTION_ALIASES.get(names[builtin_index], names[builtin_index])
     builtin_result = {
@@ -124,9 +156,10 @@ def recognize_card_fingerprint(collected_data):
         distances = numpy.concatenate((distances, local_distances))
         names += tuple(entry["card_id"] for entry in local)
         sources += tuple(f"local_{entry['status']}:{entry['id']}" for entry in local)
+        identifiers += tuple(entry["id"] for entry in local)
     candidates = []
     canonical_seen = set()
-    for index in numpy.argsort(distances, kind="stable"):
+    for index in sorted(range(len(distances)), key=tie_order):
         raw_id = names[index]
         canonical_id = CARD_DETECTION_ALIASES.get(raw_id, raw_id)
         if canonical_id in canonical_seen:
@@ -137,19 +170,21 @@ def recognize_card_fingerprint(collected_data):
                 "card_id": canonical_id,
                 "fingerprint_id": raw_id,
                 "source": sources[index],
+                "reference_id": identifiers[index],
                 "distance": int(distances[index]),
             }
         )
         if len(candidates) == 3:
             break
     best = candidates[0]
-    accepted = best["distance"] <= CARD_MATCH_THRESHOLD
+    accepted = int(best["distance"]) <= CARD_MATCH_THRESHOLD
     return {
         "card_id": best["card_id"] if accepted else "UNKNOWN",
         "fingerprint_id": best["fingerprint_id"] if accepted else "UNKNOWN",
         "source": best["source"] if accepted else "",
+        "reference_id": best["reference_id"] if accepted else "",
         "candidates": candidates,
-        "candidate_margin": candidates[1]["distance"] - best["distance"],
+        "candidate_margin": int(candidates[1]["distance"]) - int(best["distance"]),
         "match_threshold": CARD_MATCH_THRESHOLD,
         "builtin_result": builtin_result,
     }

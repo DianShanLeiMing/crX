@@ -4,6 +4,8 @@ from crX.bot import card_detection as detection
 from crX.bot.card_data import CARD_NAMES_ZH
 from crX.utils import card_catalog as catalog
 from crX.utils import card_workflow as workflow
+from crX.utils import reference_hits as hits
+from crX.utils import reference_preferences as preferences
 from tests.test_card_library import fingerprint
 from tests.test_card_workflow import records
 
@@ -20,7 +22,7 @@ def test_catalog_includes_zero_sample_cards_and_deduplicates_formal_sources(tmp_
     assert len(data["knight"]) == 2 and len(data["giant"]) == 1 and data["archers"] == []
     reference = next(ref for ref in data["knight"] if ref.identifier == current[first.key].review["formal_id"])
     assert {sample.key for sample in reference.sources} == {first.key, duplicate.key}
-    assert reference.status == "待上传" and catalog.reference_crop(reference) is not None
+    assert reference.status == "待上传" and reference.name == "参考1"
     monkeypatch.setattr(detection, "_REFERENCE_NAMES", ("knight", "knight"))
     monkeypatch.setattr(detection, "_REFERENCE_MATRIX", fingerprint()[None, ...].repeat(2, axis=0))
     deduplicated = catalog.build_catalog(list(current.values()))
@@ -37,9 +39,45 @@ def test_missing_images_keep_references_and_never_invent_a_thumbnail(tmp_path, r
     sample.file("card").unlink()
     data = catalog.build_catalog(list(current.values()))
     assert len(data["knight"]) == 1
-    assert catalog.reference_crop(data["knight"][0]) is None
-    assert catalog.preview_crop(data["giant"][0]) is None
+    assert data["knight"][0].name == "参考1"
+    assert data["giant"][0].name == "首选（内置参考）"
     other_machine = catalog.build_catalog([])
-    assert len(other_machine["knight"]) == 1 and catalog.reference_crop(other_machine["knight"][0]) is None
+    assert len(other_machine["knight"]) == 1 and other_machine["knight"][0].identifier == data["knight"][0].identifier
     assert other_machine["knight"][0].status == "正式参考"
     assert destination.read_bytes() == before
+
+
+def test_first_choice_swap_preserves_source_and_counts(tmp_path, review_store, monkeypatch):
+    add, _destination = review_store
+    first, second = add("first"), add("second", channel=4)
+    workflow.confirm_samples(tmp_path, [first, second], "knight")
+    monkeypatch.setattr(detection, "_REFERENCE_NAMES", ("knight", "knight"))
+    monkeypatch.setattr(detection, "_REFERENCE_MATRIX", fingerprint(15)[None, ...].repeat(2, axis=0))
+    data = catalog.build_catalog(list(records(tmp_path).values()), root=tmp_path)
+    # Duplicate original references collapse, leaving one original first choice.
+    original = next(ref for ref in data["knight"] if ref.builtin)
+    candidate = next(ref for ref in data["knight"] if not ref.builtin)
+    assert original.name == "首选（内置参考）" and candidate.name == "参考1"
+    hits.record_hits(tmp_path, {original.identifier: 3, candidate.identifier: 8})
+    catalog.set_preferred_reference(tmp_path, "knight", candidate.identifier)
+    refs = catalog.build_catalog(list(records(tmp_path).values()), root=tmp_path)["knight"]
+    assert refs[0].identifier == candidate.identifier and refs[0].name == "首选" and refs[0].hits == 8
+    old = next(ref for ref in refs if ref.identifier == original.identifier)
+    assert old.name == "参考1（内置参考）" and old.hits == 3
+    assert sum(ref.preferred for ref in refs) == 1
+
+
+def test_no_original_reference_requires_manual_first_choice_and_stable_numbers(tmp_path, review_store):
+    add, _destination = review_store
+    first, second = add("first"), add("second", channel=4)
+    workflow.confirm_samples(tmp_path, [first, second], "knight")
+    refs = catalog.build_catalog(list(records(tmp_path).values()), root=tmp_path)["knight"]
+    assert [ref.name for ref in refs] == ["参考1", "参考2"]
+    hits.record_hits(tmp_path, {refs[1].identifier: 10})
+    reordered = catalog.build_catalog(list(records(tmp_path).values()), root=tmp_path)["knight"]
+    assert [ref.name for ref in reordered] == ["参考2", "参考1"]
+    catalog.set_preferred_reference(tmp_path, "knight", refs[1].identifier)
+    preferred = catalog.build_catalog(list(records(tmp_path).values()), root=tmp_path)["knight"]
+    assert preferred[0].name == "首选" and preferred[1].name == "参考1"
+    value = preferences.read_document(preferences.preferences_path())["cards"]["knight"]
+    assert value["preferred"] == refs[1].identifier and len(value["numbers"]) == 2

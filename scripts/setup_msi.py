@@ -42,6 +42,9 @@ build_exe_options = {
         ROOT_DIR / "crX" / "detection" / "reference_images",
         ROOT_DIR / "crX" / "__version__",
         (ROOT_DIR / "crX" / "bot" / "card_reference_library.json", "card_reference_library.json"),
+        (ROOT_DIR / "crX" / "bot" / "card_builtin_references.json", "card_builtin_references.json"),
+        (ROOT_DIR / "crX" / "bot" / "card_reference_preferences.json", "card_reference_preferences.json"),
+        (ROOT_DIR / "crX" / "bot" / "card_reference_hits.json", "card_reference_hits.json"),
     ],
     "include_msvcr": True,
 }

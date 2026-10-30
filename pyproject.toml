@@ -129,4 +129,4 @@ include = ["crX/interface/**"]
 [tool.ty.overrides.rules]
 unknown-argument = "warn"
 [tool.setuptools.package-data]
-crX = ["__version__", "detection/reference_images/**/*.png", "bot/card_reference_library.json"]
+crX = ["__version__", "detection/reference_images/**/*.png", "bot/card_reference*.json", "bot/card_builtin_references.json"]

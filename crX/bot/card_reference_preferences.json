@@ -1,0 +1,966 @@
+{
+  "version": 1,
+  "cards": {
+    "archer_queen": {
+      "preferred": "98e8d13111454839",
+      "numbers": {
+        "98e8d13111454839": 0
+      }
+    },
+    "archers": {
+      "preferred": "68bbabebcfb31e59",
+      "numbers": {
+        "68bbabebcfb31e59": 0,
+        "4d73b71e14f2ee77": 1,
+        "efe8f1e30f73b72a": 2
+      }
+    },
+    "arrows": {
+      "preferred": "e53c3427b48c04e6",
+      "numbers": {
+        "e53c3427b48c04e6": 0
+      }
+    },
+    "baby_dragon": {
+      "preferred": "4251d9b931355826",
+      "numbers": {
+        "4251d9b931355826": 0
+      }
+    },
+    "balloon": {
+      "preferred": "0798ba11d10992ab",
+      "numbers": {
+        "0798ba11d10992ab": 0
+      }
+    },
+    "bandit": {
+      "preferred": "a13a956b60a66864",
+      "numbers": {
+        "a13a956b60a66864": 0,
+        "9c5e1cd9e363ae4b": 1
+      }
+    },
+    "barb_barrel": {
+      "preferred": "67484c720518531f",
+      "numbers": {
+        "67484c720518531f": 0,
+        "74ab686c7256de2b": 1,
+        "bc1fba216c57c893": 2
+      }
+    },
+    "barb_hut": {
+      "preferred": "134048e582b57bbf",
+      "numbers": {
+        "134048e582b57bbf": 0
+      }
+    },
+    "barbarians": {
+      "preferred": "8cc0e3b34a4ea85d",
+      "numbers": {
+        "8cc0e3b34a4ea85d": 0
+      }
+    },
+    "bats": {
+      "preferred": "acb643367c9a9bb7",
+      "numbers": {
+        "acb643367c9a9bb7": 0
+      }
+    },
+    "battle_healer": {
+      "preferred": "52aee4ff1da02134",
+      "numbers": {
+        "52aee4ff1da02134": 0
+      }
+    },
+    "battle_ram": {
+      "preferred": "2b10359500a76aab",
+      "numbers": {
+        "2b10359500a76aab": 0,
+        "8c99ef347da29627": 1
+      }
+    },
+    "berserker": {
+      "preferred": "f0d874c8f3af3e79",
+      "numbers": {
+        "f0d874c8f3af3e79": 0
+      }
+    },
+    "bomb_tower": {
+      "preferred": "f8711c244a20ffd8",
+      "numbers": {
+        "f8711c244a20ffd8": 0
+      }
+    },
+    "bomber": {
+      "preferred": "82f7b2e1d7212fa6",
+      "numbers": {
+        "82f7b2e1d7212fa6": 0
+      }
+    },
+    "boss_bandit": {
+      "preferred": "164a2f0ba79d4c77",
+      "numbers": {
+        "164a2f0ba79d4c77": 0
+      }
+    },
+    "bowler": {
+      "preferred": "5f4e331daaa8f698",
+      "numbers": {
+        "5f4e331daaa8f698": 0
+      }
+    },
+    "cannon": {
+      "preferred": "62450ea35cdcd569",
+      "numbers": {
+        "62450ea35cdcd569": 0
+      }
+    },
+    "cannon_cart": {
+      "preferred": "b21e78e0217b83be",
+      "numbers": {
+        "b21e78e0217b83be": 0
+      }
+    },
+    "clone": {
+      "preferred": "31cd982046efe22b",
+      "numbers": {
+        "31cd982046efe22b": 0
+      }
+    },
+    "dark_prince": {
+      "preferred": "1b8e1265d65cd0d9",
+      "numbers": {
+        "1b8e1265d65cd0d9": 0
+      }
+    },
+    "dart_goblin": {
+      "preferred": "01a48b106551c5a9",
+      "numbers": {
+        "01a48b106551c5a9": 0
+      }
+    },
+    "earthquake": {
+      "preferred": "537116ea1444aeae",
+      "numbers": {
+        "537116ea1444aeae": 0
+      }
+    },
+    "electro_dragon": {
+      "preferred": "875f739f71de1be7",
+      "numbers": {
+        "875f739f71de1be7": 0
+      }
+    },
+    "electro_giant": {
+      "preferred": "5b4b6a73c4531e9e",
+      "numbers": {
+        "5b4b6a73c4531e9e": 0
+      }
+    },
+    "electro_spirit": {
+      "preferred": "f7c0f21cba9461a1",
+      "numbers": {
+        "f7c0f21cba9461a1": 0,
+        "906fb22a9379e9ec": 1
+      }
+    },
+    "electro_wizard": {
+      "preferred": "8b34db4127cd7ca7",
+      "numbers": {
+        "8b34db4127cd7ca7": 0
+      }
+    },
+    "elite_barbarians": {
+      "preferred": "f037dd28dfb7a405",
+      "numbers": {
+        "f037dd28dfb7a405": 0
+      }
+    },
+    "elixir_collector": {
+      "preferred": "42fcf4e1f4bef4b9",
+      "numbers": {
+        "42fcf4e1f4bef4b9": 0
+      }
+    },
+    "elixir_golem": {
+      "preferred": "e95df1d9a5a197af",
+      "numbers": {
+        "e95df1d9a5a197af": 0
+      }
+    },
+    "evo_archers": {
+      "preferred": "af498eca9138fa1c",
+      "numbers": {
+        "af498eca9138fa1c": 0
+      }
+    },
+    "evo_baby_dragon": {
+      "preferred": "48ef82336b49e94e",
+      "numbers": {
+        "48ef82336b49e94e": 0
+      }
+    },
+    "evo_barbarians": {
+      "preferred": "7ca6e0db38623f5c",
+      "numbers": {
+        "7ca6e0db38623f5c": 0
+      }
+    },
+    "evo_bats": {
+      "preferred": "8bb4879362a268d8",
+      "numbers": {
+        "8bb4879362a268d8": 0
+      }
+    },
+    "evo_battle_ram": {
+      "preferred": "6c693e72cbd5682f",
+      "numbers": {
+        "6c693e72cbd5682f": 0,
+        "316af643ab660c38": 1
+      }
+    },
+    "evo_bomber": {
+      "preferred": "70f74059949cab96",
+      "numbers": {
+        "70f74059949cab96": 0
+      }
+    },
+    "evo_cannon": {
+      "preferred": "f3d9c2b237ee7335",
+      "numbers": {
+        "f3d9c2b237ee7335": 0
+      }
+    },
+    "evo_dart_goblin": {
+      "preferred": "6e69a8641aa28ad9",
+      "numbers": {
+        "6e69a8641aa28ad9": 0
+      }
+    },
+    "evo_fire_cracker": {
+      "preferred": "dfb9e72a14f3b909",
+      "numbers": {
+        "dfb9e72a14f3b909": 0
+      }
+    },
+    "evo_furnace": {
+      "preferred": "b792db01827579f1",
+      "numbers": {
+        "b792db01827579f1": 0
+      }
+    },
+    "evo_goblin_barrel": {
+      "preferred": "ba38d89a1fd05cce",
+      "numbers": {
+        "ba38d89a1fd05cce": 0
+      }
+    },
+    "evo_goblin_cage": {
+      "preferred": "67012e4605cf701a",
+      "numbers": {
+        "67012e4605cf701a": 0
+      }
+    },
+    "evo_hunter": {
+      "preferred": "654749a40ea299b1",
+      "numbers": {
+        "654749a40ea299b1": 0
+      }
+    },
+    "evo_ice_spirit": {
+      "preferred": "3268b7a8907a4139",
+      "numbers": {
+        "3268b7a8907a4139": 0
+      }
+    },
+    "evo_knight": {
+      "preferred": "29dd275031604554",
+      "numbers": {
+        "29dd275031604554": 0
+      }
+    },
+    "evo_mega_knight": {
+      "preferred": "8eefda544173c85d",
+      "numbers": {
+        "8eefda544173c85d": 0
+      }
+    },
+    "evo_mortar": {
+      "preferred": "65ed70b37d572d54",
+      "numbers": {
+        "65ed70b37d572d54": 0
+      }
+    },
+    "evo_pekka": {
+      "preferred": null,
+      "numbers": {
+        "7984e09226d81d8c": 1
+      }
+    },
+    "evo_royal_ghost": {
+      "preferred": null,
+      "numbers": {
+        "d44ca6c0369cea69": 1
+      }
+    },
+    "evo_royal_giant": {
+      "preferred": "2629624f77c101ef",
+      "numbers": {
+        "2629624f77c101ef": 0
+      }
+    },
+    "evo_tesla": {
+      "preferred": "d145c7259fcfe33a",
+      "numbers": {
+        "d145c7259fcfe33a": 0
+      }
+    },
+    "evo_wizard": {
+      "preferred": "5de3ba243baffae1",
+      "numbers": {
+        "5de3ba243baffae1": 0
+      }
+    },
+    "evo_zap": {
+      "preferred": "479688869a0c6943",
+      "numbers": {
+        "479688869a0c6943": 0
+      }
+    },
+    "executioner": {
+      "preferred": "09ed03555087432e",
+      "numbers": {
+        "09ed03555087432e": 0
+      }
+    },
+    "fire_cracker": {
+      "preferred": "f4fec73fb75018c3",
+      "numbers": {
+        "f4fec73fb75018c3": 0
+      }
+    },
+    "fire_spirit": {
+      "preferred": "d5c0b786c17da50e",
+      "numbers": {
+        "d5c0b786c17da50e": 0
+      }
+    },
+    "fireball": {
+      "preferred": "05d24b4229b31750",
+      "numbers": {
+        "05d24b4229b31750": 0,
+        "fc3b1875c2768888": 1
+      }
+    },
+    "fisherman": {
+      "preferred": "b0c8456ae9ced4a2",
+      "numbers": {
+        "b0c8456ae9ced4a2": 0
+      }
+    },
+    "flying_machine": {
+      "preferred": "52b1d767b0c5e86e",
+      "numbers": {
+        "52b1d767b0c5e86e": 0
+      }
+    },
+    "freeze": {
+      "preferred": "c50f736b5dc30dbf",
+      "numbers": {
+        "c50f736b5dc30dbf": 0
+      }
+    },
+    "furnace": {
+      "preferred": "00d8d21914c44c61",
+      "numbers": {
+        "00d8d21914c44c61": 0,
+        "be0074d81ab6610f": 1,
+        "6f814f868453ecd1": 2,
+        "527c6b66950bb5a2": 3,
+        "9c29de18ba78d4ca": 4
+      }
+    },
+    "giant": {
+      "preferred": "086a2aa18061a663",
+      "numbers": {
+        "086a2aa18061a663": 0
+      }
+    },
+    "giant_skeleton": {
+      "preferred": "0d189c076be69101",
+      "numbers": {
+        "0d189c076be69101": 0
+      }
+    },
+    "gob_curse": {
+      "preferred": "23bc7beebdbad384",
+      "numbers": {
+        "23bc7beebdbad384": 0
+      }
+    },
+    "goblin_barrel": {
+      "preferred": "05251ea8cc488b25",
+      "numbers": {
+        "05251ea8cc488b25": 0
+      }
+    },
+    "goblin_cage": {
+      "preferred": "90d9fc3db11a053a",
+      "numbers": {
+        "90d9fc3db11a053a": 0
+      }
+    },
+    "goblin_demolisher": {
+      "preferred": "36f91a281bae6f34",
+      "numbers": {
+        "36f91a281bae6f34": 0
+      }
+    },
+    "goblin_drill": {
+      "preferred": "f6d3a0516166cbe0",
+      "numbers": {
+        "f6d3a0516166cbe0": 0
+      }
+    },
+    "goblin_gang": {
+      "preferred": "85f0cdfb9ee761ff",
+      "numbers": {
+        "85f0cdfb9ee761ff": 0
+      }
+    },
+    "goblin_giant": {
+      "preferred": "79fe82febed0e22b",
+      "numbers": {
+        "79fe82febed0e22b": 0
+      }
+    },
+    "goblin_hut": {
+      "preferred": "714c084058628ac0",
+      "numbers": {
+        "714c084058628ac0": 0
+      }
+    },
+    "goblin_machine": {
+      "preferred": "8ab5b96200ab0cb4",
+      "numbers": {
+        "8ab5b96200ab0cb4": 0
+      }
+    },
+    "goblins": {
+      "preferred": "6fef2c2b617cad4d",
+      "numbers": {
+        "6fef2c2b617cad4d": 0
+      }
+    },
+    "goblinstein": {
+      "preferred": "0b4c91ae9e40af52",
+      "numbers": {
+        "0b4c91ae9e40af52": 0
+      }
+    },
+    "golden_knight": {
+      "preferred": "06253f8f156a9721",
+      "numbers": {
+        "06253f8f156a9721": 0
+      }
+    },
+    "golem": {
+      "preferred": "10f285305dfcb758",
+      "numbers": {
+        "10f285305dfcb758": 0
+      }
+    },
+    "graveyard": {
+      "preferred": "a707dcf2a5c8b1df",
+      "numbers": {
+        "a707dcf2a5c8b1df": 0
+      }
+    },
+    "guards": {
+      "preferred": "fb2ffbb8e8eb6f71",
+      "numbers": {
+        "fb2ffbb8e8eb6f71": 0
+      }
+    },
+    "heal_spirit": {
+      "preferred": "e0144c4139b5ef88",
+      "numbers": {
+        "e0144c4139b5ef88": 0
+      }
+    },
+    "hero_barb_barrel": {
+      "preferred": "9ec9742537eb96e1",
+      "numbers": {
+        "9ec9742537eb96e1": 0
+      }
+    },
+    "hero_bowler": {
+      "preferred": "d4ba1e0681df4692",
+      "numbers": {
+        "d4ba1e0681df4692": 0
+      }
+    },
+    "hero_goblins": {
+      "preferred": "4eeedbfce67a8167",
+      "numbers": {
+        "4eeedbfce67a8167": 0
+      }
+    },
+    "hero_ice_golem": {
+      "preferred": null,
+      "numbers": {
+        "babfd7793a9667db": 1,
+        "5a9d2df29698b447": 2
+      }
+    },
+    "hero_ice_wizard": {
+      "preferred": null,
+      "numbers": {
+        "538fb948890551ce": 1,
+        "638e280317774bbd": 2,
+        "0b66f718a47acf0d": 3,
+        "9434968e159192b1": 4
+      }
+    },
+    "hero_knight": {
+      "preferred": "c8909a9fc3c1baff",
+      "numbers": {
+        "c8909a9fc3c1baff": 0
+      }
+    },
+    "hero_magic_archer": {
+      "preferred": "43cc180a0cd66228",
+      "numbers": {
+        "43cc180a0cd66228": 0
+      }
+    },
+    "hero_mini_pekka": {
+      "preferred": "e07120f51f7b4300",
+      "numbers": {
+        "e07120f51f7b4300": 0
+      }
+    },
+    "hero_musketeer": {
+      "preferred": "28e8c3b6a6758171",
+      "numbers": {
+        "28e8c3b6a6758171": 0
+      }
+    },
+    "hog": {
+      "preferred": "b1bbd4562401f305",
+      "numbers": {
+        "b1bbd4562401f305": 0,
+        "1f1d5a9e20ba7fb3": 1
+      }
+    },
+    "hunter": {
+      "preferred": "d0b7d422a977d350",
+      "numbers": {
+        "d0b7d422a977d350": 0
+      }
+    },
+    "ice_golem": {
+      "preferred": "13083ca1cf019bf1",
+      "numbers": {
+        "13083ca1cf019bf1": 0
+      }
+    },
+    "ice_spirit": {
+      "preferred": "ec1ebe3bbd73db04",
+      "numbers": {
+        "ec1ebe3bbd73db04": 0
+      }
+    },
+    "ice_wizard": {
+      "preferred": "187953467f2d9649",
+      "numbers": {
+        "187953467f2d9649": 0
+      }
+    },
+    "inferno_dragon": {
+      "preferred": "e888e6fb3446009a",
+      "numbers": {
+        "e888e6fb3446009a": 0
+      }
+    },
+    "inferno_tower": {
+      "preferred": "49403f0e79d95227",
+      "numbers": {
+        "49403f0e79d95227": 0
+      }
+    },
+    "knight": {
+      "preferred": "87e2cd11d899becc",
+      "numbers": {
+        "87e2cd11d899becc": 0
+      }
+    },
+    "lava_hound": {
+      "preferred": "8c4255e32edb7360",
+      "numbers": {
+        "8c4255e32edb7360": 0
+      }
+    },
+    "lightning": {
+      "preferred": "36dc780e29568263",
+      "numbers": {
+        "36dc780e29568263": 0
+      }
+    },
+    "little_prince": {
+      "preferred": "8042837e3a018e93",
+      "numbers": {
+        "8042837e3a018e93": 0
+      }
+    },
+    "log": {
+      "preferred": "91a34316b25c84f9",
+      "numbers": {
+        "91a34316b25c84f9": 0
+      }
+    },
+    "lumberjack": {
+      "preferred": "7ff1878d9a448773",
+      "numbers": {
+        "7ff1878d9a448773": 0
+      }
+    },
+    "magic_archer": {
+      "preferred": "0c28c366e0198cca",
+      "numbers": {
+        "0c28c366e0198cca": 0
+      }
+    },
+    "mega_knight": {
+      "preferred": "d5a8bef0dcdfb60a",
+      "numbers": {
+        "d5a8bef0dcdfb60a": 0
+      }
+    },
+    "mega_minion": {
+      "preferred": "37e17626d499d318",
+      "numbers": {
+        "37e17626d499d318": 0
+      }
+    },
+    "mighty_miner": {
+      "preferred": "673c9fd14854e7a1",
+      "numbers": {
+        "673c9fd14854e7a1": 0
+      }
+    },
+    "miner": {
+      "preferred": "1844fc52899d26b3",
+      "numbers": {
+        "1844fc52899d26b3": 0
+      }
+    },
+    "mini_pekka": {
+      "preferred": "8b91822d09798da4",
+      "numbers": {
+        "8b91822d09798da4": 0
+      }
+    },
+    "minion_horde": {
+      "preferred": "8bc287db99d40f21",
+      "numbers": {
+        "8bc287db99d40f21": 0
+      }
+    },
+    "minions": {
+      "preferred": "5782803900226f49",
+      "numbers": {
+        "5782803900226f49": 0,
+        "4568c56e24e2a7a0": 1
+      }
+    },
+    "minion_giant": {
+      "preferred": "e2edc0f5674673ec",
+      "numbers": {
+        "e2edc0f5674673ec": 0,
+        "793974ee14a14fd3": 1
+      }
+    },
+    "mirror": {
+      "preferred": "ce47d80198f59f81",
+      "numbers": {
+        "ce47d80198f59f81": 0
+      }
+    },
+    "monk": {
+      "preferred": "2a72bbcfb140500c",
+      "numbers": {
+        "2a72bbcfb140500c": 0
+      }
+    },
+    "mortar": {
+      "preferred": "a08265bdb639db19",
+      "numbers": {
+        "a08265bdb639db19": 0
+      }
+    },
+    "mother_witch": {
+      "preferred": "63367e41727945ed",
+      "numbers": {
+        "63367e41727945ed": 0
+      }
+    },
+    "musketeer": {
+      "preferred": "1bf670f345b550ae",
+      "numbers": {
+        "1bf670f345b550ae": 0
+      }
+    },
+    "night_witch": {
+      "preferred": "775370d378ce9cd7",
+      "numbers": {
+        "775370d378ce9cd7": 0
+      }
+    },
+    "pekka": {
+      "preferred": "9d42e89681c687cc",
+      "numbers": {
+        "9d42e89681c687cc": 0
+      }
+    },
+    "phoenix": {
+      "preferred": "bcfda52be626ca63",
+      "numbers": {
+        "bcfda52be626ca63": 0
+      }
+    },
+    "poison": {
+      "preferred": "d00338ce49fd9444",
+      "numbers": {
+        "d00338ce49fd9444": 0
+      }
+    },
+    "prince": {
+      "preferred": "755ce3d9c6b433a5",
+      "numbers": {
+        "755ce3d9c6b433a5": 0,
+        "e83fbb1d94114063": 1
+      }
+    },
+    "princess": {
+      "preferred": "95b86e2da684c0f4",
+      "numbers": {
+        "95b86e2da684c0f4": 0
+      }
+    },
+    "rage": {
+      "preferred": "4e33fb9bb6fec0a1",
+      "numbers": {
+        "4e33fb9bb6fec0a1": 0
+      }
+    },
+    "ram_rider": {
+      "preferred": "aec4bc799bc22ec2",
+      "numbers": {
+        "aec4bc799bc22ec2": 0
+      }
+    },
+    "rascals": {
+      "preferred": "17fe13e1355706ea",
+      "numbers": {
+        "17fe13e1355706ea": 0
+      }
+    },
+    "rocket": {
+      "preferred": "a42677ff1a94a52c",
+      "numbers": {
+        "a42677ff1a94a52c": 0
+      }
+    },
+    "ronin": {
+      "preferred": null,
+      "numbers": {
+        "9dae1af417a10230": 1,
+        "dfe671841d03af1e": 2
+      }
+    },
+    "royal_delivery": {
+      "preferred": "be2e42f88dc1b136",
+      "numbers": {
+        "be2e42f88dc1b136": 0
+      }
+    },
+    "royal_ghost": {
+      "preferred": "00534efabdef5e8b",
+      "numbers": {
+        "00534efabdef5e8b": 0,
+        "497150d0eda073b0": 1
+      }
+    },
+    "royal_giant": {
+      "preferred": "37b17a77e7ebcc4f",
+      "numbers": {
+        "37b17a77e7ebcc4f": 0
+      }
+    },
+    "royal_hogs": {
+      "preferred": "453f6a0687328e42",
+      "numbers": {
+        "453f6a0687328e42": 0
+      }
+    },
+    "royal_recruits": {
+      "preferred": "6de752176f194b9a",
+      "numbers": {
+        "6de752176f194b9a": 0
+      }
+    },
+    "rune_giant": {
+      "preferred": "b59313a1f271cf86",
+      "numbers": {
+        "b59313a1f271cf86": 0
+      }
+    },
+    "skeleton_army": {
+      "preferred": "6083dd887af926ed",
+      "numbers": {
+        "6083dd887af926ed": 0
+      }
+    },
+    "skeleton_barrel": {
+      "preferred": "104e42aaccf8c597",
+      "numbers": {
+        "104e42aaccf8c597": 0
+      }
+    },
+    "skeleton_dragons": {
+      "preferred": "27eb8ce1c6dda005",
+      "numbers": {
+        "27eb8ce1c6dda005": 0
+      }
+    },
+    "skeleton_king": {
+      "preferred": "24da52c5a80faafb",
+      "numbers": {
+        "24da52c5a80faafb": 0
+      }
+    },
+    "skeletons": {
+      "preferred": "6d7d0646d3a1f672",
+      "numbers": {
+        "6d7d0646d3a1f672": 0,
+        "871e6a29f97521d0": 1,
+        "e661f59d90f07267": 2,
+        "829d1916e73e5622": 3,
+        "999d14878ca0f2a5": 4
+      }
+    },
+    "snowball": {
+      "preferred": "20490ad5e101d94f",
+      "numbers": {
+        "20490ad5e101d94f": 0
+      }
+    },
+    "sparky": {
+      "preferred": "99a0534877acf827",
+      "numbers": {
+        "99a0534877acf827": 0
+      }
+    },
+    "spear_goblins": {
+      "preferred": "9bde83fba2204af8",
+      "numbers": {
+        "9bde83fba2204af8": 0
+      }
+    },
+    "spirit_empress": {
+      "preferred": "8abf385e7c407911",
+      "numbers": {
+        "8abf385e7c407911": 0,
+        "c0ab4805222424a7": 1
+      }
+    },
+    "suspicious_bush": {
+      "preferred": "be968aa29ba1c1af",
+      "numbers": {
+        "be968aa29ba1c1af": 0
+      }
+    },
+    "tesla": {
+      "preferred": "f86d14464d103469",
+      "numbers": {
+        "f86d14464d103469": 0,
+        "424c5e5f801a9014": 1
+      }
+    },
+    "three_musketeers": {
+      "preferred": "080e3b75dfd4d36f",
+      "numbers": {
+        "080e3b75dfd4d36f": 0
+      }
+    },
+    "tombstone": {
+      "preferred": "e28655201fddefc7",
+      "numbers": {
+        "e28655201fddefc7": 0
+      }
+    },
+    "tornado": {
+      "preferred": "016e351ccd46a020",
+      "numbers": {
+        "016e351ccd46a020": 0
+      }
+    },
+    "valkyrie": {
+      "preferred": "bff32896fd9066f2",
+      "numbers": {
+        "bff32896fd9066f2": 0
+      }
+    },
+    "vines": {
+      "preferred": "6e7d1fc45c7ceb19",
+      "numbers": {
+        "6e7d1fc45c7ceb19": 0
+      }
+    },
+    "void": {
+      "preferred": "5fd9ed2fc0b98b67",
+      "numbers": {
+        "5fd9ed2fc0b98b67": 0
+      }
+    },
+    "wall_breakers": {
+      "preferred": "3dc3f9c0837707ab",
+      "numbers": {
+        "3dc3f9c0837707ab": 0
+      }
+    },
+    "witch": {
+      "preferred": "20bd84fb5232aba4",
+      "numbers": {
+        "20bd84fb5232aba4": 0
+      }
+    },
+    "wizard": {
+      "preferred": "62ad4c4a195f89d0",
+      "numbers": {
+        "62ad4c4a195f89d0": 0
+      }
+    },
+    "xbow": {
+      "preferred": "3f0f53dd95bccd8d",
+      "numbers": {
+        "3f0f53dd95bccd8d": 0
+      }
+    },
+    "zap": {
+      "preferred": "d3ba38fe1f510552",
+      "numbers": {
+        "d3ba38fe1f510552": 0,
+        "1a9ee893e8d42d1f": 1,
+        "a1c5bad25a00149f": 2
+      }
+    },
+    "zappies": {
+      "preferred": "7a54af591a7354b6",
+      "numbers": {
+        "7a54af591a7354b6": 0
+      }
+    }
+  }
+}

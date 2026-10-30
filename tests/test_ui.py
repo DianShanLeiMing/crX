@@ -986,7 +986,7 @@ def test_rename_and_remove_update_shared_sources_without_second_approval(review_
     assert first.file("frame").exists() and duplicate.file("frame").exists()
 
 
-def test_catalog_search_preview_and_upload_archive_preserve_images(review_ui, monkeypatch):
+def test_catalog_search_and_upload_archive_clean_images(review_ui, monkeypatch):
     from crX.bot.card_data import CARD_NAMES_ZH
     from crX.utils.card_upload import _archive_published
 
@@ -1018,16 +1018,18 @@ def test_catalog_search_preview_and_upload_archive_preserve_images(review_ui, mo
     assert str(view.references.cget("selectmode")) == "browse"
     for index, key in enumerate(keys, 1):
         view.references.selection_set(key)
-        _wait_ui(ui, lambda: view._preview_photo is not None and key in view.caption_var.get())
-        assert view.caption_var.get().splitlines()[0] == f"参考 {index}"
-    assert tuple(view.references.cget("columns")) == ("name",)
+        assert view.references.set(key, "name") == f"参考{index}"
+        assert view.references.set(key, "identifier") == key
+        assert view.references.set(key, "hits") == "0"
+    assert tuple(view.references.cget("columns")) == ("name", "identifier", "hits")
+    assert not hasattr(view, "preview_image")
     view.query.set("弓箭手")
     ui.update()
     assert "archers" in view.cards.get_children() and view.cards.set("archers", "count") == "0"
     view.cards.selection_set("archers")
     ui.update()
     assert not view.references.get_children()
-    assert "暂无正式参考" in view.preview_image.cget("text")
+    assert "0 份正式参考" in view.title.get()
     view.query.set("")
     view.only_samples.set(True)
     view.render_cards()
@@ -1057,7 +1059,7 @@ def test_catalog_search_preview_and_upload_archive_preserve_images(review_ui, mo
     assert tab.stage_tabs.tab(tab.stage_pages["待上传"], "text") == "待上传（0）"
     assert all(tab.samples[sample.key].uploaded for sample in (first, second))
     assert destination.read_bytes() == before
-    assert all(not sample.file("card").exists() for sample in (first, second))
+    assert all(not sample.file(kind).exists() for sample in (first, second) for kind in ("card", "hand", "frame"))
     tab.catalog_button.invoke()
     ui.update()
     assert tab.filter_var.get() == "样本库"
@@ -1067,15 +1069,12 @@ def test_catalog_search_preview_and_upload_archive_preserve_images(review_ui, mo
     assert all(ref.uploaded for ref in view.data["knight"])
     key = view.references.get_children()[1]
     view.references.selection_set(key)
-    _wait_ui(ui, lambda: view._preview_photo is None and key in view.caption_var.get())
     tab.set_running(True)
     view.query.set("giant")
     ui.update()
     assert view.cards.get_children() == ("giant",)
-    _wait_ui(ui, lambda: view.preview_image.cget("text") == "暂无原图")
-    assert view._preview_photo is None
-    assert view.references.set(view.references.get_children()[0], "name") == "内置正式参考"
-    assert view.caption_var.get().splitlines()[0] == "内置正式参考"
+    assert view.references.set(view.references.get_children()[0], "name") == "首选（内置参考）"
+    assert str(view.preferred_button.cget("state")) == "disabled"
     tab.set_running(False)
     tab.refresh()
     _wait_ui(ui, lambda: not tab._scan_busy)
@@ -1101,6 +1100,43 @@ def test_legacy_trial_is_visible_pending_and_can_be_approved(review_ui):
     tab.stage_buttons["confirm"].invoke()
     finish(ui, tab)
     assert tab.samples[source.key].status == "included" and len(formal._read_entries(destination)) == 1
+
+
+def test_catalog_first_choice_and_clear_require_explicit_stats_upload(review_ui):
+    from crX.utils import reference_hits as hits
+
+    ui, tab, add, _destination = review_ui
+    source = add("first")
+    select(tab, source)
+    tab.card_var.set("knight")
+    tab.stage_buttons["confirm"].invoke()
+    finish(ui, tab)
+    tab.catalog_button.invoke()
+    _wait_ui(ui, lambda: not tab._scan_busy)
+    view = tab.library_view
+    view.query.set("knight")
+    view.cards.selection_set("knight")
+    view.cards.focus("knight")
+    ui.update()
+    key = view.references.get_children()[0]
+    view.references.selection_set(key)
+    view.preferred_button.invoke()
+    finish(ui, tab)
+    assert view.references.set(key, "name") == "首选"
+    hits.record_hits(tab.root, {key: 8})
+    view.refresh_order()
+    _wait_ui(ui, lambda: not tab._scan_busy)
+    assert view.references.set(key, "hits") == "8"
+    view.update_hits.set(True)
+    tab.update_hits.set(True)
+    view.clear_button.invoke()
+    finish(ui, tab)
+    assert not view.update_hits.get() and not tab.update_hits.get()
+    assert view.references.set(key, "hits") == "0"
+    assert "仅在本地清空" in view.message.get()
+    view.update_hits.set(True)
+    view._update_message()
+    assert "本次上传将同步清空结果" in view.message.get()
 
 
 def test_sample_deletion_preserves_formal_and_only_deletes_selected_rows(review_ui, monkeypatch):

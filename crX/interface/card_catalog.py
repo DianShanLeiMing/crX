@@ -1,30 +1,23 @@
-"""Read-only card catalog with lazy thumbnails and a single-reference preview."""
+"""Text-only reference catalog with explicit first-choice and statistics controls."""
 
 from __future__ import annotations
 
 import tkinter as tk
-from collections import OrderedDict
 
 import ttkbootstrap as ttk
-from PIL import ImageTk
 
 from crX.bot.card_data import CARD_NAMES_ZH
-from crX.utils.card_catalog import preview_crop, reference_crop
 
 
 class CardCatalogView(ttk.Frame):
-    def __init__(self, parent, *, background, later, refresh):
+    def __init__(self, parent, *, refresh, action=lambda _operation: None, status=None):
         super().__init__(parent)
-        self._background = background
-        self._later = later
         self.data = {}
+        self._action = action
+        self._disabled = False
+        self._allow_reorder = True
+        self._refresh = refresh
         self._signature = None
-        self._generation = 0
-        self._selection = 0
-        self._thumb_busy = False
-        self._thumb_queued = False
-        self._photos = OrderedDict()
-        self._preview_photo = None
         self._references = {}
         self._sort_count = None
         self._card = None
@@ -39,7 +32,7 @@ class CardCatalogView(ttk.Frame):
         ttk.Checkbutton(search, text="只看有样本", variable=self.only_samples, command=self.render_cards).pack(
             side="left"
         )
-        ttk.Button(search, text="刷新", command=refresh).pack(side="right")
+        ttk.Button(search, text="刷新", command=self.refresh_order).pack(side="right")
         self.query.trace_add("write", lambda *_: self.render_cards())
         self.panes = tk.PanedWindow(self, orient="horizontal", sashwidth=6, opaqueresize=True, borderwidth=0)
         self.panes.grid(row=1, column=0, sticky="nsew")
@@ -48,10 +41,8 @@ class CardCatalogView(ttk.Frame):
         left.rowconfigure(0, weight=1)
         self.panes.add(left, minsize=180, width=270, stretch="never")
         self.cards = ttk.Treeview(
-            left, columns=("card", "count"), show="tree headings", selectmode="browse", style="CardSamples.Treeview"
+            left, columns=("card", "count"), show="headings", selectmode="browse", style="CardSamples.Treeview"
         )
-        self.cards.heading("#0", text="缩略图")
-        self.cards.column("#0", width=54, minwidth=42, stretch=False)
         self.cards.heading("card", text="卡名", command=self._sort_names)
         self.cards.column("card", width=150, minwidth=80)
         self.cards.heading("count", text="样本数", command=self._sort_counts)
@@ -60,68 +51,104 @@ class CardCatalogView(ttk.Frame):
         scroll = ttk.Scrollbar(left, orient="vertical", command=self.cards.yview)
         scroll.grid(row=0, column=1, sticky="ns")
 
-        def scrolled(first, last):
-            scroll.set(first, last)
-            self._queue_thumbnails()
-
-        self.cards.configure(yscrollcommand=scrolled)
+        self.cards.configure(yscrollcommand=scroll.set)
         self.cards.bind("<<TreeviewSelect>>", self._select_card)
-        self.cards.bind("<Map>", lambda _: self._queue_thumbnails())
         right = ttk.Frame(self.panes)
         right.columnconfigure(0, weight=1)
         right.rowconfigure(2, weight=1)
         self.panes.add(right, minsize=220, stretch="always")
         self.title = tk.StringVar(value="选择卡牌查看正式参考")
         ttk.Label(right, textvariable=self.title).grid(row=0, column=0, sticky="ew", padx=6, pady=4)
+        tools = ttk.Frame(right)
+        tools.grid(row=1, column=0, sticky="ew", padx=6, pady=(0, 4))
+        self.preferred_button = ttk.Button(tools, text="设为首选 / 交换", command=lambda: action("preferred"))
+        self.preferred_button.grid(row=0, column=0, sticky="w")
+        self.upload_button = ttk.Button(tools, text="上传该卡牌", command=lambda: action("upload"))
+        self.upload_button.grid(row=0, column=1, sticky="w", padx=6)
+        self.update_hits = tk.BooleanVar(value=False)
+        self.hits_check = ttk.Checkbutton(
+            tools, text="更新命中数", variable=self.update_hits, command=self._update_message
+        )
+        self.hits_check.grid(row=1, column=0, sticky="w", pady=(4, 0))
+        self.clear_button = ttk.Button(
+            tools, text="清空全部本地命中数", bootstyle="secondary-outline", command=lambda: action("clear")
+        )
+        self.clear_button.grid(row=1, column=1, sticky="w", padx=6, pady=(4, 0))
         gallery = ttk.Frame(right)
         gallery.columnconfigure(0, weight=1)
         gallery.rowconfigure(0, weight=1)
         self.references = ttk.Treeview(
             gallery,
-            columns=("name",),
-            show="tree headings",
+            columns=("name", "identifier", "hits"),
+            show="headings",
             height=4,
             selectmode="browse",
             style="CardReferences.Treeview",
         )
-        self.references.heading("#0", text="缩略图")
-        self.references.column("#0", width=54, minwidth=42, stretch=False)
         self.references.heading("name", text="参考")
         self.references.column("name", width=120, minwidth=60)
+        self.references.heading("identifier", text="参考编号")
+        self.references.column("identifier", width=160, minwidth=100)
+        self.references.heading("hits", text="命中数")
+        self.references.column("hits", width=80, minwidth=60, stretch=False, anchor="e")
         self.references.grid(row=0, column=0, sticky="nsew")
         reference_scroll = ttk.Scrollbar(gallery, orient="vertical", command=self.references.yview)
         reference_scroll.grid(row=0, column=1, sticky="ns")
 
-        def references_scrolled(first, last):
-            reference_scroll.set(first, last)
-            self._queue_thumbnails()
-
-        self.references.configure(yscrollcommand=references_scrolled)
-        self.references.bind("<<TreeviewSelect>>", self._select_reference)
-        gallery.grid(row=1, column=0, sticky="nsew", padx=(6, 0))
-        preview = ttk.Labelframe(right, text="参考原图", padding=4)
-        preview.grid(row=2, column=0, sticky="nsew", padx=6, pady=(6, 0))
-        self.preview_image = ttk.Label(preview, text="选择参考", anchor="center", width=1)
-        self.preview_image.pack(fill="both", expand=True)
-        self.caption_var = tk.StringVar()
-        caption = ttk.Label(preview, textvariable=self.caption_var, wraplength=300, justify="left")
-        caption.pack(fill="x", pady=4)
-        caption.bind("<Configure>", lambda event: event.widget.configure(wraplength=max(1, event.width)))
-        self.message = tk.StringVar(value="样本数按正式参考去重统计；无原图的参考仍可正常参与识别。")
+        self.references.configure(yscrollcommand=reference_scroll.set)
+        reference_horizontal = ttk.Scrollbar(gallery, orient="horizontal", command=self.references.xview)
+        reference_horizontal.grid(row=1, column=0, sticky="ew")
+        self.references.configure(xscrollcommand=reference_horizontal.set)
+        gallery.grid(row=2, column=0, sticky="nsew", padx=(6, 0))
+        self.message = tk.StringVar(value="样本数按颜色指纹去重统计；上传成功后自动清理来源图片。")
         ttk.Label(self, textvariable=self.message, wraplength=680).grid(row=2, column=0, sticky="ew", pady=(6, 0))
+        if status is not None:
+            ttk.Label(self, textvariable=status, wraplength=680).grid(row=3, column=0, sticky="ew", pady=(4, 0))
 
     def set_data(self, data):
+        if not self._allow_reorder:
+            for card, refs in data.items():
+                old_order = {ref.identifier: index for index, ref in enumerate(self.data.get(card, []))}
+                refs.sort(key=lambda ref: (not ref.preferred, old_order.get(ref.identifier, len(old_order))))
+        self._allow_reorder = False
+        same_order = tuple((card, tuple(ref.identifier for ref in refs)) for card, refs in data.items()) == tuple(
+            (card, tuple(ref.identifier for ref in refs)) for card, refs in self.data.items()
+        )
         signature = tuple(
-            (card, tuple((ref.identifier, ref.uploaded, tuple(sample.key for sample in ref.sources)) for ref in refs))
+            (
+                card,
+                tuple(
+                    (
+                        ref.identifier,
+                        ref.uploaded,
+                        ref.name,
+                        ref.hits,
+                        ref.cleared,
+                        tuple(sample.key for sample in ref.sources),
+                    )
+                    for ref in refs
+                ),
+            )
             for card, refs in data.items()
         )
         self.data = data
+        self._update_message()
         if signature == self._signature:
             return
         self._signature = signature
-        self._generation += 1
-        self._photos.clear()
+        if same_order:
+            refs = self.data.get(self._card, [])
+            self._references = {ref.identifier: ref for ref in refs}
+            for ref in refs:
+                if self.references.exists(ref.identifier):
+                    self.references.item(ref.identifier, values=(ref.name, ref.identifier, ref.hits))
+            self.set_disabled(self._disabled)
+            return
         self.render_cards()
+
+    def refresh_order(self):
+        self._allow_reorder = True
+        self._refresh()
 
     def _sort_counts(self):
         self._sort_count = not self._sort_count if self._sort_count is not None else True
@@ -151,7 +178,6 @@ class CardCatalogView(ttk.Frame):
             self.cards.insert(
                 "", "end", iid=card, text="", values=(CARD_NAMES_ZH.get(card, card), len(self.data[card]))
             )
-            self._show_photo(f"card:{card}", self.cards, card)
         if cards:
             selected = self._card if self._card in cards else cards[0]
             self.cards.selection_set(selected)
@@ -160,16 +186,12 @@ class CardCatalogView(ttk.Frame):
         else:
             self._card = None
             self._clear_references("没有匹配的卡牌")
-        self._queue_thumbnails()
+            self.set_disabled(self._disabled)
 
     def _clear_references(self, text):
-        self._selection += 1
         self._references = {}
         self.references.delete(*self.references.get_children())
         self.title.set(text)
-        self._preview_photo = None
-        self.preview_image.configure(image="", text=text)
-        self.caption_var.set("")
 
     def _select_card(self, _event=None):
         selection = self.cards.selection()
@@ -181,94 +203,29 @@ class CardCatalogView(ttk.Frame):
         refs = self.data.get(card, [])
         self._clear_references("暂无正式参考" if not refs else "请选择参考")
         self.title.set(f"{CARD_NAMES_ZH.get(card, card)} · {len(refs)} 份正式参考")
-        number = 0
         for ref in refs:
-            if ref.builtin:
-                name = ref.status
-            else:
-                number += 1
-                name = f"参考 {number}"
             self._references[ref.identifier] = ref
-            self.references.insert("", "end", iid=ref.identifier, values=(name,))
-            self._show_photo(f"reference:{ref.identifier}", self.references, ref.identifier)
+            self.references.insert("", "end", iid=ref.identifier, values=(ref.name, ref.identifier, ref.hits))
         if refs:
             selected = tuple(key for key in previous if key in self._references) or (refs[0].identifier,)
             self.references.selection_set(selected)
-        self._queue_thumbnails()
+        self.set_disabled(self._disabled)
 
-    def _select_reference(self, _event=None):
-        keys = self.references.selection()
-        if not keys:
-            self._selection += 1
-            self._preview_photo = None
-            self.preview_image.configure(image="", text="请选择参考" if self._references else "暂无正式参考")
-            self.caption_var.set("")
-        elif keys[0] in self._references:
-            self._load_preview(keys[0])
+    def _update_message(self):
+        cleared = any(ref.cleared for refs in self.data.values() for ref in refs)
+        self.message.set(
+            "本次上传将同步清空结果及清空后新增的命中数。"
+            if cleared and self.update_hits.get()
+            else "命中数仅在本地清空；未勾选更新命中数，上传不包含统计。"
+            if cleared
+            else "本次上传包含命中统计；清空本地命中数作用于全部卡牌。"
+            if self.update_hits.get()
+            else "首选由你设置，其余按命中数排序；命中数代表使用频率。上传默认不包含统计。"
+        )
 
-    def _load_preview(self, key):
-        ref, name = self._references[key], self.references.set(key, "name")
-        self._selection += 1
-        token = (self._generation, self._selection)
-        self._preview_photo = None
-        self.preview_image.configure(image="", text="加载中……")
-        self.caption_var.set("")
-        self._background("catalog_preview", lambda: (ref.identifier, name, preview_crop(ref)), token)
-
-    def _queue_thumbnails(self):
-        if not self._thumb_queued:
-            self._thumb_queued = True
-            self._later(30, self._load_thumbnails)
-
-    def _load_thumbnails(self):
-        self._thumb_queued = False
-        if self._thumb_busy or not self.winfo_ismapped():
-            return
-        targets = {}
-        for tree, prefix in ((self.cards, "card"), (self.references, "reference")):
-            keys = tree.get_children()
-            first, last = tree.yview()
-            for key in keys[int(first * len(keys)) : min(len(keys), int(last * len(keys)) + 2)]:
-                cache_key = f"{prefix}:{key}"
-                if cache_key in self._photos:
-                    self._show_photo(cache_key, tree, key)
-                elif len(targets) < 32:
-                    targets[cache_key] = self.data.get(key, []) if prefix == "card" else [self._references[key]]
-        if targets:
-            self._thumb_busy = True
-
-            def load():
-                return {
-                    key: next((image for ref in refs if (image := reference_crop(ref)) is not None), None)
-                    for key, refs in targets.items()
-                }
-
-            self._background("catalog_thumbnails", load, self._generation)
-
-    def _show_photo(self, cache_key, tree, key):
-        if cache_key in self._photos and tree.exists(key):
-            self._photos.move_to_end(cache_key)
-            photo = self._photos[cache_key]
-            tree.item(key, image=photo or "", text="" if photo else "无图")
-
-    def deliver(self, kind, token, result, error):
-        if kind == "catalog_thumbnails":
-            self._thumb_busy = False
-            if error is None and token == self._generation:
-                for key, preview in result.items():
-                    self._photos[key] = ImageTk.PhotoImage(preview, master=self) if preview is not None else None
-                    prefix, identifier = key.split(":", 1)
-                    self._show_photo(key, self.cards if prefix == "card" else self.references, identifier)
-                while len(self._photos) > 128:
-                    self._photos.popitem(last=False)
-            self._queue_thumbnails()
-        elif kind == "catalog_preview" and token == (self._generation, self._selection):
-            if error:
-                self.message.set("样本原图暂不可用，请刷新后重试。")
-                return
-            identifier, name, preview = result
-            photo = ImageTk.PhotoImage(preview, master=self) if preview is not None else None
-            self._preview_photo = photo
-            self.preview_image.configure(image=photo or "", text="暂无原图" if photo is None else "")
-            self.caption_var.set(f"{name}\n参考编号：{identifier}")
-            self.message.set("样本数按正式参考去重统计；无原图的参考仍可正常参与识别。")
+    def set_disabled(self, disabled):
+        self._disabled = disabled
+        for button in (self.preferred_button, self.upload_button):
+            button.configure(state="disabled" if disabled or not self._references else "normal")
+        self.clear_button.configure(state="disabled" if disabled else "normal")
+        self.hits_check.configure(state="disabled" if disabled else "normal")
