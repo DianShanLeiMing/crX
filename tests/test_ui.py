@@ -863,6 +863,7 @@ def test_sash_drag_receives_motion_and_release_from_child_widgets(review_ui, pan
     for distance in (15, 30, 45):
         target.event_generate("<B1-Motion>", x=20, y=5, rooty=root_y - distance, state=0x0100)
         ui.update()
+    _wait_ui(ui, lambda: panes.sash_coord(0)[1] <= before - 35)
     position = panes.sash_coord(0)[1]
     target.event_generate("<ButtonRelease-1>", x=20, y=5, rooty=root_y - 45)
     ui.update()
@@ -872,22 +873,124 @@ def test_sash_drag_receives_motion_and_release_from_child_widgets(review_ui, pan
     assert tab.tree.selection() == selection
 
 
+@pytest.mark.parametrize("target_name", ["description_label", "description_bar"])
+@pytest.mark.parametrize("send_motion", [False, True])
+def test_drag_starts_on_description_text_or_its_top_padding(review_ui, target_name, send_motion):
+    ui, tab, add, _destination = review_ui
+    sample = add("description-edge")
+    select(tab, sample)
+    ui.update()
+    target, panes = getattr(tab, target_name), tab.review_panes
+    before = panes.sash_coord(0)[1]
+    window = tab.winfo_toplevel()
+    window_size = (window.winfo_width(), window.winfo_height())
+    selection = tab.tree.selection()
+    root_y = target.winfo_rooty() + 1
+    target.event_generate("<ButtonPress-1>", x=20, y=1, rooty=root_y)
+    assert tab._pane_drag is not None
+    if send_motion:
+        target.event_generate("<B1-Motion>", x=20, y=-39, rooty=root_y - 40, state=0x0100)
+    target.event_generate("<ButtonRelease-1>", x=20, y=-39, rooty=root_y - 40)
+    ui.update()
+    assert panes.sash_coord(0)[1] <= before - 30
+    assert (window.winfo_width(), window.winfo_height()) == window_size
+    assert tab.tree.selection() == selection and tab._pane_drag is None
+    assert str(target.cget("cursor")) == "sb_v_double_arrow"
+
+
+@pytest.mark.parametrize("pane_name,expanded", [("review_panes", False), ("body_panes", False), ("body_panes", True)])
+def test_detail_dividers_resize_window_only_at_bottom_edge(review_ui, pane_name, expanded):
+    ui, tab, add, _destination = review_ui
+    add("window-resize")
+    if expanded:
+        tab.expand_details_button.invoke()
+    window = tab.winfo_toplevel()
+    ui.update()
+    original = (window.winfo_width(), window.winfo_height())
+    table_height = tab.sample_table.winfo_height()
+    detail_height = tab.details.winfo_height()
+    controls_height = tab.controls.container.winfo_height()
+    panes = getattr(tab, pane_name)
+    root_y = panes.winfo_rooty() + panes.sash_coord(0)[1] + 2
+    panes.event_generate("<ButtonPress-1>", x=20, y=panes.sash_coord(0)[1] + 2, rooty=root_y)
+    ui.update()
+    for distance in (20, 40, 60):
+        panes.event_generate("<B1-Motion>", x=20, y=2, rooty=root_y + distance, state=0x0100)
+        ui.update()
+    if pane_name == "body_panes":
+        _wait_ui(ui, lambda: window.winfo_height() == original[1] + 60)
+        assert window.winfo_height() == original[1] + 60
+        if not expanded:
+            assert abs(tab.sample_table.winfo_height() - table_height) <= 2
+        assert abs(tab.details.winfo_height() - detail_height - 60) <= 2
+        assert abs(tab.controls.container.winfo_height() - controls_height) <= 2
+    else:
+        assert window.winfo_height() == original[1]
+    assert window.winfo_width() == original[0]
+    for distance in (40, 20, 0):
+        panes.event_generate("<B1-Motion>", x=20, y=2, rooty=root_y + distance, state=0x0100)
+        ui.update()
+    panes.event_generate("<ButtonRelease-1>", x=20, y=2, rooty=root_y)
+    ui.update()
+    assert (window.winfo_width(), window.winfo_height()) == original
+    assert abs(tab.details.winfo_height() - detail_height) <= 2
+
+
+def test_window_resize_coalesces_motion_and_flushes_latest_size_on_release(review_ui, monkeypatch):
+    ui, tab, add, _destination = review_ui
+    add("resize-frames")
+    window, panes = tab.winfo_toplevel(), tab.body_panes
+    ui.update()
+    original_height = window.winfo_height()
+    calls = []
+    geometry = window.geometry
+
+    def resize(value):
+        calls.append(value)
+        return geometry(value)
+
+    monkeypatch.setattr(window, "geometry", resize)
+    y = panes.sash_coord(0)[1] + 2
+    root_y = panes.winfo_rooty() + y
+    panes.event_generate("<ButtonPress-1>", x=20, y=y, rooty=root_y)
+    ui.update()
+    for distance in range(1, 61):
+        panes.event_generate("<B1-Motion>", x=20, y=2, rooty=root_y + distance, state=0x0100)
+    assert calls == []  # Bursts of input must leave time for painting.
+    _wait_ui(ui, lambda: bool(calls) and window.winfo_height() == original_height + 60)
+    assert len(calls) == 1
+    for distance in range(61, 81):
+        panes.event_generate("<B1-Motion>", x=20, y=2, rooty=root_y + distance, state=0x0100)
+    panes.event_generate("<ButtonRelease-1>", x=20, y=2, rooty=root_y + 80)
+    ui.update()
+    assert window.winfo_height() == original_height + 80
+    assert len(calls) == 2
+    assert tab._window_resize_after is None and tab._window_resize is None
+
+
 @pytest.mark.parametrize("pane_name", ["review_panes", "body_panes"])
-def test_quick_sash_drag_keeps_last_position_without_intermediate_redraw(review_ui, pane_name):
+@pytest.mark.parametrize("send_motion", [False, True])
+def test_quick_sash_drag_keeps_last_position_without_intermediate_redraw(review_ui, pane_name, send_motion):
     ui, tab, add, _destination = review_ui
     add("quick-resize")
     panes = getattr(tab, pane_name)
     ui.update()
+    window = tab.winfo_toplevel()
+    window_height, details_height = window.winfo_height(), tab.details.winfo_height()
     before = panes.sash_coord(0)[1]
     y = before + 2
     panes.event_generate("<ButtonPress-1>", x=20, y=y)
     ui.update()
     direction = -1 if pane_name == "review_panes" else 1
-    for distance in range(2, 62, 2):
-        panes.event_generate("<B1-Motion>", x=20, y=y + direction * distance, state=0x0100)
+    if send_motion:
+        for distance in range(2, 62, 2):
+            panes.event_generate("<B1-Motion>", x=20, y=y + direction * distance, state=0x0100)
     panes.event_generate("<ButtonRelease-1>", x=20, y=y + direction * 60)
     ui.update()
     assert direction * (panes.sash_coord(0)[1] - before) >= 50
+    if pane_name == "body_panes":
+        assert window.winfo_height() == window_height + 60
+        assert abs(tab.details.winfo_height() - details_height - 60) <= 2
 
 
 def test_sash_drag_continues_when_keyboard_focus_changes(review_ui):
@@ -918,9 +1021,13 @@ def test_sash_drag_reverses_immediately_after_hitting_boundary(review_ui, pane_n
     ui.update()
     panes.event_generate("<B1-Motion>", x=20, y=y + direction * 2000, state=0x0100)
     ui.update()
+    if pane_name == "body_panes":
+        _wait_ui(ui, lambda: tab._window_resize_after is None)
     boundary = panes.sash_coord(0)[1]
     panes.event_generate("<B1-Motion>", x=20, y=y + direction * 1980, state=0x0100)
     ui.update()
+    if pane_name == "body_panes":
+        _wait_ui(ui, lambda: tab._window_resize_after is None)
     position = panes.sash_coord(0)[1]
     panes.event_generate("<ButtonRelease-1>", x=20, y=y + direction * 1980)
     ui.update()
@@ -949,6 +1056,10 @@ def test_included_cards_merge_and_reference_selection_scopes_edits(review_ui, mo
     assert "validation_reason" not in tab.tree.cget("columns")
     assert not tab.description_label.winfo_ismapped()
     assert not hasattr(tab, "resize_handle")
+    # Keep the footer deliberately shorter than its content: growing the
+    # whole window no longer consumes footer space to expand the details.
+    tab.body_panes.paneconfigure(tab.controls.container, height=80)
+    ui.update()
     before_height = tab.details.winfo_height()
     before_table = tab.sample_table.winfo_height()
     before_sash = tab.body_panes.sash_coord(0)[1]

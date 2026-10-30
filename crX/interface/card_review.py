@@ -57,6 +57,7 @@ FILTER_COLUMNS = {
 }
 THUMBNAIL_CACHE_SIZE = 128
 REVIEW_THUMBNAIL_SIZE = (24, 30)
+WINDOW_RESIZE_INTERVAL_MS = 16
 
 
 def search_card_choices(choices: dict[str, str], query: str) -> list[str]:
@@ -121,6 +122,8 @@ class CardReviewTab(ttk.Frame):
         self._images = {}
         self._thumbnail_images = OrderedDict()
         self._bottom_resize_stretch = None
+        self._window_resize = None
+        self._window_resize_after = None
         self._pane_drag = None
         self._pane_grab_owned = False
         self._pane_drag_tag = f"SashDrag:{self}"
@@ -279,8 +282,18 @@ class CardReviewTab(ttk.Frame):
         self.rows_frame.bind("<Configure>", self._layout_rows, add="+")
         self._update_review_theme()
         self.description_var = tk.StringVar(value="选择样本可查看完整说明。")
-        self.description_label = ttk.Label(table, textvariable=self.description_var, justify="left", wraplength=500)
-        self.description_label.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(4, 0))
+        self.description_bar = ttk.Frame(table, padding=(0, 4, 0, 0), cursor="sb_v_double_arrow")
+        self.description_bar.grid(row=3, column=0, columnspan=3, sticky="ew")
+        self.description_label = ttk.Label(
+            self.description_bar,
+            textvariable=self.description_var,
+            justify="left",
+            wraplength=500,
+            cursor="sb_v_double_arrow",
+        )
+        self.description_label.pack(fill="x")
+        for widget in (self.description_bar, self.description_label):
+            widget.bind("<ButtonPress-1>", self._begin_review_resize)
         self.description_label.bind(
             "<Configure>", lambda event: self.description_label.configure(wraplength=max(1, event.width))
         )
@@ -454,11 +467,15 @@ class CardReviewTab(ttk.Frame):
                 self.body_panes.paneconfigure(self.controls.container, height=min(height, 140))
 
     def _begin_review_resize(self, event):
+        if event.widget in (self.description_bar, self.description_label):
+            if self._details_expanded:
+                return None
+            return self._begin_pane_resize(self.review_panes, event, sash_index=0)
         return self._begin_pane_resize(self.review_panes, event)
 
     def _begin_bottom_resize(self, event):
-        if self.body_panes.identify(event.x, event.y):
-            self._end_pane_resize()
+        result = self._begin_pane_resize(self.body_panes, event)
+        if self._pane_drag is not None:
             self._bottom_resize_stretch = self.review_panes.panecget(self.details, "stretch")
             details_height = self.details.winfo_height()
             if not self._details_expanded:
@@ -466,16 +483,21 @@ class CardReviewTab(ttk.Frame):
                     self.sample_table, height=self.sample_table.winfo_height(), stretch="never"
                 )
             self.review_panes.paneconfigure(self.details, height=details_height, stretch="always")
-        return self._begin_pane_resize(self.body_panes, event)
+            self.body_panes.paneconfigure(self.controls.container, height=self.controls.container.winfo_height())
+            window = self.winfo_toplevel()
+            self._window_resize = (window, window.winfo_width(), window.winfo_height(), details_height)
+        return result
 
-    def _begin_pane_resize(self, panes, event):
+    def _begin_pane_resize(self, panes, event, *, sash_index=None):
         if self._pane_drag is not None:
             self._end_pane_resize()
-        identified = panes.identify(event.x, event.y)
-        if not identified:
-            return "break"
+        if sash_index is None:
+            identified = panes.identify(event.x, event.y)
+            if not identified:
+                return "break"
+            sash_index = int(identified[0])
         self._panes_resized = True
-        index = int(identified[0])
+        index = sash_index
         x, y = panes.sash_coord(index)
         self._pane_drag = (panes, index, event.y_root, x, y)
         # A local grab still sends events to descendants under the pointer.
@@ -495,12 +517,28 @@ class CardReviewTab(ttk.Frame):
     def _drag_pane(self, event):
         if self._pane_drag is not None:
             panes, index, root_y, x, y = self._pane_drag
-            panes.sash_place(index, x, y + event.y_root - root_y)
+            distance = event.y_root - root_y
+            if panes is self.body_panes and self._window_resize is not None:
+                window, width, height, details_height = self._window_resize
+                detail_minimum = int(panes.panecget(self.review_panes, "minsize")) if self._details_expanded else 0
+                minimum = max(window.minsize()[1], height - details_height + detail_minimum)
+                requested = max(minimum, min(window.maxsize()[1], height + distance))
+                self._window_resize = (window, width, requested, details_height + requested - height)
+                if requested != height and self._window_resize_after is None:
+                    self._window_resize_after = self._later(WINDOW_RESIZE_INTERVAL_MS, self._apply_window_resize)
+            else:
+                panes.sash_place(index, x, y + distance)
             # Re-anchor at the actual clamped position on every move. Mouse
             # travel past either boundary must not accumulate a dead zone.
             x, y = panes.sash_coord(index)
             self._pane_drag = (panes, index, event.y_root, x, y)
         return "break"
+
+    def _apply_window_resize(self):
+        self._window_resize_after = None
+        if self._window_resize is not None:
+            window, width, height, _details_height = self._window_resize
+            window.geometry(f"{width}x{height}")
 
     def _end_pane_resize(self, event=None):
         if self._pane_drag is None:
@@ -508,6 +546,9 @@ class CardReviewTab(ttk.Frame):
         panes = self._pane_drag[0]
         if event is not None and event.type == tk.EventType.Unmap and event.widget is not panes:
             return None
+        # Fast drags can coalesce all motion events into the final release.
+        if event is not None and event.type == tk.EventType.ButtonRelease and event.y_root != self._pane_drag[2]:
+            self._drag_pane(event)
         self._pane_drag = None
         for widget in self._pane_drag_widgets:
             if widget.winfo_exists():
@@ -525,14 +566,20 @@ class CardReviewTab(ttk.Frame):
 
     def _end_bottom_resize(self, _event=None):
         if self._bottom_resize_stretch is not None:
+            if self._window_resize_after is not None:
+                self.after_cancel(self._window_resize_after)
+                self._after_ids.discard(self._window_resize_after)
+                self._apply_window_resize()
+            # The final geometry request may still be waiting for Tk's layout.
+            # Preserve the requested detail height even on a rapid release.
+            details_height = self._window_resize[3] if self._window_resize else self.details.winfo_height()
             if not self._details_expanded:
                 self.review_panes.paneconfigure(
                     self.sample_table, height=self.sample_table.winfo_height(), stretch="always"
                 )
-            self.review_panes.paneconfigure(
-                self.details, height=self.details.winfo_height(), stretch=self._bottom_resize_stretch
-            )
+            self.review_panes.paneconfigure(self.details, height=details_height, stretch=self._bottom_resize_stretch)
             self._bottom_resize_stretch = None
+            self._window_resize = None
 
     def _scroll_rows(self, *args):
         self.tree.yview(*args)
@@ -1210,9 +1257,9 @@ class CardReviewTab(ttk.Frame):
     def _configure_detail_mode(self):
         show_references = self.filter_var.get() == "待上传"
         if show_references:
-            self.description_label.grid_remove()
+            self.description_bar.grid_remove()
         else:
-            self.description_label.grid()
+            self.description_bar.grid()
         if show_references != self._reference_mode:
             self._reference_mode = show_references
             if show_references:
