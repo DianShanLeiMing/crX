@@ -67,6 +67,7 @@ class WorkerProcess(Process):
         if cls is None or not cls.is_supported_on_current_platform():
             logger.error("当前系统不支持所选设备连接方式")
             return None
+        emulator = None
         try:
             kwargs = {"adb_path": jobs.get(UIField.ADB_PATH, "")}
             if selection == EmulatorType.MUMU:
@@ -80,6 +81,24 @@ class WorkerProcess(Process):
                 emulator.restart()
             return emulator
         except (EmulatorNotReadyError, OSError, ValueError) as error:
+            # Startup navigation can fail before the state loop creates its recorder.
+            # Flush its exact cached frame before returning and exiting the worker.
+            diagnostics = None
+            try:
+                diagnostics = FailureSampleRecorder()
+                diagnostics.offer(
+                    emulator,
+                    logger,
+                    state="start",
+                    attempt=1,
+                    session_log_path=getattr(self, "session_log_path", None),
+                    exception=traceback.format_exc()[-8000:],
+                )
+            except Exception:
+                logging.warning("初始化异常采样失败，继续停止任务", exc_info=True)
+            finally:
+                if diagnostics is not None:
+                    diagnostics.close()
             logger.error(f"设备尚未就绪：{error}")
             return None
 

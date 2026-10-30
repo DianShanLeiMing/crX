@@ -68,9 +68,10 @@ def test_attach_emulator_reraises_when_restart_not_ready(monkeypatch):
         attach_emulator("adb", _RecordingLogger())
 
 
-def test_setup_emulator_returns_none_and_reports_when_restart_not_ready(monkeypatch):
+def test_setup_emulator_returns_none_and_reports_when_restart_not_ready(monkeypatch, tmp_path):
     from crX.bot import worker as worker_module
 
+    monkeypatch.setattr("crX.utils.failure_samples.get_failure_samples_dir", lambda: tmp_path)
     monkeypatch.setattr(
         worker_module,
         "get_emulator_registry",

@@ -279,15 +279,17 @@ def _is_clash_main_menu_image(image) -> bool:
         return False
     # At 160 DPI, 9:16 moves fixed-size controls rather than stretching their artwork.
     # Require three independent native anchors plus undimmed yellow button pixels.
-    if all(pixel_is_equal(image[y, x], [0, 187, 255], tol=25) for x, y in MAIN_NATIVE_YELLOW_POINTS) and all(
-        find_image(image, folder, tolerance=0.95, subcrop=region) is not None
-        for folder, region in (
-            ("main_battle_button", MAIN_BATTLE_BUTTON_REGION),
-            ("main_burger_button", MAIN_BURGER_BUTTON_REGION),
-            ("main_battle_tab", MAIN_BATTLE_TAB_REGION),
+    if all(pixel_is_equal(image[y, x], [0, 187, 255], tol=25) for x, y in MAIN_NATIVE_YELLOW_POINTS):
+        # A native frame must pass every anchor; historical pixel fallbacks must
+        # not accept a partially obscured native menu after a text-template match.
+        return all(
+            find_image(image, folder, tolerance=0.95, subcrop=region) is not None
+            for folder, region in (
+                ("main_battle_button", MAIN_BATTLE_BUTTON_REGION),
+                ("main_burger_button", MAIN_BURGER_BUTTON_REGION),
+                ("main_battle_tab", MAIN_BATTLE_TAB_REGION),
+            )
         )
-    ):
-        return True
     pixels = [
         image[14][180],
         image[14][279],

@@ -1058,3 +1058,35 @@ def test_distribution_intro_stuck_times_out_without_any_tap(clock):
     assert logger.failure_frame is not None
     assert np.array_equal(logger.failure_frame["image"], frame)
     assert logger.failure_frame["details"]["actions"] == 0
+
+
+@pytest.mark.parametrize("entry", ("startup", "post_battle", "before_match"))
+def test_distribution_returns_to_daily_reward_main_menu(clock, entry):
+    main = image("main-menu-daily-reward-native.png")
+    assert is_clash_main_menu_image(main)
+    screen = RewardSequence(clock, [(image("item-distribution-collect-all-native.png"), None), (main, None)])
+    logger = Logger()
+    if entry == "startup":
+        result = nav.wait_for_clash_main_menu(screen, logger, timeout=10)
+    elif entry == "before_match":
+        result = nav.finish_pending_battle_rewards(screen, logger)
+    else:
+        result = nav.get_to_main_after_fight(screen, logger, timeout=10)
+    assert result
+    assert screen.clicks == [(0, 180, 583)]
+    assert clock[0] - screen.entered >= nav.POST_BATTLE_MAIN_STABLE_S
+    assert logger.failure_frame is None
+    assert logger.stats["completed_fights"] == 0
+
+
+@pytest.mark.parametrize("region", ((115, 460, 245, 540), (318, 45, 352, 91), (150, 575, 210, 640)))
+def test_daily_reward_main_menu_still_requires_all_anchors(region):
+    main = image("main-menu-daily-reward-native.png")
+    left, top, right, bottom = region
+    main[top:bottom, left:right] = 0
+    assert not is_clash_main_menu_image(main)
+
+
+def test_daily_reward_main_menu_rejects_dimmed_overlay():
+    main = image("main-menu-daily-reward-native.png")
+    assert not is_clash_main_menu_image((main * 0.4).astype(np.uint8))

@@ -9,6 +9,8 @@ import numpy as np
 import pytest
 
 from crX.bot import nav, worker
+from crX.emulators import EmulatorType
+from crX.emulators.base import EmulatorNotReadyError
 from crX.utils import failure_samples as failures
 from crX.utils.logger import Logger
 
@@ -196,6 +198,64 @@ def test_worker_samples_all_five_failures_before_restart_or_final_stop(tmp_path,
     assert len(records) == 5
     assert sorted(record["data"]["recovery_attempt"] for record in records) == [1, 2, 3, 4, 5]
     assert logger.stats["completed_fights"] == 0
+
+
+@pytest.mark.parametrize("cached", (True, False))
+def test_startup_failure_flushes_evidence_before_worker_exits(tmp_path, monkeypatch, cached):
+    frame = native_frame()
+    captures = []
+
+    class Device:
+        def __init__(self, logger, **kwargs):
+            self.logger = logger
+
+        @classmethod
+        def is_supported_on_current_platform(cls):
+            return True
+
+        def restart(self):
+            if cached:
+                failures.remember_failure_frame(
+                    self.logger, frame, reason="战后返回主界面超时", stage="unknown", actions=1
+                )
+            raise EmulatorNotReadyError("皇室战争未进入主界面")
+
+        def screenshot(self):
+            captures.append(True)
+            return frame
+
+    monkeypatch.setattr(worker, "get_emulator_registry", lambda: {EmulatorType.ADB: Device})
+    monkeypatch.setattr(failures, "get_failure_samples_dir", lambda: tmp_path)
+    process = worker.WorkerProcess.__new__(worker.WorkerProcess)
+    process.shutdown_event = threading.Event()
+    process.session_log_path = "startup-session.txt"
+    logger = Logger()
+    assert process._setup_emulator({"emulator": EmulatorType.ADB}, logger) is None
+    records, errors = failures.scan_failures(tmp_path)
+    assert errors == 0 and len(records) == 1
+    data = records[0]["data"]
+    assert data["state"] == "start" and data["recovery_attempt"] == 1
+    assert data["session_log_path"] == "startup-session.txt"
+    assert "EmulatorNotReadyError" in data["exception"]
+    assert np.array_equal(cv2.imread(str(records[0]["directory"] / "frame.png")), frame)
+    assert captures == ([] if cached else [True])
+    assert data["capture_source"] == ("failure_frame" if cached else "before_recovery")
+    if cached:
+        assert data["reason"] == "战后返回主界面超时"
+        assert data["details"]["actions"] == 1
+    assert "设备尚未就绪" in logger.current_status
+
+
+def test_startup_sampling_error_preserves_original_failure(monkeypatch):
+    from tests.test_emulator_setup_failfast import _FakeNotReadyController
+
+    monkeypatch.setattr(worker, "get_emulator_registry", lambda: {EmulatorType.ADB: _FakeNotReadyController})
+    monkeypatch.setattr(worker, "FailureSampleRecorder", lambda: (_ for _ in ()).throw(OSError("disk error")))
+    process = worker.WorkerProcess.__new__(worker.WorkerProcess)
+    process.shutdown_event = threading.Event()
+    logger = Logger()
+    assert process._setup_emulator({"emulator": EmulatorType.ADB}, logger) is None
+    assert "fake emulator is not ready" in logger.current_status
 
 
 def test_sampler_exception_cannot_break_worker_recovery(tmp_path, monkeypatch):
