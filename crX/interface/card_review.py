@@ -106,7 +106,7 @@ class CardReviewTab(ttk.Frame):
         self._results = Queue()
         self._scan_busy = False
         self._history_pending = True
-        self._history_scan = False
+        self._maintenance_scan = False
         self._action_busy = False
         self._images = {}
         self._thumbnail_images = OrderedDict()
@@ -588,18 +588,24 @@ class CardReviewTab(ttk.Frame):
         if not self._scan_busy and not self._action_busy:
             self._scan_busy = True
             history = self._history_pending and not self._running
-            self._history_scan = history
-            if history:
+            maintenance = not self._running and (
+                history
+                or any(sample.uploaded and not sample.review.get("images_cleaned") for sample in self.samples.values())
+            )
+            self._maintenance_scan = maintenance
+            if maintenance:
                 self._action_busy = self.formalizing = True
                 self._set_action_state()
                 if self.clear_busy_callback:
                     self.clear_busy_callback(True)
             root = self.root
-            self._background("scan", lambda: self._scan_contents(root, history), self._revision)
+            self._background("scan", lambda: self._scan_contents(root, history, maintenance), self._revision)
 
     @staticmethod
-    def _scan_contents(root, history):
-        samples, errors, groups = scan_review(root, refresh_library=True, reassess_history=history)
+    def _scan_contents(root, history, cleanup=False):
+        samples, errors, groups = scan_review(
+            root, refresh_library=True, reassess_history=history, cleanup_uploaded=cleanup
+        )
         return samples, errors, groups, build_catalog(samples)
 
     def _open_folder(self):
@@ -694,8 +700,8 @@ class CardReviewTab(ttk.Frame):
                 break
             if kind == "scan":
                 self._scan_busy = False
-                if self._history_scan:
-                    self._history_scan = False
+                if self._maintenance_scan:
+                    self._maintenance_scan = False
                     self._history_pending = error is not None or bool(result[1])
                     self._action_busy = self.formalizing = False
                     if self.clear_busy_callback:
@@ -772,6 +778,8 @@ class CardReviewTab(ttk.Frame):
             elif kind == "progress":
                 self.message_var.set(result)
             elif kind == "save":
+                if error:
+                    self._history_pending = True
                 self._action_busy = self.formalizing = self.clearing = False
                 if self.clear_busy_callback:
                     self.clear_busy_callback(False)
@@ -1274,7 +1282,7 @@ class CardReviewTab(ttk.Frame):
         self.stage_help.set(
             {
                 "待确认": "核对卡名与版本后确认并入库；无需保留的样本可选中后删除。正式库已覆盖时无需新增，冲突保留待确认。任务停止后可操作。",
-                "待上传": "在下方选择具体参考更正或移出；上传共享上方选中卡牌的全部正式参考。截图和备注留在本机。",
+                "待上传": "在下方选择具体参考更正或移出；上传共享上方选中卡牌的全部正式参考。上传成功后清理来源图片，备注保留。",
                 "样本库": "查询全部卡牌的正式参考，选择参考查看原图。",
             }[stage]
         )

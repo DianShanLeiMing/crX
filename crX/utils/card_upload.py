@@ -139,6 +139,7 @@ def _archive_published(root, identifiers, revision):
     ]
     if updates:
         workflow._commit(root, entries, entries, updates)
+    workflow._cleanup_uploaded_images(root, workflow._scan(root), entries)
 
 
 def _commit_entries(repo, head, payload, directory):
@@ -232,4 +233,4 @@ def upload_references(root, selected, *, progress=lambda _message: None):
             _archive_published(root, chosen, head)
         except (OSError, ValueError) as error:
             raise ValueError("远端已上传，本机归档未完成；刷新或再次上传可恢复，参考和原图保留") from error
-        return f"已上传 {len(chosen)} 份正式参考；其他机器更新代码后生效，截图和备注保留在本机"
+        return f"已上传 {len(chosen)} 份正式参考；其他机器更新代码后生效，来源图片已清理，备注保留"

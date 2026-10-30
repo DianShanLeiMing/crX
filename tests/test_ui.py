@@ -1057,7 +1057,7 @@ def test_catalog_search_preview_and_upload_archive_preserve_images(review_ui, mo
     assert tab.stage_tabs.tab(tab.stage_pages["待上传"], "text") == "待上传（0）"
     assert all(tab.samples[sample.key].uploaded for sample in (first, second))
     assert destination.read_bytes() == before
-    assert all(sample.file("card").is_file() for sample in (first, second))
+    assert all(not sample.file("card").exists() for sample in (first, second))
     tab.catalog_button.invoke()
     ui.update()
     assert tab.filter_var.get() == "样本库"
@@ -1067,7 +1067,7 @@ def test_catalog_search_preview_and_upload_archive_preserve_images(review_ui, mo
     assert all(ref.uploaded for ref in view.data["knight"])
     key = view.references.get_children()[1]
     view.references.selection_set(key)
-    _wait_ui(ui, lambda: view._preview_photo is not None and key in view.caption_var.get())
+    _wait_ui(ui, lambda: view._preview_photo is None and key in view.caption_var.get())
     tab.set_running(True)
     view.query.set("giant")
     ui.update()

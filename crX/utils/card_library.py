@@ -330,6 +330,13 @@ def clear_filtered_samples(
 def sample_fingerprint(sample) -> np.ndarray:
     from crX.bot.card_detection import COLORS_KEYS, extract_card_fingerprint
 
+    if sample.uploaded and sample.review.get("images_cleaned") is True:
+        from crX.utils import formal_library as formal
+
+        for entry in formal._read_entries(formal.formal_path()):
+            if entry["id"] == sample.review.get("formal_id") and entry["card_id"] == sample.card_id:
+                return np.array(entry["fingerprint"], dtype=np.int64)
+        raise ValueError("已清理图片的样本缺少有效正式参考")
     slot = sample.record.get("slot")
     if type(slot) is not int or not 0 <= slot < 4 or sample.record.get("available") is not True:
         raise ValueError("请使用可正常出牌的单张手牌样本")

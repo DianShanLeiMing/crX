@@ -17,6 +17,7 @@ from tests.test_card_review import add_group_sample
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="Git is unavailable")
 run_lint_checks = upload._lint
+source_fingerprint = local.sample_fingerprint
 
 
 def git(repo, *args):
@@ -113,6 +114,7 @@ def test_failed_push_retries_without_duplicate_commit(upload_store, monkeypatch)
     monkeypatch.setattr(upload, "_git", fail_push)
     with pytest.raises(ValueError, match="本地提交已保留"):
         upload.upload_references(root, [sample])
+    assert all(sample.file(kind).exists() for kind in ("card", "hand", "frame"))
     assert not workflow.scan_review(root)[0][0].uploaded
     head = git(repo, "rev-parse", "HEAD")
     monkeypatch.setattr(upload, "_git", run)
@@ -120,6 +122,7 @@ def test_failed_push_retries_without_duplicate_commit(upload_store, monkeypatch)
     assert git(repo, "rev-parse", "HEAD") == head == git(remote, "rev-parse", "main")
     assert checks == [True]
     assert workflow.scan_review(root)[0][0].uploaded
+    assert all(not sample.file(kind).exists() for kind in ("card", "hand", "frame"))
 
 
 def test_uploaded_samples_archive_per_reference_and_keep_sources(upload_store):
@@ -130,7 +133,13 @@ def test_uploaded_samples_archive_per_reference_and_keep_sources(upload_store):
     assert current[first.key].uploaded and not current[second.key].uploaded
     assert all(sample.status == "included" for sample in current.values())
     assert current[first.key].review["note"] == "private local note"
-    assert first.file("card").is_file() and first.file("frame").is_file()
+    assert source_fingerprint(current[first.key]).tolist() == next(
+        entry["fingerprint"]
+        for entry in formal._read_entries(formal.formal_path())
+        if entry["id"] == first.review["formal_id"]
+    )
+    assert all(not first.file(kind).exists() for kind in ("card", "hand", "frame"))
+    assert all(second.file(kind).is_file() for kind in ("card", "hand", "frame"))
     later = add("later", 8)
     assert not later.uploaded
     # Old records recover their archive status from the fetched remote, not HEAD alone.
@@ -214,3 +223,37 @@ def test_git_commit_hook_is_respected_and_index_is_preserved(upload_store):
     assert git(repo, "rev-parse", "HEAD") == git(remote, "rev-parse", "main") == before
     assert git(repo, "diff", "--cached", "--name-only") == ""
     assert not (repo / ".git" / "index.lock").exists()
+
+
+def test_history_cleanup_recovers_after_interruption_and_requires_valid_published_fingerprint(
+    upload_store, monkeypatch
+):
+    _repo, _remote, root, add, _checks = upload_store
+    sample, unpublished = add("first"), add("second", 4)
+    entries = formal._read_entries(formal.formal_path())
+    # Publication markers represent already successful historic uploads.
+    workflow._commit(
+        root,
+        entries,
+        entries,
+        [(sample, {"published_reference_id": sample.review["formal_id"], "published_commit": "a" * 40})],
+    )
+    original_unlink = type(root).unlink
+
+    def locked_image(path, *args, **kwargs):
+        if path.name == "sample-000-hand.png" and path.parent == sample.directory:
+            raise PermissionError("image is open")
+        return original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(type(root), "unlink", locked_image)
+    with pytest.raises(PermissionError):
+        workflow.scan_review(root)
+    current = {item.key: item for item in workflow._scan(root)}
+    assert not current[sample.key].review.get("images_cleaned")
+    assert sample.file("frame").exists()
+    assert all(unpublished.file(kind).exists() for kind in ("card", "hand", "frame"))
+    monkeypatch.setattr(type(root), "unlink", original_unlink)
+    current = {item.key: item for item in workflow.scan_review(root)[0]}
+    assert current[sample.key].review["images_cleaned"]
+    assert all(not sample.file(kind).exists() for kind in ("card", "hand", "frame"))
+    assert formal._read_entries(formal.formal_path()) == entries
