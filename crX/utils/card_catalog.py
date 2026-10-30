@@ -60,7 +60,7 @@ def reference_crop(reference, size=(24, 30)):
     return None
 
 
-def comparison_crop(reference):
+def preview_crop(reference):
     image = reference_crop(reference, size=(160, 200))
     if image is not None:
         scale = min(160 / image.width, 200 / image.height)

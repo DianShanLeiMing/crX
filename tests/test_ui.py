@@ -385,7 +385,7 @@ def test_review_details_expand_scroll_and_restore_without_resizing_window(deskto
         window.geometry("760x820")
         ui.update()
         assert tab.sample_table.winfo_height() > table_height + 100
-        for stage in ("待确认", "待上传", "已忽略"):
+        for stage in ("待确认", "待上传"):
             tab.filter_var.set(stage)
             tab._render_list()
             ui.update()
@@ -506,16 +506,6 @@ def test_row_thumbnails_align_scroll_and_support_bulk_selection(desktop_ui, tmp_
         tab.clear_selection_button.invoke()
         ui.update()
         assert not tab.tree.selection() and not tab.thumbnail_tree.selection()
-        tab.filter_var.set("已忽略")
-        tab._render_list()
-        ui.update()
-        assert not tab.thumbnail_tree.get_children() and not tab.tree.get_children()
-        assert (
-            tab.thumbnail_tree.winfo_rootx() + tab.thumbnail_tree.winfo_width()
-            <= tab.sample_table.winfo_rootx() + tab.sample_table.winfo_width()
-        )
-        tab.filter_var.set("待确认")
-        tab._render_list()
         ui.geometry("760x700")
         tab.tree.yview_moveto(0)
         ui.update()
@@ -533,7 +523,7 @@ def test_row_thumbnails_align_scroll_and_support_bulk_selection(desktop_ui, tmp_
         ui.attributes("-alpha", 1)
 
 
-def test_thumbnail_results_follow_current_filter_without_resetting_edits(desktop_ui, tmp_path, monkeypatch):
+def test_thumbnail_results_follow_current_tab_without_resetting_edits(desktop_ui, tmp_path, monkeypatch):
     import threading
     import tkinter as tk
 
@@ -560,15 +550,16 @@ def test_thumbnail_results_follow_current_filter_without_resetting_edits(desktop
     tab.pack(fill="both", expand=True)
     try:
         _wait_ui(ui, lambda: not tab._scan_busy and entered.is_set())
-        group = tab.sample_groups[second.key]
-        tab.group_var.set(next(label for label, key in tab.group_choices.items() if key == group))
-        tab._render_list()
-        tab.note_var.set("后台读图时仍可编辑")
-        assert tab.tree.get_children() == (second.key,)
+        switch(ui, tab, "待上传")
+        assert not tab.tree.get_children()
         release.set()
+        _wait_ui(ui, lambda: not tab._thumbnail_busy)
+        assert not tab._thumbnail_images and not tab.thumbnail_tree.get_children()
+        switch(ui, tab, "待确认")
+        select(tab, second)
+        tab.note_var.set("后台读图时仍可编辑")
         _wait_ui(ui, lambda: second.key in tab._thumbnail_images and not tab._thumbnail_busy)
-        assert tab.thumbnail_tree.get_children() == (second.key,)
-        assert first.key not in tab._thumbnail_images
+        assert set(tab.thumbnail_tree.get_children()) == {first.key, second.key}
         assert tab.tree.selection() == tab.thumbnail_tree.selection() == (second.key,)
         assert tab.note_var.get() == "后台读图时仍可编辑"
     finally:
@@ -629,10 +620,16 @@ def finish(ui, tab):
     _wait_ui(ui, lambda: not tab._action_busy and not tab._scan_busy)
 
 
-def test_three_tabs_single_approval_routes_and_keeps_owned_status(review_ui):
+def test_two_tabs_single_approval_routes_and_keeps_owned_status(review_ui):
     ui, tab, add, destination = review_ui
     first, duplicate, conflict = add("first"), add("duplicate", shift=5), add("conflict", channel=15)
-    assert tuple(tab.stage_pages) == ("待确认", "待上传", "已忽略") and not hasattr(tab, "filter_combo")
+    assert tuple(tab.stage_pages) == ("待确认", "待上传") and not hasattr(tab, "filter_combo")
+    assert not {"ignore", "restore"}.intersection(tab.stage_buttons)
+    legacy = add("legacy", channel=4)
+    save_review(legacy, "ignored", note="历史忽略记录")
+    tab.refresh()
+    finish(ui, tab)
+    assert legacy.key not in tab.tree.get_children() and legacy.file("card").is_file()
     assert not {"session", "formal", "runtime"}.intersection(tab.tree.cget("columns"))
     select(tab, first)
     assert tab.card_var.get() == ""  # Candidate hints never become human labels.
@@ -670,6 +667,40 @@ def test_three_tabs_single_approval_routes_and_keeps_owned_status(review_ui):
     assert tab.samples[first.key].status == "included"
 
 
+def test_pending_list_shows_all_groups_and_updates_after_processing(review_ui, monkeypatch):
+    import cv2
+
+    ui, tab, add, _destination = review_ui
+    first, duplicate, other = add("z-first"), add("y-duplicate", shift=5), add("a-other", channel=4)
+    image = cv2.imread(str(other.file("card")))
+    cv2.imwrite(str(other.file("card")), image[:, ::-1])
+    tab.refresh()
+    finish(ui, tab)
+    assert not hasattr(tab, "group_combo") and not hasattr(tab, "group_var")
+    assert set(tab.tree.get_children()) == {first.key, duplicate.key, other.key}
+    select(tab, other)
+    monkeypatch.setattr("crX.interface.card_review.messagebox.askyesno", lambda *args, **kwargs: True)
+    tab.clear_button.invoke()
+    finish(ui, tab)
+    assert other.key not in tab.samples and not other.file("card").exists()
+    assert set(tab.tree.get_children()) == {first.key, duplicate.key}
+    select(tab, first)
+    tab.card_var.set("knight")
+    tab.stage_buttons["confirm"].invoke()
+    finish(ui, tab)
+    assert tab.tree.get_children() == (duplicate.key,)
+    tab.card_var.set("knight")
+    tab.stage_buttons["confirm"].invoke()
+    finish(ui, tab)
+    assert tab.samples[duplicate.key].status == "covered"
+    assert not tab.tree.get_children()
+    # Processed samples remain available in their corresponding tabs.
+    switch(ui, tab, "待上传")
+    assert tab.tree.get_children() == (first.key,)
+    switch(ui, tab, "待确认")
+    assert not tab.tree.get_children()
+
+
 def test_batch_approval_uses_visible_selection_and_preserves_edits(review_ui):
     ui, tab, add, destination = review_ui
     first, second = add("first"), add("second", shift=5)
@@ -687,6 +718,50 @@ def test_batch_approval_uses_visible_selection_and_preserves_edits(review_ui):
     assert all(tab.samples[key].review["note"] == "批量备注" for key in (first.key, second.key))
     assert tab.samples[other.key].status == "pending"
     assert len(formal._read_entries(destination)) == 1
+
+
+@pytest.mark.parametrize("stage", ["待确认", "待上传"])
+def test_manual_pane_sizes_survive_content_changes_and_refresh(review_ui, stage):
+    ui, tab, add, _destination = review_ui
+    if stage == "待上传":
+        sample = add("resize")
+        select(tab, sample)
+        tab.card_var.set("knight")
+        tab.stage_buttons["confirm"].invoke()
+        finish(ui, tab)
+        switch(ui, tab, stage)
+    ui.update()
+
+    def drag(panes, distance):
+        y = panes.sash_coord(0)[1] + 2
+        assert panes.identify(20, y)
+        panes.event_generate("<ButtonPress-1>", x=20, y=y)
+        ui.update()
+        for step in (distance // 2, distance):
+            panes.event_generate("<B1-Motion>", x=20, y=y + step, state=0x0100)
+            ui.update()
+        panes.event_generate("<ButtonRelease-1>", x=20, y=y + distance)
+        ui.update()
+
+    upper = tab.review_panes.sash_coord(0)[1]
+    drag(tab.review_panes, -30)
+    assert tab.review_panes.sash_coord(0)[1] <= upper - 20
+    bottom = tab.body_panes.sash_coord(0)[1]
+    drag(tab.body_panes, 50)
+    assert tab.body_panes.sash_coord(0)[1] >= bottom + 40
+    sizes = (tab.body_panes.sash_coord(0)[1], tab.sample_table.winfo_height(), tab.details.winfo_height())
+    tab.message_var.set("处理结果和说明更新后应保留手动调整的展示区域。\n" * 8)
+    ui.update()
+    tab._fit_controls()
+    ui.update()
+    assert abs(tab.body_panes.sash_coord(0)[1] - sizes[0]) <= 2
+    tab.refresh()
+    finish(ui, tab)
+    assert abs(tab.body_panes.sash_coord(0)[1] - sizes[0]) <= 2
+    assert abs(tab.sample_table.winfo_height() - sizes[1]) <= 2
+    assert abs(tab.details.winfo_height() - sizes[2]) <= 2
+    drag(tab.body_panes, -50)
+    assert tab.body_panes.sash_coord(0)[1] <= sizes[0] - 40
 
 
 def test_included_cards_merge_and_reference_selection_scopes_edits(review_ui, monkeypatch):
@@ -819,26 +894,21 @@ def test_included_cards_merge_and_reference_selection_scopes_edits(review_ui, mo
     assert {entry["card_id"] for entry in formal._read_entries(destination)} == {"cannon", "archers"}
 
 
-def test_ignore_restore_and_running_guards_recheck_after_dialog(review_ui, monkeypatch):
+def test_delete_and_running_guards_recheck_after_dialog(review_ui, monkeypatch):
     ui, tab, add, destination = review_ui
     source = add("source")
     select(tab, source)
     tab.card_var.set("knight")
     tab.set_running(True)
-    for action in ("confirm", "ignore"):
-        assert str(tab.stage_buttons[action].cget("state")) == "disabled"
+    assert str(tab.stage_buttons["confirm"].cget("state")) == "disabled"
+    assert str(tab.clear_button.cget("state")) == "disabled"
     tab._save()
+    tab._clear_samples()
     assert not tab._action_busy and not formal._read_entries(destination)
     tab.set_running(False)
-    tab.note_var.set("切牌动画")
-    tab.stage_buttons["ignore"].invoke()
-    finish(ui, tab)
-    switch(ui, tab, "已忽略")
-    assert tab.tree.get_children() == (source.key,) and "切牌动画" in tab.description_var.get()
-    tab.stage_buttons["restore"].invoke()
-    finish(ui, tab)
-    switch(ui, tab, "待确认")
-    assert tab.note_var.get() == "切牌动画"
+    monkeypatch.setattr("crX.interface.card_review.messagebox.askyesno", lambda *args, **kwargs: False)
+    tab.clear_button.invoke()
+    assert not tab._action_busy and source.file("frame").exists()
     prompts = []
 
     def start_during_confirmation(_title, message, **_kwargs):
@@ -916,7 +986,7 @@ def test_rename_and_remove_update_shared_sources_without_second_approval(review_
     assert first.file("frame").exists() and duplicate.file("frame").exists()
 
 
-def test_catalog_search_comparison_and_upload_archive_preserve_images(review_ui, monkeypatch):
+def test_catalog_search_preview_and_upload_archive_preserve_images(review_ui, monkeypatch):
     from crX.bot.card_data import CARD_NAMES_ZH
     from crX.utils.card_upload import _archive_published
 
@@ -944,20 +1014,20 @@ def test_catalog_search_comparison_and_upload_archive_preserve_images(review_ui,
     assert view.cards.set("knight", "count") == "2"
     keys = view.references.get_children()
     assert len(keys) == 2
-    view.references.selection_set(keys)
-    ui.update()
-    assert str(view.compare_button.cget("state")) == "normal"
-    view.compare_button.invoke()
-    _wait_ui(ui, lambda: len(view._comparison_photos) == 2)
-    assert all(view._comparison_photos)
-    assert all(key in caption.get() for key, caption in zip(keys, view.caption_vars, strict=True))
+    assert not hasattr(view, "compare_button")
+    assert str(view.references.cget("selectmode")) == "browse"
+    for index, key in enumerate(keys, 1):
+        view.references.selection_set(key)
+        _wait_ui(ui, lambda: view._preview_photo is not None and key in view.caption_var.get())
+        assert view.caption_var.get().splitlines()[0] == f"参考 {index}"
+    assert tuple(view.references.cget("columns")) == ("name",)
     view.query.set("弓箭手")
     ui.update()
     assert "archers" in view.cards.get_children() and view.cards.set("archers", "count") == "0"
     view.cards.selection_set("archers")
     ui.update()
     assert not view.references.get_children()
-    assert "暂无正式参考" in view.image_labels[0].cget("text")
+    assert "暂无正式参考" in view.preview_image.cget("text")
     view.query.set("")
     view.only_samples.set(True)
     view.render_cards()
@@ -995,18 +1065,17 @@ def test_catalog_search_comparison_and_upload_archive_preserve_images(review_ui,
     ui.update()
     assert view.cards.set("knight", "count") == "2"
     assert all(ref.uploaded for ref in view.data["knight"])
-    view.references.selection_set(view.references.get_children())
-    ui.update()
-    view.compare_button.invoke()
-    _wait_ui(ui, lambda: len(view._comparison_photos) == 2)
-    assert all(view._comparison_photos)
+    key = view.references.get_children()[1]
+    view.references.selection_set(key)
+    _wait_ui(ui, lambda: view._preview_photo is not None and key in view.caption_var.get())
     tab.set_running(True)
     view.query.set("giant")
     ui.update()
     assert view.cards.get_children() == ("giant",)
-    _wait_ui(ui, lambda: len(view._comparison_photos) == 1)
-    assert view._comparison_photos == [None]
-    assert view.image_labels[0].cget("text") == "暂无原图"
+    _wait_ui(ui, lambda: view.preview_image.cget("text") == "暂无原图")
+    assert view._preview_photo is None
+    assert view.references.set(view.references.get_children()[0], "name") == "内置正式参考"
+    assert view.caption_var.get().splitlines()[0] == "内置正式参考"
     tab.set_running(False)
     tab.refresh()
     _wait_ui(ui, lambda: not tab._scan_busy)

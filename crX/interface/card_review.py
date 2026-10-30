@@ -29,7 +29,6 @@ from crX.utils.card_review import (
 from crX.utils.card_upload import upload_references
 from crX.utils.card_workflow import (
     REVIEW_TABS,
-    change_result,
     confirm_samples,
     delete_samples,
     edit_formal_reference,
@@ -40,23 +39,20 @@ from crX.utils.open_folder import open_folder
 
 MODE_LABELS = {"practice": "练习", "1v1": "1v1", "2v2": "2v2"}
 STAGE_ACTIONS = {
-    "待确认": ("confirm", "ignore"),
+    "待确认": ("confirm",),
     "待上传": ("rename", "remove"),
     "样本库": (),
-    "已忽略": ("restore",),
 }
 COLUMN_SPECS = {
     "group": ("相似分组", 100),
     "card": ("卡名 / 候选提示", 180),
     "reason": ("采样原因", 110),
     "status": ("处理结果", 80),
-    "validation_reason": ("说明", 250),
     "references": ("正式参考", 100),
 }
 FILTER_COLUMNS = {
     "待确认": ("group", "card", "reason", "status"),
     "待上传": ("card", "references", "status"),
-    "已忽略": ("card", "status", "validation_reason"),
 }
 THUMBNAIL_CACHE_SIZE = 128
 REVIEW_THUMBNAIL_SIZE = (24, 30)
@@ -103,7 +99,7 @@ class CardReviewTab(ttk.Frame):
         self._reference_card_id = None
         self._reference_mode = False
         self._preview_key = None
-        self.group_choices = {}
+        self.group_labels = {}
         self._selected_keys = ()
         self._selection_cleared = False
         self.selected = None
@@ -115,6 +111,7 @@ class CardReviewTab(ttk.Frame):
         self._images = {}
         self._thumbnail_images = OrderedDict()
         self._bottom_resize_stretch = None
+        self._panes_resized = False
         self._controls_request = None
         self._thumbnail_busy = False
         self._thumbnail_after = None
@@ -156,12 +153,6 @@ class CardReviewTab(ttk.Frame):
             self.stage_pages[label] = page
         self.stage_tabs.pack(fill="x", before=filters, pady=(0, 4))
         self.stage_tabs.bind("<<NotebookTabChanged>>", self._switch_tab)
-        self.group_var = tk.StringVar(value="全部分组")
-        self.group_combo = ttk.Combobox(
-            filters, textvariable=self.group_var, values=["全部分组"], state="readonly", width=16
-        )
-        self.group_combo.pack(side="left", padx=(8, 0))
-        self.group_combo.bind("<<ComboboxSelected>>", lambda _: self._render_list())
         ttk.Button(filters, text="刷新", command=self.refresh).pack(side="left", padx=8)
         ttk.Button(filters, text="打开样本目录", command=self._open_folder).pack(side="left")
         self.expand_details_button = ttk.Button(filters, text="展开详情", command=self._toggle_details)
@@ -187,7 +178,7 @@ class CardReviewTab(ttk.Frame):
         self.body_panes = tk.PanedWindow(
             self,
             orient="vertical",
-            sashwidth=6,
+            sashwidth=10,
             sashpad=0,
             sashrelief="flat",
             sashcursor="sb_v_double_arrow",
@@ -201,14 +192,16 @@ class CardReviewTab(ttk.Frame):
         self.review_panes = tk.PanedWindow(
             self.body_panes,
             orient="vertical",
-            sashwidth=8,
+            sashwidth=10,
             sashpad=0,
             sashrelief="flat",
+            sashcursor="sb_v_double_arrow",
             showhandle=False,
             opaqueresize=True,
             borderwidth=0,
             background=ttk.Style().colors.border,
         )
+        self.review_panes.bind("<ButtonPress-1>", self._begin_review_resize, add="+")
         self.bind(
             "<<ThemeChanged>>",
             self._update_review_theme,
@@ -370,12 +363,6 @@ class CardReviewTab(ttk.Frame):
         actions.grid(row=2, column=0, sticky="ew", pady=2)
         self.stage_buttons = {
             "confirm": ttk.Button(actions, text="确认并入库", command=self._save, state="disabled"),
-            "ignore": ttk.Button(
-                actions, text="忽略", command=lambda: self._change_result("ignored"), state="disabled"
-            ),
-            "restore": ttk.Button(
-                actions, text="恢复待确认", command=lambda: self._change_result("pending"), state="disabled"
-            ),
             "rename": ttk.Button(actions, text="更正卡名", command=self._rename_selected, state="disabled"),
             "remove": ttk.Button(actions, text="移出正式参考", command=self._remove_selected, state="disabled"),
         }
@@ -394,7 +381,7 @@ class CardReviewTab(ttk.Frame):
 
     def _update_review_theme(self, _event=None):
         style = ttk.Style()
-        self.review_panes.configure(background=style.colors.bg)
+        self.review_panes.configure(background=style.colors.border)
         self.body_panes.configure(background=style.colors.border)
         for name in ("CardSamples.Treeview", "CardReferences.Treeview"):
             for suffix, fallback in (("", "TkDefaultFont"), (".Heading", "TkHeadingFont")):
@@ -427,10 +414,16 @@ class CardReviewTab(ttk.Frame):
         height = self.controls.winfo_reqheight()
         if self._controls_request != height:
             self._controls_request = height
-            self.body_panes.paneconfigure(self.controls.container, height=min(height, 140))
+            if not self._panes_resized:
+                self.body_panes.paneconfigure(self.controls.container, height=min(height, 140))
+
+    def _begin_review_resize(self, event):
+        if self.review_panes.identify(event.x, event.y):
+            self._panes_resized = True
 
     def _begin_bottom_resize(self, event):
         if self.body_panes.identify(event.x, event.y):
+            self._panes_resized = True
             self._bottom_resize_stretch = self.review_panes.panecget(self.details, "stretch")
             details_height = self.details.winfo_height()
             if not self._details_expanded:
@@ -616,7 +609,6 @@ class CardReviewTab(ttk.Frame):
     def _switch_tab(self, _event=None):
         index = self.stage_tabs.index("current")
         self.filter_var.set(tuple(REVIEW_TABS)[index])
-        self.group_var.set("全部分组")
         self._selection_cleared = False
         self._render_list()
 
@@ -792,16 +784,16 @@ class CardReviewTab(ttk.Frame):
         self._later(100, self._poll)
 
     def _update_groups(self, groups):
-        prior_group = self.group_choices.get(self.group_var.get())
         self.groups = {group: list(keys) for group, keys in groups.items()}
         self.sample_groups = {key: group for group, keys in groups.items() for key in keys}
-        self.group_choices = {
-            f"相似组 {index:02d}（{len(keys)} 张）": group for index, (group, keys) in enumerate(groups.items(), 1)
+        pending_groups = []
+        for group, keys in self.groups.items():
+            count = sum(self.samples[key].review.get("work_result", "pending") == "pending" for key in keys)
+            if count:
+                pending_groups.append((group, count))
+        self.group_labels = {
+            group: f"{index:02d}（{count} 张）" for index, (group, count) in enumerate(pending_groups, 1)
         }
-        self.group_combo.configure(values=["全部分组", *self.group_choices])
-        self.group_var.set(
-            next((label for label, group in self.group_choices.items() if group == prior_group), "全部分组")
-        )
 
     def _configure_columns(self):
         columns = FILTER_COLUMNS[self.filter_var.get()]
@@ -837,19 +829,13 @@ class CardReviewTab(ttk.Frame):
         self._configure_detail_mode()
         selected = self.selected.key if self.selected else None
         selection = self.tree.selection()
-        pending = self.filter_var.get() == "待确认"
-        if not pending:
-            self.group_var.set("全部分组")
-        self.group_combo.configure(state="readonly" if pending else "disabled")
-        group_filter = self.group_choices.get(self.group_var.get())
         columns = self._configure_columns()
         result = REVIEW_TABS[self.filter_var.get()]
         visible = [
             self.samples[key]
-            for group, keys in self.groups.items()
+            for keys in self.groups.values()
             for key in keys
-            if (group_filter is None or group == group_filter)
-            and self.samples[key].review.get("work_result", "pending") == result
+            if self.samples[key].review.get("work_result", "pending") == result
             and (result != "included" or not self.samples[key].uploaded)
         ]
         # Keep groups in collection order; bring explicit conflicts to the front.
@@ -871,17 +857,15 @@ class CardReviewTab(ttk.Frame):
         desired = tuple(sample.key for sample in visible)
         if tuple(self.tree.get_children()) != desired:
             self.tree.delete(*self.tree.get_children())
-        labels = {group: label.removeprefix("相似组 ") for label, group in self.group_choices.items()}
         for sample in visible:
             candidates = sample.record.get("candidates", [])
             suggestion = CARD_NAMES_ZH.get(candidates[0].get("card_id"), "") if candidates else ""
             card = CARD_NAMES_ZH.get(sample.card_id, "") or (f"候选：{suggestion}" if suggestion else "待选择")
             row = {
-                "group": labels[self.sample_groups[sample.key]],
+                "group": self.group_labels.get(self.sample_groups[sample.key], ""),
                 "card": card,
                 "reason": REASON_LABELS.get(sample.record.get("reason"), "识别异常"),
                 "status": sample_progress(sample)[0],
-                "validation_reason": validation_reason(sample),
                 "references": "",
             }
             if result == "included":
@@ -1289,10 +1273,9 @@ class CardReviewTab(ttk.Frame):
         )
         self.stage_help.set(
             {
-                "待确认": "核对卡名与版本后确认并入库；正式库已覆盖时无需新增，冲突保留待确认。任务停止后可操作。",
+                "待确认": "核对卡名与版本后确认并入库；无需保留的样本可选中后删除。正式库已覆盖时无需新增，冲突保留待确认。任务停止后可操作。",
                 "待上传": "在下方选择具体参考更正或移出；上传共享上方选中卡牌的全部正式参考。截图和备注留在本机。",
-                "样本库": "查询全部卡牌的正式参考；选择两份参考可并排对比。",
-                "已忽略": "人工忽略的样本；可恢复待确认。",
+                "样本库": "查询全部卡牌的正式参考，选择参考查看原图。",
             }[stage]
         )
 
@@ -1337,13 +1320,6 @@ class CardReviewTab(ttk.Frame):
             self.message_var.set("请选择名录中的准确卡名，并区分普通／觉醒／精英版本。名录缺失时请保留待确认。")
             return
         self._start_action(lambda: confirm_samples(self.root, samples, card_id, note))
-
-    def _change_result(self, result):
-        if self._running or self._action_busy:
-            return
-        samples, note = self._action_samples(), self.note_var.get()
-        if samples:
-            self._start_action(lambda: change_result(self.root, samples, result, note))
 
     def _rename_selected(self):
         samples, card_id = self._action_samples(), self._chosen_card()

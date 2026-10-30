@@ -38,7 +38,7 @@ def test_missing_images_keep_references_and_never_invent_a_thumbnail(tmp_path, r
     data = catalog.build_catalog(list(current.values()))
     assert len(data["knight"]) == 1
     assert catalog.reference_crop(data["knight"][0]) is None
-    assert catalog.comparison_crop(data["giant"][0]) is None
+    assert catalog.preview_crop(data["giant"][0]) is None
     other_machine = catalog.build_catalog([])
     assert len(other_machine["knight"]) == 1 and catalog.reference_crop(other_machine["knight"][0]) is None
     assert other_machine["knight"][0].status == "正式参考"

@@ -1,4 +1,4 @@
-"""Read-only card catalog with lazy thumbnails and two-reference comparison."""
+"""Read-only card catalog with lazy thumbnails and a single-reference preview."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import ttkbootstrap as ttk
 from PIL import ImageTk
 
 from crX.bot.card_data import CARD_NAMES_ZH
-from crX.utils.card_catalog import comparison_crop, reference_crop
+from crX.utils.card_catalog import preview_crop, reference_crop
 
 
 class CardCatalogView(ttk.Frame):
@@ -24,7 +24,7 @@ class CardCatalogView(ttk.Frame):
         self._thumb_busy = False
         self._thumb_queued = False
         self._photos = OrderedDict()
-        self._comparison_photos = []
+        self._preview_photo = None
         self._references = {}
         self._sort_count = None
         self._card = None
@@ -69,7 +69,7 @@ class CardCatalogView(ttk.Frame):
         self.cards.bind("<Map>", lambda _: self._queue_thumbnails())
         right = ttk.Frame(self.panes)
         right.columnconfigure(0, weight=1)
-        right.rowconfigure(3, weight=1)
+        right.rowconfigure(2, weight=1)
         self.panes.add(right, minsize=220, stretch="always")
         self.title = tk.StringVar(value="选择卡牌查看正式参考")
         ttk.Label(right, textvariable=self.title).grid(row=0, column=0, sticky="ew", padx=6, pady=4)
@@ -78,18 +78,16 @@ class CardCatalogView(ttk.Frame):
         gallery.rowconfigure(0, weight=1)
         self.references = ttk.Treeview(
             gallery,
-            columns=("name", "status"),
+            columns=("name",),
             show="tree headings",
             height=4,
-            selectmode="extended",
+            selectmode="browse",
             style="CardReferences.Treeview",
         )
         self.references.heading("#0", text="缩略图")
         self.references.column("#0", width=54, minwidth=42, stretch=False)
         self.references.heading("name", text="参考")
-        self.references.column("name", width=72, minwidth=60, stretch=False)
-        self.references.heading("status", text="状态")
-        self.references.column("status", width=120, minwidth=80)
+        self.references.column("name", width=120, minwidth=60)
         self.references.grid(row=0, column=0, sticky="nsew")
         reference_scroll = ttk.Scrollbar(gallery, orient="vertical", command=self.references.yview)
         reference_scroll.grid(row=0, column=1, sticky="ns")
@@ -101,28 +99,14 @@ class CardCatalogView(ttk.Frame):
         self.references.configure(yscrollcommand=references_scrolled)
         self.references.bind("<<TreeviewSelect>>", self._select_reference)
         gallery.grid(row=1, column=0, sticky="nsew", padx=(6, 0))
-        tools = ttk.Frame(right)
-        tools.grid(row=2, column=0, sticky="ew", padx=6, pady=4)
-        ttk.Label(tools, text="Ctrl / Shift 选择两份参考").pack(side="left")
-        self.compare_button = ttk.Button(tools, text="对比选中", command=self.compare, state="disabled")
-        self.compare_button.pack(side="right")
-        comparison = ttk.Frame(right)
-        comparison.grid(row=3, column=0, sticky="nsew", padx=6)
-        comparison.columnconfigure((0, 1), weight=1, uniform="samples")
-        comparison.rowconfigure(0, weight=1)
-        self.image_labels = []
-        self.caption_vars = []
-        for index, title in enumerate(("样本 A", "样本 B")):
-            box = ttk.Labelframe(comparison, text=title, padding=4)
-            box.grid(row=0, column=index, sticky="nsew", padx=(0, 4) if index == 0 else (4, 0))
-            image = ttk.Label(box, text="选择参考", anchor="center", width=1)
-            image.pack(fill="both", expand=True)
-            caption = tk.StringVar()
-            label = ttk.Label(box, textvariable=caption, wraplength=150, justify="left")
-            label.pack(fill="x", pady=4)
-            label.bind("<Configure>", lambda event: event.widget.configure(wraplength=max(1, event.width)))
-            self.image_labels.append(image)
-            self.caption_vars.append(caption)
+        preview = ttk.Labelframe(right, text="参考原图", padding=4)
+        preview.grid(row=2, column=0, sticky="nsew", padx=6, pady=(6, 0))
+        self.preview_image = ttk.Label(preview, text="选择参考", anchor="center", width=1)
+        self.preview_image.pack(fill="both", expand=True)
+        self.caption_var = tk.StringVar()
+        caption = ttk.Label(preview, textvariable=self.caption_var, wraplength=300, justify="left")
+        caption.pack(fill="x", pady=4)
+        caption.bind("<Configure>", lambda event: event.widget.configure(wraplength=max(1, event.width)))
         self.message = tk.StringVar(value="样本数按正式参考去重统计；无原图的参考仍可正常参与识别。")
         ttk.Label(self, textvariable=self.message, wraplength=680).grid(row=2, column=0, sticky="ew", pady=(6, 0))
 
@@ -183,11 +167,9 @@ class CardCatalogView(ttk.Frame):
         self._references = {}
         self.references.delete(*self.references.get_children())
         self.title.set(text)
-        self.compare_button.configure(state="disabled")
-        self._comparison_photos.clear()
-        for image, caption in zip(self.image_labels, self.caption_vars, strict=True):
-            image.configure(image="", text=text)
-            caption.set("")
+        self._preview_photo = None
+        self.preview_image.configure(image="", text=text)
+        self.caption_var.set("")
 
     def _select_card(self, _event=None):
         selection = self.cards.selection()
@@ -199,9 +181,15 @@ class CardCatalogView(ttk.Frame):
         refs = self.data.get(card, [])
         self._clear_references("暂无正式参考" if not refs else "请选择参考")
         self.title.set(f"{CARD_NAMES_ZH.get(card, card)} · {len(refs)} 份正式参考")
-        for index, ref in enumerate(refs, 1):
+        number = 0
+        for ref in refs:
+            if ref.builtin:
+                name = ref.status
+            else:
+                number += 1
+                name = f"参考 {number}"
             self._references[ref.identifier] = ref
-            self.references.insert("", "end", iid=ref.identifier, values=(f"参考 {index}", ref.status))
+            self.references.insert("", "end", iid=ref.identifier, values=(name,))
             self._show_photo(f"reference:{ref.identifier}", self.references, ref.identifier)
         if refs:
             selected = tuple(key for key in previous if key in self._references) or (refs[0].identifier,)
@@ -210,35 +198,22 @@ class CardCatalogView(ttk.Frame):
 
     def _select_reference(self, _event=None):
         keys = self.references.selection()
-        self.compare_button.configure(state="normal" if len(keys) == 2 else "disabled")
         if not keys:
             self._selection += 1
-            self._comparison_photos.clear()
-            for label, caption in zip(self.image_labels, self.caption_vars, strict=True):
-                label.configure(image="", text="请选择参考" if self._references else "暂无正式参考")
-                caption.set("")
-        elif len(keys) == 1:
-            self._load_comparison(keys)
-        elif len(keys) > 2:
-            self._selection += 1
-            self.message.set("请选择两份参考进行对比。")
+            self._preview_photo = None
+            self.preview_image.configure(image="", text="请选择参考" if self._references else "暂无正式参考")
+            self.caption_var.set("")
+        elif keys[0] in self._references:
+            self._load_preview(keys[0])
 
-    def compare(self):
-        keys = self.references.selection()
-        if len(keys) == 2:
-            self._load_comparison(keys)
-
-    def _load_comparison(self, keys):
-        refs = [self._references[key] for key in keys if key in self._references]
+    def _load_preview(self, key):
+        ref, name = self._references[key], self.references.set(key, "name")
         self._selection += 1
         token = (self._generation, self._selection)
-        self._comparison_photos.clear()
-        for index, (label, caption) in enumerate(zip(self.image_labels, self.caption_vars, strict=True)):
-            label.configure(image="", text="加载中……" if index < len(refs) else "选择第二份参考后点击对比")
-            caption.set("")
-        self._background(
-            "catalog_comparison", lambda: [(ref.identifier, ref.status, comparison_crop(ref)) for ref in refs], token
-        )
+        self._preview_photo = None
+        self.preview_image.configure(image="", text="加载中……")
+        self.caption_var.set("")
+        self._background("catalog_preview", lambda: (ref.identifier, name, preview_crop(ref)), token)
 
     def _queue_thumbnails(self):
         if not self._thumb_queued:
@@ -287,13 +262,13 @@ class CardCatalogView(ttk.Frame):
                 while len(self._photos) > 128:
                     self._photos.popitem(last=False)
             self._queue_thumbnails()
-        elif kind == "catalog_comparison" and token == (self._generation, self._selection):
+        elif kind == "catalog_preview" and token == (self._generation, self._selection):
             if error:
                 self.message.set("样本原图暂不可用，请刷新后重试。")
                 return
-            for index, (identifier, status, preview) in enumerate(result):
-                photo = ImageTk.PhotoImage(preview, master=self) if preview is not None else None
-                self._comparison_photos.append(photo)
-                self.image_labels[index].configure(image=photo or "", text="暂无原图" if photo is None else "")
-                self.caption_vars[index].set(f"{status}\n参考编号：{identifier}")
+            identifier, name, preview = result
+            photo = ImageTk.PhotoImage(preview, master=self) if preview is not None else None
+            self._preview_photo = photo
+            self.preview_image.configure(image=photo or "", text="暂无原图" if photo is None else "")
+            self.caption_var.set(f"{name}\n参考编号：{identifier}")
             self.message.set("样本数按正式参考去重统计；无原图的参考仍可正常参与识别。")
