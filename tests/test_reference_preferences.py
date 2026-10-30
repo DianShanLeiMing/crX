@@ -4,6 +4,7 @@ import numpy as np
 
 from crX.bot import card_detection as detection
 from crX.utils import formal_library as formal
+from crX.utils import reference_hits
 from tests.test_card_library import fingerprint
 
 
@@ -57,7 +58,7 @@ def test_manual_order_precedes_hit_counts_and_skips_references_over_threshold(mo
     monkeypatch.setattr(detection, "runtime_formal_entries", lambda: [])
     value = {"preferred": ids[0], "numbers": dict(zip(ids, range(3), strict=True)), "order": [ids[0], ids[2], ids[1]]}
     monkeypatch.setattr(detection, "runtime_preferences", lambda: {"knight": value})
-    monkeypatch.setattr(detection.reference_hits, "_runtime_counts", {ids[1]: 1000})
+    monkeypatch.setattr(reference_hits, "_runtime_counts", {ids[1]: 1000})
     observed = [dict(zip(detection.COLORS_KEYS, row.tolist(), strict=True)) for row in base]
     result = detection.recognize_card_fingerprint(observed)
     assert result["card_id"] == "knight" and result["reference_id"] == ids[2] and result["source"] == "two"

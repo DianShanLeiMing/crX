@@ -77,7 +77,7 @@ def test_no_original_reference_requires_manual_first_choice_and_stable_numbers(t
     assert [ref.name for ref in refs] == ["参考1", "参考2"]
     hits.record_hits(tmp_path, {refs[1].identifier: 10})
     reordered = catalog.build_catalog(list(records(tmp_path).values()), root=tmp_path)["knight"]
-    assert [ref.name for ref in reordered] == ["参考2", "参考1"]
+    assert [ref.name for ref in reordered] == ["参考1", "参考2"]
     catalog.set_preferred_reference(tmp_path, "knight", refs[1].identifier)
     preferred = catalog.build_catalog(list(records(tmp_path).values()), root=tmp_path)["knight"]
     assert preferred[0].name == "首选" and preferred[1].name == "参考1"
@@ -108,3 +108,53 @@ def test_manual_order_survives_counts_refresh_and_first_choice_exchange(tmp_path
     actual = catalog.build_catalog(samples, root=tmp_path)["knight"]
     assert [ref.identifier for ref in actual] == [one, two, preferred]
     assert [ref.hits for ref in actual] == [50, 1, 0]
+
+
+@pytest.mark.parametrize("manual_order", [False, True])
+def test_new_reference_always_appends_after_existing_order(tmp_path, review_store, manual_order):
+    add, _destination = review_store
+    sources = [add("first"), add("second", channel=4), add("third", channel=8)]
+    workflow.confirm_samples(tmp_path, sources, "knight")
+    refs = catalog.build_catalog(list(records(tmp_path).values()), root=tmp_path)["knight"]
+    first, one, two = (ref.identifier for ref in refs)
+    catalog.set_preferred_reference(tmp_path, "knight", first)
+    before = (first, one, two)
+    if manual_order:
+        catalog.reorder_references(tmp_path, "knight", (first, two, one), before)
+        before = (first, two, one)
+    latest = add("latest", channel=12)
+    workflow.confirm_samples(tmp_path, [latest], "knight")
+    current = list(records(tmp_path).values())
+    identifier = next(sample.review["formal_id"] for sample in current if sample.key == latest.key)
+    hits.record_hits(tmp_path, {identifier: 1000, one: 100, two: 1})
+    expected = (*before, identifier)
+    actual = catalog.build_catalog(current, root=tmp_path)["knight"]
+    assert tuple(ref.identifier for ref in actual) == expected
+    assert actual[-1].name == "参考4" and actual[-1].hits == 1000
+    assert preferences.read_document(preferences.preferences_path())["cards"]["knight"]["order"] == list(expected)
+    hits.clear_local(tmp_path)
+    assert tuple(ref.identifier for ref in catalog.build_catalog(current, root=tmp_path)["knight"]) == expected
+
+
+def test_legacy_automatic_order_is_preserved_before_appending_new_reference(tmp_path, review_store):
+    from crX.utils.card_review import atomic_json
+
+    add, _destination = review_store
+    sources = [add("first"), add("second", channel=4), add("latest", channel=8)]
+    workflow.confirm_samples(tmp_path, sources, "knight")
+    current = list(records(tmp_path).values())
+    ids = {sample.key: sample.review["formal_id"] for sample in current}
+    first, second, latest = (ids[sample.key] for sample in sources)
+    atomic_json(
+        preferences.preferences_path(),
+        {"version": 1, "cards": {"knight": {"preferred": None, "numbers": {first: 1, second: 2}}}},
+    )
+    hits.record_hits(tmp_path, {first: 1, second: 10, latest: 1000})
+    actual = catalog.build_catalog(current, root=tmp_path)["knight"]
+    assert [ref.identifier for ref in actual] == [second, first, latest]
+    hits.record_hits(tmp_path, {first: 10000})
+    assert [ref.identifier for ref in catalog.build_catalog(current, root=tmp_path)["knight"]] == [
+        second,
+        first,
+        latest,
+    ]

@@ -24,7 +24,6 @@ from crX.bot.coords import (
     LEGACY_SCREEN_SIZE,
 )
 from crX.bot.state_detect import image_has_elixir
-from crX.utils import reference_hits
 from crX.utils.card_library import runtime_entries
 from crX.utils.formal_library import _signature as reference_signature
 from crX.utils.formal_library import runtime_formal_entries
@@ -139,9 +138,7 @@ def recognize_card_fingerprint(collected_data):
         ranks = order_ranks.get(card, {})
         return (
             0 if value.get("preferred") == identifier else 1,
-            ranks.get(identifier, len(ranks))
-            if "order" in value
-            else -reference_hits._runtime_counts.get(identifier, 0),
+            ranks.get(identifier, len(ranks)),
             value.get("numbers", {}).get(identifier, index + 1),
             index,
         )

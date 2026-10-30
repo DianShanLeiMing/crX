@@ -60,14 +60,16 @@ def build_catalog(samples, *, root=None):
         for reference in references.values():
             reference.uploaded |= reference.identifier in published or not formal.source_checkout()
     cards = {card: list(references.values()) for card, references in cards.items()}
-    preferences = reference_preferences.register_references(cards)["cards"]
     hits, cleared = reference_hits.totals(root) if root is not None else ({}, False)
+    for references in cards.values():
+        for reference in references:
+            reference.hits = hits.get(reference.identifier, 0)
+    preferences = reference_preferences.register_references(cards)["cards"]
     for card, references in cards.items():
         value = preferences.get(card, {})
         for reference in references:
             reference.preferred = value.get("preferred") == reference.identifier
             reference.number = value.get("numbers", {}).get(reference.identifier, 0)
-            reference.hits = hits.get(reference.identifier, 0)
             reference.cleared = cleared
         reference_preferences.sort_references(references, value)
     return cards

@@ -97,6 +97,7 @@ def card_preferences(references, saved=None):
     """Retain retired numbers so deleting a reference never renumbers another."""
     saved = saved or {}
     numbers = dict(saved.get("numbers", {}))
+    known = set(numbers)
     preferred = saved.get("preferred")
     if not saved:
         preferred = next((ref.identifier for ref in references if ref.builtin), None)
@@ -106,16 +107,22 @@ def card_preferences(references, saved=None):
             numbers[ref.identifier] = 0 if ref.identifier == preferred else next_number
             if ref.identifier != preferred:
                 next_number += 1
-    result = {"preferred": preferred, "numbers": numbers}
+    active = {ref.identifier for ref in references}
     if "order" in saved:
-        active = {ref.identifier for ref in references}
         order = [key for key in saved["order"] if key in active]
-        order.extend(ref.identifier for ref in references if ref.identifier not in order)
-        if preferred in order:
-            order.remove(preferred)
-            order.insert(0, preferred)
-        result["order"] = order
-    return result
+    else:
+        # Freeze the previous automatic order once; newly seen references always
+        # follow the known ones, even when shared statistics already contain hits.
+        existing = sorted(
+            (ref for ref in references if ref.identifier in known),
+            key=lambda ref: (-ref.hits, numbers[ref.identifier]),
+        )
+        order = [ref.identifier for ref in existing]
+    order.extend(ref.identifier for ref in references if ref.identifier not in order)
+    if preferred in order:
+        order.remove(preferred)
+        order.insert(0, preferred)
+    return {"preferred": preferred, "numbers": numbers, "order": order}
 
 
 def sort_references(references, value):
@@ -123,7 +130,7 @@ def sort_references(references, value):
     references.sort(
         key=lambda ref: (
             not ref.preferred,
-            ranks.get(ref.identifier, len(ranks)) if "order" in value else -ref.hits,
+            ranks.get(ref.identifier, len(ranks)),
             ref.number,
         )
     )
