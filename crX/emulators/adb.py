@@ -13,6 +13,10 @@ SCREEN_WIDTH, SCREEN_HEIGHT = GAME_SCREEN_SIZE
 SCREEN_DENSITY = GAME_SCREEN_DPI
 
 
+class AdbConnectionNotReadyError(EmulatorNotReadyError):
+    """The chosen endpoint exists in configuration but is not online yet."""
+
+
 class AdbController(AdbBasedController):
     supported_platforms = [Platform.WINDOWS, Platform.MACOS, Platform.LINUX]
 
@@ -31,14 +35,14 @@ class AdbController(AdbBasedController):
         if self.device_serial and ":" in self.device_serial:
             result = self.adb(["connect", self.device_serial])
             if result.returncode:
-                raise EmulatorNotReadyError("ADB 连接失败")
+                raise AdbConnectionNotReadyError("ADB 连接失败")
         devices = self.discover_devices(self.adb_path)
         if not self.device_serial:
             if len(devices) != 1:
                 raise EmulatorNotReadyError("请选择一个在线的 ADB 设备")
             self.device_serial = devices[0]
         if self.device_serial not in devices:
-            raise EmulatorNotReadyError("所选 ADB 设备已离线或尚未授权")
+            raise AdbConnectionNotReadyError("所选 ADB 设备已离线或尚未授权")
 
     def configure(self):
         for command in (

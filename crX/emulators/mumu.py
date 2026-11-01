@@ -10,7 +10,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from crX.emulators.adb import AdbController
+from crX.emulators.adb import AdbConnectionNotReadyError, AdbController
 from crX.emulators.adb_base import resolve_adb, run_command
 from crX.emulators.base import EmulatorNotReadyError
 from crX.utils.platform import Platform, is_windows
@@ -152,13 +152,24 @@ class MuMuEmulatorController(AdbController):
             if result.returncode:
                 raise EmulatorNotReadyError("MuMu 无法启动所选实例")
         deadline = time.monotonic() + 120
+        connection_error = None
         while time.monotonic() < deadline:
             info = self._info()
             if info.get("is_android_started") and info.get("adb_port"):
                 self.device_serial = adb_endpoint(info)
                 self.adb_path = resolve_adb(self.adb_path)
-                super().start()
-                return
-            self.logger.change_status(f"正在等待 MuMu 实例 {self.instance_index} 启动")
+                # Android's ready flag can precede ADB availability. This is part
+                # of the bounded boot wait, not a retry of game actions/restart().
+                try:
+                    super().start()
+                except AdbConnectionNotReadyError as error:
+                    connection_error = error
+                    self.logger.change_status(f"正在等待 MuMu 实例 {self.instance_index} 的 ADB 连接就绪：{error}")
+                else:
+                    return
+            else:
+                self.logger.change_status(f"正在等待 MuMu 实例 {self.instance_index} 启动")
             time.sleep(1)
+        if connection_error is not None:
+            raise EmulatorNotReadyError(f"MuMu 的 ADB 连接就绪超时（120 秒）：{connection_error}") from connection_error
         raise EmulatorNotReadyError("MuMu 的 Android 系统启动超时（120 秒）")
