@@ -1201,6 +1201,7 @@ def test_upload_publishes_all_references_of_selected_cards_and_blocks_while_runn
     ui, tab, add, _destination = review_ui
     first, supplement, other = add("first"), add("supplement", channel=4), add("other", channel=8)
     assert str(tab.upload_button.cget("state")) == "disabled"
+    assert not hasattr(tab, "hits_check") and not hasattr(tab, "update_hits")
     for sample, card_id in ((first, "knight"), (supplement, "knight"), (other, "archers")):
         select(tab, sample)
         tab.card_var.set(card_id)

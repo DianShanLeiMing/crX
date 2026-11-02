@@ -118,7 +118,6 @@ class CardReviewTab(ttk.Frame):
         self._history_pending = True
         self._maintenance_scan = False
         self._action_busy = False
-        self._upload_action = False
         self._images = {}
         self._thumbnail_images = OrderedDict()
         self._bottom_resize_stretch = None
@@ -190,9 +189,6 @@ class CardReviewTab(ttk.Frame):
         self.clear_selection_button.pack(side="left", padx=(0, 8))
         self.upload_button = ttk.Button(selection_tools, text="上传", command=self._upload, state="disabled")
         self.upload_button.pack(side="left")
-        self.update_hits = tk.BooleanVar(value=False)
-        self.hits_check = ttk.Checkbutton(selection_tools, text="更新新增命中数", variable=self.update_hits)
-        self.hits_check.pack(side="left", padx=8)
         self.clear_button = ttk.Button(
             selection_tools, text="删除样本", bootstyle="danger-outline", command=self._clear_samples, state="disabled"
         )
@@ -824,7 +820,6 @@ class CardReviewTab(ttk.Frame):
                 self._start_action(lambda: reference_hits.clear_local(root, identifiers))
         elif operation == "upload":
             results = self._results
-            self._upload_action = True
             self._start_action(
                 lambda: upload_references(
                     root,
@@ -853,9 +848,7 @@ class CardReviewTab(ttk.Frame):
         def progress(message):
             results.put(("progress", None, message, None))
 
-        options = {"update_hits": True} if self.update_hits.get() else {}
-        self._upload_action = True
-        self._start_action(lambda: upload_references(root, samples, progress=progress, **options))
+        self._start_action(lambda: upload_references(root, samples, progress=progress))
 
     def _clear_selection(self):
         if not self._action_busy:
@@ -953,10 +946,6 @@ class CardReviewTab(ttk.Frame):
                 if error:
                     self._history_pending = True
                 self._action_busy = self.formalizing = self.clearing = False
-                if self._upload_action:
-                    if error is None:
-                        self.update_hits.set(False)
-                    self._upload_action = False
                 if self.clear_busy_callback:
                     self.clear_busy_callback(False)
                 self._set_action_state()
@@ -1437,7 +1426,6 @@ class CardReviewTab(ttk.Frame):
 
     def _set_action_state(self):
         self.library_view.set_disabled(self._running or self._action_busy)
-        self.hits_check.configure(state="disabled" if self._running or self._action_busy else "normal")
         self._sync_thumbnail_selection()
         stage = self.filter_var.get()
         selected = self._action_samples()
