@@ -192,7 +192,7 @@ class CardReviewTab(ttk.Frame):
         self.clear_button = ttk.Button(
             selection_tools, text="删除样本", bootstyle="danger-outline", command=self._clear_samples, state="disabled"
         )
-        self.clear_button.pack(side="right", padx=(24, 0))
+        self.clear_button.pack(side="left", padx=(24, 0))
         self.body_panes = tk.PanedWindow(
             self,
             orient="vertical",
