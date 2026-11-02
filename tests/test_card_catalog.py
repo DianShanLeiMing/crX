@@ -102,12 +102,13 @@ def test_manual_order_survives_counts_refresh_and_first_choice_exchange(tmp_path
     assert [ref.name for ref in actual] == ["首选", "参考3", "参考2"]
     with pytest.raises(ValueError, match="顺序已经变化"):
         catalog.reorder_references(tmp_path, "knight", original, original)
-    with pytest.raises(ValueError, match="首选固定"):
-        catalog.reorder_references(tmp_path, "knight", (two, preferred, one), reordered)
+    catalog.reorder_references(tmp_path, "knight", (two, preferred, one), reordered)
+    moved = catalog.build_catalog(samples, root=tmp_path)["knight"]
+    assert moved[0].identifier == two and moved[0].preferred
     catalog.set_preferred_reference(tmp_path, "knight", one)
     actual = catalog.build_catalog(samples, root=tmp_path)["knight"]
-    assert [ref.identifier for ref in actual] == [one, two, preferred]
-    assert [ref.hits for ref in actual] == [50, 1, 0]
+    assert [ref.identifier for ref in actual] == [one, preferred, two]
+    assert [ref.hits for ref in actual] == [50, 0, 1]
 
 
 @pytest.mark.parametrize("manual_order", [False, True])

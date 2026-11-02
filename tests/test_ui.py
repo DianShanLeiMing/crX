@@ -1289,7 +1289,7 @@ def test_catalog_search_and_upload_archive_clean_images(review_ui, monkeypatch):
     keys = view.references.get_children()
     assert len(keys) == 2
     assert not hasattr(view, "compare_button")
-    assert str(view.references.cget("selectmode")) == "browse"
+    assert str(view.references.cget("selectmode")) == "extended"
     for index, key in enumerate(keys, 1):
         view.references.selection_set(key)
         assert view.references.set(key, "name") == f"参考{index}"
@@ -1348,7 +1348,7 @@ def test_catalog_search_and_upload_archive_clean_images(review_ui, monkeypatch):
     ui.update()
     assert view.cards.get_children() == ("giant",)
     assert view.references.set(view.references.get_children()[0], "name") == "首选（内置参考）"
-    assert str(view.preferred_button.cget("state")) == "disabled"
+    assert str(view.clear_button.cget("state")) == "disabled"
     tab.set_running(False)
     tab.refresh()
     _wait_ui(ui, lambda: not tab._scan_busy)
@@ -1376,7 +1376,7 @@ def test_legacy_trial_is_visible_pending_and_can_be_approved(review_ui):
     assert tab.samples[source.key].status == "included" and len(formal._read_entries(destination)) == 1
 
 
-def test_catalog_first_choice_and_clear_require_explicit_stats_upload(review_ui):
+def test_catalog_clear_and_global_metadata_upload(review_ui, monkeypatch):
     from crX.utils import reference_hits as hits
 
     ui, tab, add, _destination = review_ui
@@ -1394,26 +1394,33 @@ def test_catalog_first_choice_and_clear_require_explicit_stats_upload(review_ui)
     ui.update()
     key = view.references.get_children()[0]
     view.references.selection_set(key)
-    view.preferred_button.invoke()
-    finish(ui, tab)
-    assert view.references.set(key, "name") == "首选"
     hits.record_hits(tab.root, {key: 8})
     view.refresh_order()
     _wait_ui(ui, lambda: not tab._scan_busy)
     assert view.references.set(key, "hits") == "8"
-    view.update_hits.set(True)
-    tab.update_hits.set(True)
     view.clear_button.invoke()
     finish(ui, tab)
-    assert not view.update_hits.get() and not tab.update_hits.get()
     assert view.references.set(key, "hits") == "0"
-    assert "仅在本地清空" in view.message.get()
-    view.update_hits.set(True)
-    view._update_message()
-    assert "本次上传将同步清空结果" in view.message.get()
+    assert "线上数据保留" in view.message.get()
+    assert not hasattr(view, "preferred_button") and not hasattr(view, "hits_check")
+    assert "命中变化" in tab.summary_var.get()
+    calls = []
+
+    def upload(root, selected, **options):
+        calls.append((root, selected, options))
+        return "已上传顺序与命中次数"
+
+    monkeypatch.setattr("crX.interface.card_review.upload_references", upload)
+    view.query.set("no-such-card")
+    ui.update()
+    view.upload_button.invoke()
+    finish(ui, tab)
+    assert len(calls) == 1
+    assert calls[0][0] == tab.root and calls[0][1] == []
+    assert calls[0][2]["metadata_only"] and calls[0][2]["update_hits"]
 
 
-def test_catalog_drag_persists_order_keeps_labels_and_pins_first_choice(review_ui):
+def test_catalog_drag_persists_order_and_allows_moving_first_choice(review_ui):
     from crX.utils import reference_hits as hits
     from crX.utils import reference_preferences as preferences
 
@@ -1432,8 +1439,6 @@ def test_catalog_drag_persists_order_keeps_labels_and_pins_first_choice(review_u
     ui.update()
     preferred, one, two = view.references.get_children()
     view.references.selection_set(preferred)
-    view.preferred_button.invoke()
-    finish(ui, tab)
     labels = {key: view.references.set(key, "name") for key in (preferred, one, two)}
 
     def drag(source, target, *, cancel=False):
@@ -1448,7 +1453,8 @@ def test_catalog_drag_persists_order_keeps_labels_and_pins_first_choice(review_u
 
     drag(one, two)
     assert view.references.get_children() == (preferred, two, one)
-    assert {key: view.references.set(key, "name") for key in (preferred, one, two)} == labels
+    assert view.references.set(preferred, "name").startswith("首选")
+    assert all(view.references.set(key, "name") == labels[key] for key in (one, two))
     value = preferences.read_document(preferences.preferences_path())["cards"]["knight"]
     assert value["order"] == [preferred, two, one]
     hits.record_hits(tab.root, {one: 100})
@@ -1458,10 +1464,11 @@ def test_catalog_drag_persists_order_keeps_labels_and_pins_first_choice(review_u
     drag(one, two, cancel=True)
     assert view.references.get_children() == (preferred, two, one)
     drag(preferred, one)
-    assert view.references.get_children() == (preferred, two, one)
+    assert view.references.get_children() == (two, one, preferred)
+    assert view.references.set(two, "name").startswith("首选")
     tab.set_running(True)
     drag(one, two)
-    assert view.references.get_children() == (preferred, two, one)
+    assert view.references.get_children() == (two, one, preferred)
     tab.set_running(False)
 
 

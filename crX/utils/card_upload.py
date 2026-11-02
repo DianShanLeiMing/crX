@@ -121,12 +121,12 @@ def _base_entries(repo, directory, revision="HEAD"):
     return formal._read_entries(path)
 
 
-def _base_document(repo, directory, filename, reader):
+def _base_document(repo, directory, filename, reader, revision="HEAD"):
     path = directory / Path(filename).name
-    if _text(repo, "ls-tree", "HEAD", "--", filename):
-        if int(_text(repo, "cat-file", "-s", f"HEAD:{filename}")) > hits.MAX_BYTES:
+    if _text(repo, "ls-tree", revision, "--", filename):
+        if int(_text(repo, "cat-file", "-s", f"{revision}:{filename}")) > hits.MAX_BYTES:
             raise ValueError("已提交的参考配置过大")
-        path.write_bytes(_git(repo, "show", f"HEAD:{filename}").stdout)
+        path.write_bytes(_git(repo, "show", f"{revision}:{filename}").stdout)
     return reader(path)
 
 
@@ -148,6 +148,23 @@ def published_reference_ids():
             return {entry["id"]: revision for entry in _base_entries(repo, Path(name), revision)}
     except (OSError, ValueError):
         return {}
+
+
+def published_preferences():
+    """Read the last fetched upstream baseline without network I/O."""
+    if not formal.source_checkout():
+        return preferences.read_document(preferences.preferences_path())["cards"]
+    repo = _project_root()
+    if formal.formal_path().resolve() != repo / LIBRARY_FILE:
+        return None
+    try:
+        tracking = _text(repo, "rev-parse", "--symbolic-full-name", "@{upstream}", check=False)
+        if not tracking.startswith("refs/remotes/"):
+            return None
+        with tempfile.TemporaryDirectory(prefix="crx-card-baseline-") as name:
+            return _base_document(repo, Path(name), PREFERENCES_FILE, preferences.read_document, tracking)["cards"]
+    except (OSError, ValueError):
+        return None
 
 
 def _archive_published(root, identifiers, revision):
@@ -208,21 +225,33 @@ def _commit_entries(repo, head, payloads, directory):
             lock.unlink(missing_ok=True)
 
 
-def upload_references(root, selected, *, cards=None, update_hits=False, progress=lambda _message: None):
+def upload_references(
+    root, selected, *, cards=None, update_hits=False, metadata_only=False, progress=lambda _message: None
+):
     """Append selected approved references to HEAD, commit and push the tracked branch."""
     if not formal.source_checkout():
         raise ValueError("上传需要可写的源码 Git 项目，当前安装版不支持")
     repo = _project_root()
     if formal.formal_path().resolve() != repo / LIBRARY_FILE:
         raise ValueError("正式库不属于当前源码项目，不能上传")
+    if metadata_only and (selected or cards or not update_hits):
+        raise ValueError("顺序与命中次数上传不能包含样本入库操作")
     if cards is not None and (
         not cards or len(cards) > formal.MAX_BATCH or not set(cards).issubset(formal.CARD_NAMES_ZH)
     ):
         raise ValueError("请选择有效卡牌，一次最多上传64种")
     with workflow._locked(root):
+        if metadata_only:
+            from crX.utils.card_catalog import build_catalog
+
+            # Freeze labels/order for newly included references before taking the
+            # metadata snapshot, just as a catalog refresh does.
+            build_catalog(workflow._scan(root), root=root)
         samples = workflow._fresh(root, selected) if selected else []
-        if not samples and (
-            not cards or len(cards) > formal.MAX_BATCH or not set(cards).issubset(formal.CARD_NAMES_ZH)
+        if (
+            not metadata_only
+            and not samples
+            and (not cards or len(cards) > formal.MAX_BATCH or not set(cards).issubset(formal.CARD_NAMES_ZH))
         ):
             raise ValueError("请选择需要上传的卡牌")
         entries = {entry["id"]: entry for entry in formal._read_entries(formal.formal_path())}
@@ -255,7 +284,7 @@ def upload_references(root, selected, *, cards=None, update_hits=False, progress
             current_preferences = preferences.read_document(preferences.preferences_path())
             old_preferences = _base_document(repo, directory, PREFERENCES_FILE, preferences.read_document)
             new_preferences = {"version": 1, "cards": dict(old_preferences["cards"])}
-            for card in chosen_cards:
+            for card in current_preferences["cards"] if metadata_only else chosen_cards:
                 if card in current_preferences["cards"]:
                     new_preferences["cards"][card] = current_preferences["cards"][card]
             if new_preferences != old_preferences:
@@ -275,8 +304,9 @@ def upload_references(root, selected, *, cards=None, update_hits=False, progress
             elif not pending_push:
                 if uploaded_stats is not None:
                     hits.acknowledge_upload(root, uploaded_stats)
-                _archive_published(root, chosen, head)
-                return "所选正式参考已上传，无需重复提交"
+                if not metadata_only:
+                    _archive_published(root, chosen, head)
+                return "顺序与命中次数已同步，无需重复提交" if metadata_only else "所选正式参考已上传，无需重复提交"
         progress("正在推送正式参考……")
         try:
             _git(repo, "push", remote, f"{head}:{target}", timeout=90)
@@ -285,7 +315,10 @@ def upload_references(root, selected, *, cards=None, update_hits=False, progress
         try:
             if uploaded_stats is not None:
                 hits.acknowledge_upload(root, uploaded_stats)
-            _archive_published(root, chosen, head)
+            if not metadata_only:
+                _archive_published(root, chosen, head)
         except (OSError, ValueError) as error:
             raise ValueError("远端已上传，本机归档或图片清理未完成；刷新后可重试，正式参考保留") from error
+        if metadata_only:
+            return "已上传全部样本的顺序与新增命中次数；本地清空结果未上传，来源图片保留"
         return f"已上传 {len(chosen)} 份正式参考及所选配置；其他机器更新代码后生效，来源图片已清理，备注保留"

@@ -18,7 +18,7 @@ from crX.bot.card_data import CARD_NAMES_ZH
 from crX.bot.card_samples import get_card_samples_dir
 from crX.interface.card_catalog import CardCatalogView
 from crX.utils import reference_hits
-from crX.utils.card_catalog import build_catalog, reorder_references, set_preferred_reference
+from crX.utils.card_catalog import build_catalog, reorder_references
 from crX.utils.card_review import (
     REASON_LABELS,
     ReviewSample,
@@ -191,9 +191,7 @@ class CardReviewTab(ttk.Frame):
         self.upload_button = ttk.Button(selection_tools, text="上传", command=self._upload, state="disabled")
         self.upload_button.pack(side="left")
         self.update_hits = tk.BooleanVar(value=False)
-        self.hits_check = ttk.Checkbutton(
-            selection_tools, text="更新命中数（含本地清空结果）", variable=self.update_hits
-        )
+        self.hits_check = ttk.Checkbutton(selection_tools, text="更新新增命中数", variable=self.update_hits)
         self.hits_check.pack(side="left", padx=8)
         self.clear_button = ttk.Button(
             selection_tools, text="删除样本", bootstyle="danger-outline", command=self._clear_samples, state="disabled"
@@ -820,25 +818,19 @@ class CardReviewTab(ttk.Frame):
             return
         view, root = self.library_view, self.root
         card = view._card
-        if operation == "clear":
-            self.update_hits.set(False)
-            view.update_hits.set(False)
-            view._allow_reorder = True
-            self._start_action(lambda: reference_hits.clear_local(root))
-        elif operation == "preferred" and card and view.references.selection():
-            view._allow_reorder = True
-            identifier = view.references.selection()[0]
-            self._start_action(lambda: set_preferred_reference(root, card, identifier))
-        elif operation == "upload" and card:
-            update_hits = view.update_hits.get()
+        if operation == "clear" and card:
+            identifiers = tuple(view.references.selection())
+            if identifiers:
+                self._start_action(lambda: reference_hits.clear_local(root, identifiers))
+        elif operation == "upload":
             results = self._results
             self._upload_action = True
             self._start_action(
                 lambda: upload_references(
                     root,
                     [],
-                    cards={card},
-                    update_hits=update_hits,
+                    metadata_only=True,
+                    update_hits=True,
                     progress=lambda message: results.put(("progress", None, message, None)),
                 )
             )
@@ -905,13 +897,9 @@ class CardReviewTab(ttk.Frame):
                     included_cards = len(
                         {sample.card_id for sample in samples if sample.status == "included" and not sample.uploaded}
                     )
-                    self.summary_var.set(
-                        "  |  ".join(
-                            f"{label} {included_cards} 种卡牌"
-                            if result == "included"
-                            else f"{label} {counts[result]} 张"
-                            for label, result in REVIEW_TABS.items()
-                        )
+                    self._review_summary = "  |  ".join(
+                        f"{label} {included_cards} 种卡牌" if result == "included" else f"{label} {counts[result]} 张"
+                        for label, result in REVIEW_TABS.items()
                     )
                     for label, page in self.stage_pages.items():
                         count = included_cards if label == "待上传" else counts[REVIEW_TABS[label]]
@@ -968,7 +956,6 @@ class CardReviewTab(ttk.Frame):
                 if self._upload_action:
                     if error is None:
                         self.update_hits.set(False)
-                        self.library_view.update_hits.set(False)
                     self._upload_action = False
                 if self.clear_busy_callback:
                     self.clear_busy_callback(False)
@@ -1010,6 +997,7 @@ class CardReviewTab(ttk.Frame):
         if self.filter_var.get() == "样本库":
             self.body_panes.grid_remove()
             self.review_tools.grid_remove()
+            self.summary_var.set(self.library_view.summary)
             self.catalog_button.configure(text="返回样本管理")
             self.filters_panel.pack_forget()
             self.selection_tools.pack_forget()
@@ -1018,6 +1006,7 @@ class CardReviewTab(ttk.Frame):
             return
         self.library_view.grid_remove()
         self.review_tools.grid()
+        self.summary_var.set(getattr(self, "_review_summary", "正在读取卡牌样本……"))
         self.catalog_button.configure(text="样本库")
         self.filters_panel.pack(fill="x")
         self.selection_tools.pack(fill="x", pady=(4, 0))

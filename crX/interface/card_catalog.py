@@ -27,6 +27,8 @@ class CardCatalogView(ttk.Frame):
         self.rowconfigure(1, weight=1)
         search = ttk.Frame(self)
         search.grid(row=0, column=0, sticky="ew", pady=(0, 6))
+        self.upload_button = ttk.Button(search, text="上传顺序与命中次数", command=lambda: action("upload"))
+        self.upload_button.pack(side="left", padx=(0, 12))
         ttk.Label(search, text="搜索卡名 / 英文 ID").pack(side="left")
         self.query = tk.StringVar()
         ttk.Entry(search, textvariable=self.query, width=24).pack(side="left", padx=6)
@@ -63,19 +65,10 @@ class CardCatalogView(ttk.Frame):
         ttk.Label(right, textvariable=self.title).grid(row=0, column=0, sticky="ew", padx=6, pady=4)
         tools = ttk.Frame(right)
         tools.grid(row=1, column=0, sticky="ew", padx=6, pady=(0, 4))
-        self.preferred_button = ttk.Button(tools, text="设为首选 / 交换", command=lambda: action("preferred"))
-        self.preferred_button.grid(row=0, column=0, sticky="w")
-        self.upload_button = ttk.Button(tools, text="上传该卡牌", command=lambda: action("upload"))
-        self.upload_button.grid(row=0, column=1, sticky="w", padx=6)
-        self.update_hits = tk.BooleanVar(value=False)
-        self.hits_check = ttk.Checkbutton(
-            tools, text="更新命中数", variable=self.update_hits, command=self._update_message
-        )
-        self.hits_check.grid(row=1, column=0, sticky="w", pady=(4, 0))
         self.clear_button = ttk.Button(
-            tools, text="清空全部本地命中数", bootstyle="secondary-outline", command=lambda: action("clear")
+            tools, text="清空所选样本本机命中次数", bootstyle="secondary-outline", command=lambda: action("clear")
         )
-        self.clear_button.grid(row=1, column=1, sticky="w", padx=6, pady=(4, 0))
+        self.clear_button.pack(side="left")
         gallery = ttk.Frame(right)
         gallery.columnconfigure(0, weight=1)
         gallery.rowconfigure(0, weight=1)
@@ -84,7 +77,7 @@ class CardCatalogView(ttk.Frame):
             columns=("name", "identifier", "hits"),
             show="headings",
             height=4,
-            selectmode="browse",
+            selectmode="extended",
             style="CardReferences.Treeview",
         )
         self.references.heading("name", text="参考")
@@ -94,6 +87,7 @@ class CardCatalogView(ttk.Frame):
         self.references.heading("hits", text="命中数")
         self.references.column("hits", width=80, minwidth=60, stretch=False, anchor="e")
         self.references.grid(row=0, column=0, sticky="nsew")
+        self.references.bind("<<TreeviewSelect>>", lambda _event: self.set_disabled(self._disabled))
         self.references.bind("<ButtonPress-1>", self._begin_drag, add="+")
         self.references.bind("<B1-Motion>", self._drag_reference, add="+")
         self.references.bind("<ButtonRelease-1>", self._end_drag, add="+")
@@ -106,7 +100,9 @@ class CardCatalogView(ttk.Frame):
         reference_horizontal.grid(row=1, column=0, sticky="ew")
         self.references.configure(xscrollcommand=reference_horizontal.set)
         gallery.grid(row=2, column=0, sticky="nsew", padx=(6, 0))
-        self.message = tk.StringVar(value="样本数按颜色指纹去重统计；上传成功后自动清理来源图片。")
+        self.message = tk.StringVar(
+            value="↕ 顺序变化 · ● 命中变化。拖动第一行可调整首选；清空只影响本机贡献，线上数据保留。"
+        )
         ttk.Label(self, textvariable=self.message, wraplength=680).grid(row=2, column=0, sticky="ew", pady=(6, 0))
         if status is not None:
             ttk.Label(self, textvariable=status, wraplength=680).grid(row=3, column=0, sticky="ew", pady=(4, 0))
@@ -131,7 +127,8 @@ class CardCatalogView(ttk.Frame):
                         ref.uploaded,
                         ref.name,
                         ref.hits,
-                        ref.cleared,
+                        ref.order_changed,
+                        ref.hits_changed,
                         tuple(sample.key for sample in ref.sources),
                     )
                     for ref in refs
@@ -145,11 +142,11 @@ class CardCatalogView(ttk.Frame):
             return
         self._signature = signature
         if same_order:
-            refs = self.data.get(self._card, [])
-            self._references = {ref.identifier: ref for ref in refs}
-            for ref in refs:
-                if self.references.exists(ref.identifier):
-                    self.references.item(ref.identifier, values=(ref.name, ref.identifier, ref.hits))
+            for card in self.cards.get_children():
+                self.cards.item(card, values=(self._card_name(card), len(self.data[card])))
+            self._references = {ref.identifier: ref for ref in self.data.get(self._card, [])}
+            for ref in self._references.values():
+                self.references.item(ref.identifier, values=(ref.display_name, ref.identifier, ref.hits))
             self.set_disabled(self._disabled)
             return
         self.render_cards()
@@ -165,6 +162,14 @@ class CardCatalogView(ttk.Frame):
     def _sort_names(self):
         self._sort_count = None
         self.render_cards()
+
+    def _card_name(self, card):
+        refs = self.data[card]
+        return (
+            CARD_NAMES_ZH.get(card, card)
+            + (" ↕" if any(ref.order_changed for ref in refs) else "")
+            + (" ●" if any(ref.hits_changed for ref in refs) else "")
+        )
 
     def render_cards(self):
         query = "".join(self.query.get().casefold().split())
@@ -184,7 +189,14 @@ class CardCatalogView(ttk.Frame):
         self.cards.delete(*self.cards.get_children())
         for card in cards:
             self.cards.insert(
-                "", "end", iid=card, text="", values=(CARD_NAMES_ZH.get(card, card), len(self.data[card]))
+                "",
+                "end",
+                iid=card,
+                text="",
+                values=(
+                    self._card_name(card),
+                    len(self.data[card]),
+                ),
             )
         if cards:
             selected = self._card if self._card in cards else cards[0]
@@ -215,40 +227,36 @@ class CardCatalogView(ttk.Frame):
         self.title.set(f"{CARD_NAMES_ZH.get(card, card)} · {len(refs)} 份正式参考")
         for ref in refs:
             self._references[ref.identifier] = ref
-            self.references.insert("", "end", iid=ref.identifier, values=(ref.name, ref.identifier, ref.hits))
+            self.references.insert("", "end", iid=ref.identifier, values=(ref.display_name, ref.identifier, ref.hits))
         if refs:
             selected = tuple(key for key in previous if key in self._references) or (refs[0].identifier,)
             self.references.selection_set(selected)
         self.set_disabled(self._disabled)
 
+    @property
+    def summary(self):
+        refs = [ref for references in self.data.values() for ref in references]
+        return f"顺序变化：{sum(ref.order_changed for ref in refs)} 个样本 · 命中变化：{sum(ref.hits_changed for ref in refs)} 个样本"
+
     def _update_message(self):
-        cleared = any(ref.cleared for refs in self.data.values() for ref in refs)
-        self.message.set(
-            "本次上传将同步清空结果及清空后新增的命中数。"
-            if cleared and self.update_hits.get()
-            else "命中数仅在本地清空；未勾选更新命中数，上传不包含统计。"
-            if cleared
-            else "本次上传包含命中统计；清空本地命中数作用于全部卡牌。"
-            if self.update_hits.get()
-            else "拖动普通参考可保存顺序；首选固定在第一行。命中数代表使用频率，上传默认不包含统计。"
-        )
+        self.message.set("↕ 顺序变化 · ● 命中变化。拖动第一行可调整首选；清空只影响本机贡献，线上数据保留。")
 
     def set_disabled(self, disabled):
         self._disabled = disabled
         if disabled:
             self._cancel_drag()
-        for button in (self.preferred_button, self.upload_button):
-            button.configure(state="disabled" if disabled or not self._references else "normal")
-        self.clear_button.configure(state="disabled" if disabled else "normal")
-        self.hits_check.configure(state="disabled" if disabled else "normal")
+        self.upload_button.configure(state="disabled" if disabled else "normal")
+        self.clear_button.configure(state="disabled" if disabled or not self.references.selection() else "normal")
 
     def _begin_drag(self, event):
         self._cancel_drag()
+        if event.state & 0x0005:
+            return
         if self._disabled or self.references.identify_region(event.x, event.y) not in ("cell", "tree"):
             return
         identifier = self.references.identify_row(event.y)
         ref = self._references.get(identifier)
-        if ref is not None and not ref.preferred:
+        if ref is not None:
             self._drag = (self._card, identifier, self.references.get_children(), event.y, False)
 
     def _drag_reference(self, event):
@@ -270,8 +278,7 @@ class CardCatalogView(ttk.Frame):
         if not target:
             target = rows[-1] if event.y >= self.references.winfo_height() - 20 else rows[0] if event.y < 24 else ""
         if target:
-            first = int(bool(rows) and self._references[rows[0]].preferred)
-            self.references.move(identifier, "", max(first, self.references.index(target)))
+            self.references.move(identifier, "", self.references.index(target))
             self.references.selection_set(identifier)
             self.references.focus(identifier)
             self.references.configure(cursor="sb_v_double_arrow")

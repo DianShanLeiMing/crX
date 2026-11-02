@@ -176,7 +176,8 @@ def test_upload_settings_and_hits_only_when_explicitly_selected(upload_store):
     assert json.loads(git(remote, "show", f"main:{upload.HITS_FILE}")) == counts
     upload.upload_references(root, [], cards={"knight"}, update_hits=True)
     reset = json.loads(git(remote, "show", f"main:{upload.HITS_FILE}"))
-    assert reset["epoch"] != counts["epoch"] and not any(reset["nodes"].values())
+    assert reset == counts
+    assert hits.totals(root)[0][refs[0].identifier] == 0
 
 
 def test_manual_reference_order_is_published_with_the_selected_card(upload_store):
@@ -296,3 +297,58 @@ def test_git_commit_hook_is_respected_and_index_is_preserved(upload_store):
     assert git(repo, "rev-parse", "HEAD") == git(remote, "rev-parse", "main") == before
     assert git(repo, "diff", "--cached", "--name-only") == ""
     assert not (repo / ".git" / "index.lock").exists()
+
+
+def test_catalog_metadata_upload_marks_changes_and_keeps_new_samples_local(upload_store):
+    repo, remote, root, add, _checks = upload_store
+    first, second = add("first"), add("second", 4)
+    upload.upload_references(root, [first, second])
+    refs = build_catalog(workflow.scan_review(root)[0], root=root)["knight"]
+    original = tuple(ref.identifier for ref in refs)
+    # Establish first choice, then compare position changes against upstream.
+    reorder_references(root, "knight", original, original)
+    upload.upload_references(root, [], metadata_only=True, update_hits=True)
+    refs = build_catalog(workflow.scan_review(root)[0], root=root)["knight"]
+    assert not any(ref.order_changed or ref.hits_changed for ref in refs)
+    reorder_references(root, "knight", original[::-1], original)
+    hits.record_hits(root, {original[0]: 5})
+    changed = build_catalog(workflow.scan_review(root)[0], root=root)["knight"]
+    assert sum(ref.order_changed for ref in changed) == 2
+    assert sum(ref.hits_changed for ref in changed) == 1
+    assert changed[0].preferred and "↕" in changed[0].markers
+    new = add("not-published", 8)
+    library = git(remote, "show", f"main:{upload.LIBRARY_FILE}")
+    upload.upload_references(root, [], metadata_only=True, update_hits=True)
+    assert git(remote, "show", f"main:{upload.LIBRARY_FILE}") == library
+    assert new.file("card").exists()
+    assert not next(sample for sample in workflow.scan_review(root)[0] if sample.key == new.key).uploaded
+    refs = build_catalog(workflow.scan_review(root)[0], root=root)["knight"]
+    assert not any(ref.order_changed or ref.hits_changed for ref in refs)
+    before = git(repo, "rev-parse", "HEAD")
+    upload.upload_references(root, [], metadata_only=True, update_hits=True)
+    assert git(repo, "rev-parse", "HEAD") == before
+
+
+def test_failed_metadata_push_preserves_change_markers(upload_store, monkeypatch):
+    _repo, _remote, root, add, _checks = upload_store
+    first, second = add("first"), add("second", 4)
+    upload.upload_references(root, [first, second])
+    refs = build_catalog(workflow.scan_review(root)[0], root=root)["knight"]
+    order = tuple(ref.identifier for ref in refs)
+    reorder_references(root, "knight", order[::-1], order)
+    hits.record_hits(root, {order[0]: 3})
+    run = upload._git
+
+    def fail_push(repo, *args, **kwargs):
+        if args[0] == "push":
+            raise ValueError("offline")
+        return run(repo, *args, **kwargs)
+
+    monkeypatch.setattr(upload, "_git", fail_push)
+    with pytest.raises(ValueError, match="本地提交已保留"):
+        upload.upload_references(root, [], metadata_only=True, update_hits=True)
+    changed = build_catalog(workflow.scan_review(root)[0], root=root)["knight"]
+    assert any(ref.order_changed for ref in changed) and any(ref.hits_changed for ref in changed)
+    monkeypatch.setattr(upload, "_git", run)
+    upload.upload_references(root, [], metadata_only=True, update_hits=True)
+    assert not any(ref.order_changed or ref.hits_changed for ref in build_catalog([], root=root)["knight"])

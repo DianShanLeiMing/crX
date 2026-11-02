@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from crX.bot import card_detection as detection
@@ -25,6 +25,16 @@ class CatalogReference:
     number: int = 0
     hits: int = 0
     cleared: bool = False
+    order_changed: bool = False
+    hits_changed: bool = False
+
+    @property
+    def markers(self):
+        return (" ↕" if self.order_changed else "") + (" ●" if self.hits_changed else "")
+
+    @property
+    def display_name(self):
+        return self.name + self.markers
 
     @property
     def name(self):
@@ -60,18 +70,33 @@ def build_catalog(samples, *, root=None):
         for reference in references.values():
             reference.uploaded |= reference.identifier in published or not formal.source_checkout()
     cards = {card: list(references.values()) for card, references in cards.items()}
-    hits, cleared = reference_hits.totals(root) if root is not None else ({}, False)
+    hits, changed_hits = reference_hits.snapshot(root) if root is not None else ({}, set())
     for references in cards.values():
         for reference in references:
             reference.hits = hits.get(reference.identifier, 0)
     preferences = reference_preferences.register_references(cards)["cards"]
+    from crX.utils.card_upload import published_preferences
+
+    baseline = published_preferences()
     for card, references in cards.items():
+        original = [replace(ref, hits=0) for ref in references]
+        old = reference_preferences.card_preferences(original, (baseline or {}).get(card))
+        for ref in original:
+            ref.preferred = ref.identifier == old["preferred"]
+            ref.number = old["numbers"][ref.identifier]
+        reference_preferences.sort_references(original, old)
+        positions = {ref.identifier: index for index, ref in enumerate(original)}
         value = preferences.get(card, {})
         for reference in references:
             reference.preferred = value.get("preferred") == reference.identifier
             reference.number = value.get("numbers", {}).get(reference.identifier, 0)
-            reference.cleared = cleared
+            reference.hits_changed = reference.identifier in changed_hits
         reference_preferences.sort_references(references, value)
+        for index, reference in enumerate(references):
+            reference.order_changed = baseline is not None and (
+                positions[reference.identifier] != index
+                or reference.preferred != (old["preferred"] == reference.identifier)
+            )
     return cards
 
 

@@ -202,9 +202,14 @@ def set_reference_order(card, ordered, expected, references):
         sort_references(references, value)
         if tuple(ref.identifier for ref in references) != tuple(expected):
             raise ValueError("参考顺序已经变化，请刷新后重新排序")
-        if value["preferred"] in active and ordered[0] != value["preferred"]:
-            raise ValueError("首选固定在第一行，请使用交换首选调整")
+        previous, first = value["preferred"], ordered[0]
+        if previous != first:
+            number = value["numbers"][first]
+            if previous:
+                value["numbers"][previous] = number
+            value["numbers"][first] = 0
+            value["preferred"] = first
         value["order"] = list(ordered)
         document["cards"][card] = value
         atomic_json(path, document)
-    return "已保存参考顺序；编号与命中数保留，上传该卡牌后其他电脑生效"
+    return "已保存参考顺序；第一行是首选，点击上传顺序与命中次数后其他电脑生效"
