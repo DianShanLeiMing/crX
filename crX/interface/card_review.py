@@ -832,9 +832,10 @@ class CardReviewTab(ttk.Frame):
 
     def _reorder_catalog(self, card, ordered, expected):
         if self._running or self._action_busy:
+            self.library_view.finish_reorder(False)
             return
         root = self.root
-        self._start_action(lambda: reorder_references(root, card, ordered, expected))
+        self._start_action(lambda: reorder_references(root, card, ordered, expected), kind="reorder")
 
     def _upload(self):
         if self._running or self._action_busy:
@@ -942,7 +943,9 @@ class CardReviewTab(ttk.Frame):
                 self._queue_thumbnails()
             elif kind == "progress":
                 self.message_var.set(result)
-            elif kind == "save":
+            elif kind in ("save", "reorder"):
+                if kind == "reorder":
+                    self.library_view.finish_reorder(error is None)
                 if error:
                     self._history_pending = True
                 self._action_busy = self.formalizing = self.clearing = False
@@ -1479,7 +1482,7 @@ class CardReviewTab(ttk.Frame):
         visible = set(self.tree.get_children())
         return [self.samples[key] for key in self.tree.selection() if key in visible and key in self.samples]
 
-    def _start_action(self, operation, *, clearing=False):
+    def _start_action(self, operation, *, clearing=False, kind="save"):
         if self._running or self._action_busy:
             return
         self._revision += 1
@@ -1490,7 +1493,7 @@ class CardReviewTab(ttk.Frame):
         if self.clear_busy_callback:
             self.clear_busy_callback(True)
         self.message_var.set("正在处理选中样本……")
-        self._background("save", operation)
+        self._background(kind, operation)
 
     def _chosen_card(self):
         entered = self.card_var.get().strip()

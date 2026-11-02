@@ -3,10 +3,21 @@
 from __future__ import annotations
 
 import tkinter as tk
+from dataclasses import dataclass, replace
+from tkinter.font import Font
 
 import ttkbootstrap as ttk
 
 from crX.bot.card_data import CARD_NAMES_ZH
+
+
+@dataclass
+class ReferenceDrag:
+    card: str
+    identifier: str
+    original: tuple[str, ...]
+    start_y: int
+    moved: bool = False
 
 
 class CardCatalogView(ttk.Frame):
@@ -17,7 +28,9 @@ class CardCatalogView(ttk.Frame):
         self._reorder = reorder
         self._drag = None
         self._disabled = False
-        self._allow_reorder = True
+        self._pending_order = None
+        self._scroll_after = None
+        self._drag_y = 0
         self._refresh = refresh
         self._signature = None
         self._references = {}
@@ -25,6 +38,8 @@ class CardCatalogView(ttk.Frame):
         self._card = None
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
+        # Keep the viewport steady when drag feedback wraps to a different number of lines.
+        self.rowconfigure(2, minsize=Font(root=self, font="TkDefaultFont").metrics("linespace") * 3)
         search = ttk.Frame(self)
         search.grid(row=0, column=0, sticky="ew", pady=(0, 6))
         self.upload_button = ttk.Button(search, text="上传顺序与命中次数", command=lambda: action("upload"))
@@ -74,12 +89,14 @@ class CardCatalogView(ttk.Frame):
         gallery.rowconfigure(0, weight=1)
         self.references = ttk.Treeview(
             gallery,
-            columns=("name", "identifier", "hits"),
+            columns=("sort", "name", "identifier", "hits"),
             show="headings",
             height=4,
             selectmode="extended",
             style="CardReferences.Treeview",
         )
+        self.references.heading("sort", text="排序")
+        self.references.column("sort", width=58, minwidth=58, stretch=False, anchor="center")
         self.references.heading("name", text="参考")
         self.references.column("name", width=120, minwidth=60)
         self.references.heading("identifier", text="参考编号")
@@ -88,6 +105,10 @@ class CardCatalogView(ttk.Frame):
         self.references.column("hits", width=80, minwidth=60, stretch=False, anchor="e")
         self.references.grid(row=0, column=0, sticky="nsew")
         self.references.bind("<<TreeviewSelect>>", lambda _event: self.set_disabled(self._disabled))
+        self.references.bind("<Motion>", self._hover_handle, add="+")
+        self.references.bind("<Leave>", self._leave_handle, add="+")
+        self.references.bind("<Unmap>", self._cancel_drag, add="+")
+        self.references.bind("<Destroy>", self._stop_scroll, add="+")
         self.references.bind("<ButtonPress-1>", self._begin_drag, add="+")
         self.references.bind("<B1-Motion>", self._drag_reference, add="+")
         self.references.bind("<ButtonRelease-1>", self._end_drag, add="+")
@@ -101,20 +122,15 @@ class CardCatalogView(ttk.Frame):
         self.references.configure(xscrollcommand=reference_horizontal.set)
         gallery.grid(row=2, column=0, sticky="nsew", padx=(6, 0))
         self.message = tk.StringVar(
-            value="↕ 顺序变化 · ● 命中变化。拖动第一行可调整首选；清空只影响本机贡献，线上数据保留。"
+            value="按住排序列的 ≡ 上下拖动，第一行是首选；↕ 顺序变化，● 命中变化。清空只影响本机贡献，线上数据保留。"
         )
         ttk.Label(self, textvariable=self.message, wraplength=680).grid(row=2, column=0, sticky="ew", pady=(6, 0))
         if status is not None:
             ttk.Label(self, textvariable=status, wraplength=680).grid(row=3, column=0, sticky="ew", pady=(4, 0))
 
     def set_data(self, data):
-        if self._drag is not None:
+        if self._drag is not None or self._pending_order is not None:
             return
-        if not self._allow_reorder:
-            for card, refs in data.items():
-                old_order = {ref.identifier: index for index, ref in enumerate(self.data.get(card, []))}
-                refs.sort(key=lambda ref: (not ref.preferred, old_order.get(ref.identifier, len(old_order))))
-        self._allow_reorder = False
         same_order = tuple((card, tuple(ref.identifier for ref in refs)) for card, refs in data.items()) == tuple(
             (card, tuple(ref.identifier for ref in refs)) for card, refs in self.data.items()
         )
@@ -145,14 +161,12 @@ class CardCatalogView(ttk.Frame):
             for card in self.cards.get_children():
                 self.cards.item(card, values=(self._card_name(card), len(self.data[card])))
             self._references = {ref.identifier: ref for ref in self.data.get(self._card, [])}
-            for ref in self._references.values():
-                self.references.item(ref.identifier, values=(ref.display_name, ref.identifier, ref.hits))
+            self._refresh_reference_rows()
             self.set_disabled(self._disabled)
             return
         self.render_cards()
 
     def refresh_order(self):
-        self._allow_reorder = True
         self._refresh()
 
     def _sort_counts(self):
@@ -172,6 +186,7 @@ class CardCatalogView(ttk.Frame):
         )
 
     def render_cards(self):
+        self._cancel_drag()
         query = "".join(self.query.get().casefold().split())
         cards = [
             card
@@ -218,6 +233,8 @@ class CardCatalogView(ttk.Frame):
         if not selection:
             return
         card = selection[0]
+        if self._drag is not None and card == self._card:
+            return
         if card != self._card:
             self._cancel_drag()
         previous = self.references.selection() if card == self._card else ()
@@ -225,9 +242,11 @@ class CardCatalogView(ttk.Frame):
         refs = self.data.get(card, [])
         self._clear_references("暂无正式参考" if not refs else "请选择参考")
         self.title.set(f"{CARD_NAMES_ZH.get(card, card)} · {len(refs)} 份正式参考")
-        for ref in refs:
+        for index, ref in enumerate(refs, 1):
             self._references[ref.identifier] = ref
-            self.references.insert("", "end", iid=ref.identifier, values=(ref.display_name, ref.identifier, ref.hits))
+            self.references.insert(
+                "", "end", iid=ref.identifier, values=(f"≡ {index}", ref.display_name, ref.identifier, ref.hits)
+            )
         if refs:
             selected = tuple(key for key in previous if key in self._references) or (refs[0].identifier,)
             self.references.selection_set(selected)
@@ -239,7 +258,9 @@ class CardCatalogView(ttk.Frame):
         return f"顺序变化：{sum(ref.order_changed for ref in refs)} 个样本 · 命中变化：{sum(ref.hits_changed for ref in refs)} 个样本"
 
     def _update_message(self):
-        self.message.set("↕ 顺序变化 · ● 命中变化。拖动第一行可调整首选；清空只影响本机贡献，线上数据保留。")
+        self.message.set(
+            "按住排序列的 ≡ 上下拖动，第一行是首选；↕ 顺序变化，● 命中变化。清空只影响本机贡献，线上数据保留。"
+        )
 
     def set_disabled(self, disabled):
         self._disabled = disabled
@@ -248,59 +269,156 @@ class CardCatalogView(ttk.Frame):
         self.upload_button.configure(state="disabled" if disabled else "normal")
         self.clear_button.configure(state="disabled" if disabled or not self.references.selection() else "normal")
 
+    def _refresh_reference_rows(self, start=0, stop=None):
+        for index, key in enumerate(self.references.get_children()[start:stop], start + 1):
+            ref = self._references[key]
+            self.references.item(key, values=(f"≡ {index}", ref.display_name, key, ref.hits))
+
+    def _is_handle(self, event):
+        return (
+            self.references.identify_region(event.x, event.y) == "cell"
+            and self.references.identify_column(event.x) == "#1"
+            and bool(self.references.identify_row(event.y))
+        )
+
+    def _hover_handle(self, event):
+        if self._drag is None:
+            self.references.configure(cursor="hand2" if not self._disabled and self._is_handle(event) else "")
+
+    def _leave_handle(self, _event=None):
+        if self._drag is None:
+            self.references.configure(cursor="")
+
     def _begin_drag(self, event):
         self._cancel_drag()
-        if event.state & 0x0005:
-            return
-        if self._disabled or self.references.identify_region(event.x, event.y) not in ("cell", "tree"):
+        if self._disabled or self._pending_order is not None or event.state & 0x0005 or not self._is_handle(event):
             return
         identifier = self.references.identify_row(event.y)
-        ref = self._references.get(identifier)
-        if ref is not None:
-            self._drag = (self._card, identifier, self.references.get_children(), event.y, False)
-
-    def _drag_reference(self, event):
-        if self._drag is None or self._disabled:
+        if self._card is None:
             return
-        card, identifier, original, start_y, moved = self._drag
-        if card != self._card:
-            self._cancel_drag()
-            return
-        if not moved and abs(event.y - start_y) < 4:
-            return
-        self._drag = (card, identifier, original, start_y, True)
-        if event.y < 24:
-            self.references.yview_scroll(-1, "units")
-        elif event.y > self.references.winfo_height() - 20:
-            self.references.yview_scroll(1, "units")
-        target = self.references.identify_row(event.y)
-        rows = self.references.get_children()
-        if not target:
-            target = rows[-1] if event.y >= self.references.winfo_height() - 20 else rows[0] if event.y < 24 else ""
-        if target:
-            self.references.move(identifier, "", self.references.index(target))
-            self.references.selection_set(identifier)
-            self.references.focus(identifier)
-            self.references.configure(cursor="sb_v_double_arrow")
+        self._drag = ReferenceDrag(self._card, identifier, self.references.get_children(), event.y)
+        self._drag_y = event.y
+        self.references.selection_set(identifier)
+        self.references.focus(identifier)
+        self.references.focus_set()
+        self.references.configure(cursor="fleur")
+        self.message.set("上下拖动调整位置，松手保存；按 Esc 取消。第一行自动成为首选。")
+        # Prevent Treeview's class bindings from extending selection while dragging.
         return "break"
 
-    def _end_drag(self, _event=None):
-        if self._drag is None:
+    def _drag_reference(self, event):
+        drag = self._drag
+        if drag is None or self._disabled:
             return
-        card, _identifier, original, _start_y, moved = self._drag
-        ordered = self.references.get_children()
-        self._cancel_drag()
-        if moved and ordered != original and not self._disabled and card == self._card:
-            self._allow_reorder = True
-            self._reorder(card, ordered, original)
-        return "break" if moved else None
+        if drag.card != self._card:
+            self._cancel_drag()
+            return
+        self._drag_y = event.y
+        if not drag.moved and abs(event.y - drag.start_y) < 3:
+            return "break"
+        drag.moved = True
+        self._move_dragged_row()
+        if self._scroll_after is None:
+            self._scroll_after = self.after(80, self._scroll_drag)
+        return "break"
 
-    def _cancel_drag(self, _event=None):
-        if self._drag is not None:
-            card, _identifier, original, _start_y, _moved = self._drag
-            if card == self._card:
-                for index, key in enumerate(original):
-                    if self.references.exists(key):
-                        self.references.move(key, "", index)
+    def _move_dragged_row(self):
+        drag = self._drag
+        if drag is None:
+            return
+        target = self.references.identify_row(self._drag_y)
+        rows = self.references.get_children()
+        if not target:
+            visible = [key for key in rows if self.references.bbox(key)]
+            if visible and self._drag_y < 28:
+                target = visible[0]
+            elif visible and self._drag_y > self.references.winfo_height() - 20:
+                target = visible[-1]
+        if target and target != drag.identifier:
+            box = self.references.bbox(target)
+            source_index, target_index = self.references.index(drag.identifier), self.references.index(target)
+            if not box or (
+                self._drag_y >= box[1] + box[3] / 2
+                if target_index > source_index
+                else self._drag_y <= box[1] + box[3] / 2
+            ):
+                self.references.move(drag.identifier, "", target_index)
+                self._refresh_reference_rows(min(source_index, target_index), max(source_index, target_index) + 1)
+        position = self.references.index(drag.identifier) + 1
+        self.message.set(f"正在拖动：第 {position} / {len(rows)} 位 · 松手保存，Esc 取消 · 第一行是首选")
+
+    def _scroll_drag(self):
+        self._scroll_after = None
+        if self._drag is None or self._disabled:
+            return
+        # Continue scrolling at the edge even when the pointer stops moving.
+        direction = -1 if self._drag_y < 28 else 1 if self._drag_y > self.references.winfo_height() - 20 else 0
+        if direction:
+            self.references.yview_scroll(direction, "units")
+            self._move_dragged_row()
+            self._scroll_after = self.after(80, self._scroll_drag)
+
+    def _end_drag(self, _event=None):
+        drag = self._drag
+        if drag is None:
+            return
+        ordered = self.references.get_children()
+        self._clear_drag()
+        if drag.moved and ordered != drag.original and not self._disabled and drag.card == self._card:
+            before = self.data[drag.card]
+            self._pending_order = (drag.card, before)
+            refs = {ref.identifier: replace(ref) for ref in before}
+            first = refs[ordered[0]]
+            previous = next((ref for ref in refs.values() if ref.preferred), None)
+            if previous is not None and previous.identifier != first.identifier:
+                previous.number = first.number
+            for index, key in enumerate(ordered):
+                ref = refs[key]
+                ref.preferred = index == 0
+                if ref.preferred:
+                    ref.number = 0
+                ref.order_changed |= drag.original[index] != key
+            self.data[drag.card] = [refs[key] for key in ordered]
+            self._references = refs
+            self._refresh_reference_rows()
+            self.message.set("正在保存顺序……第一行是首选。")
+            self._reorder(drag.card, ordered, drag.original)
+        else:
+            self._update_message()
+        return "break"
+
+    def finish_reorder(self, success):
+        if self._pending_order is None:
+            return
+        card, before = self._pending_order
+        self._pending_order = None
+        self._signature = None
+        if not success:
+            self.data[card] = before
+            if self._card == card:
+                self._references = {ref.identifier: ref for ref in before}
+                for index, ref in enumerate(before):
+                    self.references.move(ref.identifier, "", index)
+                self._refresh_reference_rows()
+        self.message.set("顺序已保存；第一行是首选。" if success else "顺序保存失败，已恢复原顺序；请刷新后重试。")
+
+    def _stop_scroll(self, _event=None):
+        if self._scroll_after is not None:
+            self.after_cancel(self._scroll_after)
+            self._scroll_after = None
+
+    def _clear_drag(self):
+        self._stop_scroll()
         self._drag = None
         self.references.configure(cursor="")
+
+    def _cancel_drag(self, _event=None):
+        drag = self._drag
+        self._clear_drag()
+        if drag is not None:
+            if drag.card == self._card:
+                for index, key in enumerate(drag.original):
+                    if self.references.exists(key):
+                        self.references.move(key, "", index)
+                self._refresh_reference_rows()
+            self._update_message()

@@ -159,3 +159,24 @@ def test_legacy_automatic_order_is_preserved_before_appending_new_reference(tmp_
         first,
         latest,
     ]
+
+
+def test_reorder_does_not_scan_sources_read_stats_or_query_git(tmp_path, review_store, monkeypatch):
+    from crX.utils import card_upload
+
+    add, _destination = review_store
+    sources = [add("first"), add("second", channel=4)]
+    workflow.confirm_samples(tmp_path, sources, "knight")
+    refs = catalog.build_catalog(list(records(tmp_path).values()), root=tmp_path)["knight"]
+    original = tuple(ref.identifier for ref in refs)
+
+    def unexpected(*_args, **_kwargs):
+        pytest.fail("Sorting must not scan source images, statistics or Git")
+
+    monkeypatch.setattr(workflow, "_scan", unexpected)
+    monkeypatch.setattr(hits, "snapshot", unexpected)
+    monkeypatch.setattr(card_upload, "_git", unexpected)
+    catalog.reorder_references(tmp_path, "knight", original[::-1], original)
+    saved = preferences.read_document(preferences.preferences_path())["cards"]["knight"]
+    assert saved["order"] == list(original[::-1])
+    assert saved["preferred"] == original[-1]

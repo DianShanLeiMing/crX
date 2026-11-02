@@ -49,7 +49,7 @@ class CatalogReference:
         return "待上传" if any(sample.status == "included" for sample in self.sources) else "正式参考"
 
 
-def build_catalog(samples, *, root=None):
+def _catalog_references():
     cards = {card: {} for card in CARD_NAMES_ZH}
     for name, value in zip(detection._REFERENCE_NAMES, detection._REFERENCE_MATRIX, strict=True):
         card = detection.CARD_DETECTION_ALIASES.get(name, name)
@@ -57,6 +57,11 @@ def build_catalog(samples, *, root=None):
         cards.setdefault(card, {})[identifier] = CatalogReference(identifier, card, builtin=True, uploaded=True)
     for entry in formal._read_entries(formal.formal_path()):
         cards.setdefault(entry["card_id"], {}).setdefault(entry["id"], CatalogReference(entry["id"], entry["card_id"]))
+    return {card: list(refs.values()) for card, refs in cards.items()}
+
+
+def build_catalog(samples, *, root=None):
+    cards = {card: {ref.identifier: ref for ref in refs} for card, refs in _catalog_references().items()}
     for sample in samples:
         reference = cards.get(sample.card_id, {}).get(sample.review.get("formal_id"))
         if reference is not None and sample.status in ("included", "covered"):
@@ -109,8 +114,10 @@ def set_preferred_reference(root, card, identifier):
 
 
 def reorder_references(root, card, ordered, expected):
-    from crX.utils.card_workflow import _locked, _scan
+    from crX.utils.card_workflow import _locked
 
     with _locked(root):
-        data = build_catalog(_scan(root), root=root)
-        return reference_preferences.set_reference_order(card, ordered, expected, data.get(card, []))
+        # Sorting needs only active fingerprints and the saved preferences.
+        # Avoid source scans, shared statistics and Git on every drop.
+        references = _catalog_references().get(card, [])
+        return reference_preferences.set_reference_order(card, ordered, expected, references)

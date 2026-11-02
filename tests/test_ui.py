@@ -1296,7 +1296,7 @@ def test_catalog_search_and_upload_archive_clean_images(review_ui, monkeypatch):
         assert view.references.set(key, "name") == f"参考{index}"
         assert view.references.set(key, "identifier") == key
         assert view.references.set(key, "hits") == "0"
-    assert tuple(view.references.cget("columns")) == ("name", "identifier", "hits")
+    assert tuple(view.references.cget("columns")) == ("sort", "name", "identifier", "hits")
     assert not hasattr(view, "preview_image")
     view.query.set("弓箭手")
     ui.update()
@@ -1524,3 +1524,128 @@ def test_history_reassessment_blocks_mutations_and_defers_while_running(review_u
     finish(ui, tab)
     assert not tab._history_pending and not tab.formalizing
     assert busy == [True, False]
+
+
+@pytest.fixture
+def catalog_ui(desktop_ui):
+    from crX.interface.card_catalog import CardCatalogView
+    from crX.utils.card_catalog import CatalogReference
+
+    ui, _root = desktop_ui
+    window = tk.Toplevel(ui)
+    window.geometry("850x400")
+    calls = []
+    view = CardCatalogView(window, refresh=lambda: None, reorder=lambda *args: calls.append(args))
+    view.pack(fill="both", expand=True)
+    refs = [CatalogReference(f"{index:016x}", "knight", preferred=index == 0, number=index) for index in range(30)]
+    view.set_data({"knight": refs})
+    ui.update()
+    yield ui, view, calls
+    window.destroy()
+    ui.update()
+
+
+def test_catalog_drag_handle_live_order_and_failed_save_rollback(catalog_ui):
+    ui, view, calls = catalog_ui
+    rows = view.references.get_children()
+    source, target = rows[0], rows[2]
+    # Text selection must not start sorting.
+    x, y, _width, height = view.references.bbox(source, "name")
+    view.references.event_generate("<ButtonPress-1>", x=x + 10, y=y + height // 2)
+    view.references.event_generate("<B1-Motion>", x=x + 10, y=y + height * 2)
+    view.references.event_generate("<ButtonRelease-1>", x=x + 10, y=y + height * 2)
+    assert view._drag is None and not calls and view.references.get_children() == rows
+    # Only the dedicated handle starts a drag.
+    x, y, _width, height = view.references.bbox(source, "sort")
+    _x, target_y, _width, target_height = view.references.bbox(target)
+    view.references.event_generate("<Motion>", x=x + 10, y=y + height // 2)
+    assert str(view.references.cget("cursor")) == "hand2"
+    view.references.event_generate("<ButtonPress-1>", x=x + 10, y=y + height // 2)
+    assert view._drag is not None
+    for _ in range(4):
+        view.references.event_generate("<B1-Motion>", x=x + 10, y=target_y + target_height // 2)
+    expected = (rows[1], rows[2], rows[0], *rows[3:])
+    assert view.references.get_children() == expected
+    assert "第 3 / 30 位" in view.message.get()
+    view.references.event_generate("<ButtonRelease-1>", x=x + 10, y=target_y + target_height // 2)
+    # The dropped order and first-choice label remain visible while saving.
+    assert view.references.get_children() == expected
+    assert calls == [("knight", expected, rows)]
+    assert view.references.set(rows[1], "name").startswith("首选")
+    assert view.references.set(source, "sort") == "≡ 3"
+    assert view._scroll_after is None
+    view.set_data({"knight": []})  # A stale scan cannot undo a pending drop.
+    ui.update()
+    assert view.references.get_children() == expected
+    view.finish_reorder(False)
+    assert view.references.get_children() == rows
+    assert view.references.set(source, "name").startswith("首选")
+    assert "已恢复原顺序" in view.message.get()
+
+
+def test_catalog_drag_edge_scroll_continues_and_escape_restores(catalog_ui):
+    ui, view, calls = catalog_ui
+    rows = view.references.get_children()
+    x, y, _width, height = view.references.bbox(rows[0], "sort")
+    view.references.event_generate("<ButtonPress-1>", x=x + 10, y=y + height // 2)
+    bottom = view.references.winfo_height() - 3
+    view.references.event_generate("<B1-Motion>", x=x + 10, y=bottom)
+    position = view.references.index(rows[0])
+    assert position < len(rows) - 1  # Crossing the edge must not jump to the last hidden row.
+    _wait_ui(ui, lambda: view.references.index(rows[0]) > position)
+    assert view.references.yview()[0] > 0
+    view.references.focus_force()
+    ui.update()
+    view.references.event_generate("<Escape>")
+    ui.update()
+    assert view.references.get_children() == rows and not calls
+    assert view._drag is None and view._scroll_after is None
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_catalog_drop_remains_visible_until_background_save_completes(review_ui, monkeypatch, fail):
+    import threading
+
+    from crX.utils.card_catalog import reorder_references
+
+    ui, tab, add, _destination = review_ui
+    for sample in (add("first"), add("second", channel=4)):
+        select(tab, sample)
+        tab.card_var.set("knight")
+        tab.stage_buttons["confirm"].invoke()
+        finish(ui, tab)
+    tab.catalog_button.invoke()
+    _wait_ui(ui, lambda: not tab._scan_busy)
+    view = tab.library_view
+    view.query.set("knight")
+    view.cards.selection_set("knight")
+    ui.update()
+    original = view.references.get_children()
+    entered, release = threading.Event(), threading.Event()
+
+    def slow_save(*args):
+        entered.set()
+        if not release.wait(4):
+            raise ValueError("test save timed out")
+        if fail:
+            raise ValueError("test save failure")
+        return reorder_references(*args)
+
+    monkeypatch.setattr("crX.interface.card_review.reorder_references", slow_save)
+    try:
+        x, y, _width, height = view.references.bbox(original[0], "sort")
+        _x, target_y, _width, target_height = view.references.bbox(original[1])
+        view.references.event_generate("<ButtonPress-1>", x=x + 10, y=y + height // 2)
+        view.references.event_generate("<B1-Motion>", x=x + 10, y=target_y + target_height // 2)
+        view.references.event_generate("<ButtonRelease-1>", x=x + 10, y=target_y + target_height // 2)
+        assert entered.wait(1)
+        ui.update()
+        assert tab._action_busy and view.references.get_children() == original[::-1]
+        assert view.references.set(original[1], "name").startswith("首选")
+    finally:
+        release.set()
+    finish(ui, tab)
+    assert view._pending_order is None
+    assert view.references.get_children() == (original if fail else original[::-1])
+    if fail:
+        assert "test save failure" in tab.message_var.get()
