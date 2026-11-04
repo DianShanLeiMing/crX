@@ -617,6 +617,9 @@ def check_if_on_clash_main_burger_button_options_menu(emulator) -> bool:
 def check_if_battle_mode_is_selected(emulator, mode: str):
     """Checks if the given battle mode is selected on the clash main menu.
 
+    Classic 1v1 includes a tight shield/swords reference: the surrounding
+    button fill and notification badge can change without changing the mode.
+
     Args:
         emulator: The emulator controller.
         mode: The battle mode to check for.
@@ -634,9 +637,12 @@ def check_if_battle_mode_is_selected(emulator, mode: str):
         "Trophy Road": "selected_trophy_road_on_main",
     }
     look_folder = mode2folder[mode]
+    image = emulator.screenshot()
+    if image is None or image.shape != (*GAME_SCREEN_SIZE[::-1], 3):
+        return False
     print(f"[DEBUG] Checking if {mode} is selected...")
     print(f"[DEBUG] Looking in folder: {look_folder}")
-    coord = find_image(emulator.screenshot(), look_folder, tolerance=0.9, subcrop=SELECTED_BATTLE_MODE_REGION)
+    coord = find_image(image, look_folder, tolerance=0.9, subcrop=SELECTED_BATTLE_MODE_REGION)
     print(f"[DEBUG] Found at: {coord}")
     return coord is not None
 
