@@ -38,7 +38,9 @@ def test_single_timeout_recovers_frame_and_restores_adapter(monkeypatch):
         assert device.screenshot().shape == (640, 360, 3)
     assert run.call_count == 2
     assert device.screenshot == original and "screenshot" not in vars(device)
-    assert all(call.args[0][-3:] == ["exec-out", "screencap", "-p"] for call in run.call_args_list)
+    assert run.call_args_list[0].args[0] == ["adb", "-s", device.device_serial, "exec-out", "screencap", "-p"]
+    assert run.call_args_list[1].args[0] == ["adb", "-s", device.device_serial, "shell", "screencap", "-p"]
+    assert all(call.kwargs == {"binary": True} for call in run.call_args_list)
 
 
 def test_repeated_timeout_is_propagated_after_one_retry(monkeypatch):

@@ -80,6 +80,17 @@ class RewardSequence:
             self.entered = self.clock[0]
 
 
+def test_recovery_dismisses_captured_native_result(clock):
+    emulator = RewardSequence(
+        clock,
+        [(image("failure-result-native-20261105.png"), None), (image("failure-main-recovered.png"), None)],
+    )
+    assert nav.wait_for_clash_main_menu(emulator, Logger(), timeout=12)
+    assert len(emulator.clicks) == 1
+    _, x, y = emulator.clicks[0]
+    assert 141 < x < 219 and 545 < y < 578
+
+
 @pytest.mark.parametrize("number", range(2, 11))
 def test_attached_reward_stages(number):
     expected = "lucky_chest" if number <= 8 else "event_reward"

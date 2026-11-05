@@ -20,7 +20,7 @@ from crX.utils.logger import ProcessLogger, attach_worker_file_logging
 
 @contextmanager
 def screenshot_retry_policy(emulator, logger, shutdown_event):
-    """Retry one timed-out read, without replaying a state or any device input.
+    """Retry one timed-out read via shell, without replaying states or inputs.
 
     The worker owns recovery policy. Adapters retain a single bounded I/O attempt;
     patching the instance also covers screenshot calls inside adapter.restart().
@@ -38,10 +38,11 @@ def screenshot_retry_policy(emulator, logger, shutdown_event):
             command = error.cmd
             if not isinstance(command, list | tuple) or list(command[-3:]) != ["exec-out", "screencap", "-p"]:
                 raise
-            logger.change_status("ADB 截图超时，正在重试一次；暂不重启游戏")
+            logger.change_status("ADB 截图超时，正在使用备用通道重试一次；暂不重启游戏")
             if shutdown_event.wait(0.5):
                 raise
-            return original()
+            fallback = getattr(emulator, "screenshot_via_shell", original)
+            return fallback()
 
     emulator.screenshot = capture
     try:

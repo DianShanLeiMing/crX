@@ -172,7 +172,14 @@ class AdbBasedController(BaseEmulatorController):
             RuntimeError: If the ADB screencap command fails.
             ValueError: If the captured image data cannot be decoded.
         """
-        result = self.adb("exec-out screencap -p", binary_output=True)
+        return self._capture_screen(["exec-out", "screencap", "-p"])
+
+    def screenshot_via_shell(self) -> np.ndarray:
+        """Alternate read-only transport, selected by the worker after a timeout."""
+        return self._capture_screen(["shell", "screencap", "-p"])
+
+    def _capture_screen(self, command: list[str]) -> np.ndarray:
+        result = self.adb(command, binary_output=True)
 
         if result.returncode != 0 or not result.stdout:
             err = result.stderr if result.stderr else b"Unknown ADB error"
