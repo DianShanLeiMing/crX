@@ -89,6 +89,26 @@ def test_upload_only_selected_fingerprints_and_keep_unstaged_edits(upload_store)
     assert len(json.loads(git(remote, "show", f"main:{upload.LIBRARY_FILE}"))["entries"]) == 2
 
 
+def test_published_cache_tracks_upstream_revision_and_returns_independent_data(upload_store, monkeypatch):
+    from unittest.mock import Mock
+
+    repo, _remote, _root, _add, _checks = upload_store
+    entries = Mock(wraps=upload._base_entries)
+    document = Mock(wraps=upload._base_document)
+    monkeypatch.setattr(upload, "_base_entries", entries)
+    monkeypatch.setattr(upload, "_base_document", document)
+    upload.published_reference_ids()["mutated"] = "local"
+    upload.published_preferences()["mutated"] = {}
+    assert "mutated" not in upload.published_reference_ids()
+    assert "mutated" not in upload.published_preferences()
+    assert entries.call_count == document.call_count == 1
+    git(repo, "commit", "--allow-empty", "-m", "New upstream revision")
+    git(repo, "push")
+    upload.published_reference_ids()
+    upload.published_preferences()
+    assert entries.call_count == document.call_count == 2
+
+
 def test_staged_changes_are_preserved_and_block_new_commit(upload_store):
     repo, _remote, root, add, _checks = upload_store
     sample = add("first")

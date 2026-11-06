@@ -7,6 +7,8 @@ import os
 import shutil
 import subprocess
 import tempfile
+from copy import deepcopy
+from functools import lru_cache
 from pathlib import Path
 
 from crX.utils import card_workflow as workflow
@@ -134,6 +136,20 @@ def _payload(document):
     return (json.dumps(document, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
 
+@lru_cache(maxsize=8)
+def _published_ids_at(repo, revision):
+    # Git objects are immutable; the tracking revision is still checked on every
+    # refresh so a fetch, branch switch or successful upload is visible at once.
+    with tempfile.TemporaryDirectory(prefix="crx-card-published-") as name:
+        return {entry["id"]: revision for entry in _base_entries(repo, Path(name), revision)}
+
+
+@lru_cache(maxsize=8)
+def _published_preferences_at(repo, revision):
+    with tempfile.TemporaryDirectory(prefix="crx-card-baseline-") as name:
+        return _base_document(repo, Path(name), PREFERENCES_FILE, preferences.read_document, revision)["cards"]
+
+
 def published_reference_ids():
     """Use the locally fetched tracking revision; never fetch during UI refresh."""
     repo = _project_root()
@@ -144,8 +160,7 @@ def published_reference_ids():
         if not tracking.startswith("refs/remotes/"):
             return {}
         revision = _text(repo, "rev-parse", "--verify", tracking)
-        with tempfile.TemporaryDirectory(prefix="crx-card-published-") as name:
-            return {entry["id"]: revision for entry in _base_entries(repo, Path(name), revision)}
+        return _published_ids_at(repo, revision).copy()
     except (OSError, ValueError):
         return {}
 
@@ -161,8 +176,8 @@ def published_preferences():
         tracking = _text(repo, "rev-parse", "--symbolic-full-name", "@{upstream}", check=False)
         if not tracking.startswith("refs/remotes/"):
             return None
-        with tempfile.TemporaryDirectory(prefix="crx-card-baseline-") as name:
-            return _base_document(repo, Path(name), PREFERENCES_FILE, preferences.read_document, tracking)["cards"]
+        revision = _text(repo, "rev-parse", "--verify", tracking)
+        return deepcopy(_published_preferences_at(repo, revision))
     except (OSError, ValueError):
         return None
 

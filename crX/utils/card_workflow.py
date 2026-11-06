@@ -158,10 +158,10 @@ def _scan(root):
     return samples
 
 
-def _fresh(root, selected):
+def _fresh(root, selected, *, snapshot=None):
     if not selected or len(selected) > formal.MAX_BATCH:
         raise ValueError(f"一次请选择 1 至 {formal.MAX_BATCH} 张样本")
-    current = {sample.key: sample for sample in _scan(root)}
+    current = {sample.key: sample for sample in (_scan(root) if snapshot is None else snapshot)}
     result = []
     for previous in selected:
         sample = current.get(previous.key)
@@ -455,13 +455,18 @@ def scan_review(root, *, refresh_library=False, reassess_history=True, cleanup_u
             _cleanup_uploaded_images(root, _scan(root), remaining)
         if refresh_library:
             local.sync_library(root)
-        samples, errors = scan_samples(root)
+        # Writes and legacy-library synchronization can change the annotations.
+        # A read-only refresh already has a validated, current snapshot.
+        if updates or cleanup_uploaded or (refresh_library and local.library_path(root).exists()):
+            samples, errors = scan_samples(root)
         return samples, errors, group_review_samples(samples)
 
 
-def _plan(root, samples, card_id, entries, *, excluded=()):
+def _plan(root, samples, card_id, entries, *, excluded=(), snapshot=None):
     references = _references(entries)
-    evidence = _evidence(_scan(root), {sample.key for sample in samples} | set(excluded))
+    evidence = _evidence(
+        _scan(root) if snapshot is None else snapshot, {sample.key for sample in samples} | set(excluded)
+    )
     additions, updates = [], []
     counts = Counter()
     for sample in samples:
@@ -499,7 +504,8 @@ def confirm_samples(root, selected, card_id, note=""):
     if card_id not in CARD_NAMES_ZH:
         raise ValueError("请选择准确卡名，并区分普通／觉醒／精英版本")
     with _locked(root):
-        samples = _fresh(root, selected)
+        snapshot = _scan(root)
+        samples = _fresh(root, selected, snapshot=snapshot)
         if any(sample.status != "pending" for sample in samples):
             raise ValueError("请先将样本恢复为待确认")
         original = formal._read_entries(formal.formal_path())
@@ -510,7 +516,7 @@ def confirm_samples(root, selected, card_id, note=""):
             original,
             [(sample, _result("pending", card_id, "等待入库", note=note)) for sample in samples],
         )
-        additions, updates, counts = _plan(root, samples, card_id, original)
+        additions, updates, counts = _plan(root, samples, card_id, original, snapshot=snapshot)
         try:
             _commit(root, original, original + additions, updates)
         except (OSError, ValueError) as error:

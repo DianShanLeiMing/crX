@@ -58,6 +58,27 @@ def test_approval_adds_without_runtime_evidence_and_batch_duplicates_are_covered
     assert all(set(entry) == {"id", "card_id", "fingerprint"} for entry in formal._read_entries(destination))
 
 
+def test_confirmation_scans_once_and_still_checks_other_human_labels(tmp_path, review_store, monkeypatch):
+    from unittest.mock import Mock
+
+    add, _destination = review_store
+    historical = add("historical")
+    save_review(historical, "confirmed", "cannon")
+    candidate = add("candidate", shift=5)
+    scan = Mock(wraps=workflow.scan_samples)
+    monkeypatch.setattr(workflow, "scan_samples", scan)
+    assert "需复核" in workflow.confirm_samples(tmp_path, [candidate], "knight")
+    assert scan.call_count == 1
+    scan.reset_mock()
+    samples, errors, _groups = workflow.scan_review(tmp_path, refresh_library=True, reassess_history=False)
+    assert not errors
+    assert next(sample for sample in samples if sample.key == candidate.key).status == "pending"
+    # The historical sample migrates on the first refresh, requiring a reload.
+    scan.reset_mock()
+    workflow.scan_review(tmp_path, refresh_library=True, reassess_history=False)
+    assert scan.call_count == 1
+
+
 @pytest.mark.parametrize(("shift", "expected"), [(120, "covered"), (125, "covered"), (126, "included")])
 def test_later_appearance_only_adds_when_existing_reference_cannot_recognize_it(
     tmp_path, review_store, shift, expected

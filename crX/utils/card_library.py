@@ -12,6 +12,7 @@ import tempfile
 import threading
 import time
 from collections import Counter
+from functools import lru_cache
 from pathlib import Path
 
 import cv2
@@ -328,21 +329,48 @@ def clear_filtered_samples(
 
 
 def sample_fingerprint(sample) -> np.ndarray:
-    from crX.bot.card_detection import COLORS_KEYS, extract_card_fingerprint
-
     if sample.uploaded and sample.review.get("images_cleaned") is True:
         from crX.utils import formal_library as formal
 
-        for entry in formal._read_entries(formal.formal_path()):
-            if entry["id"] == sample.review.get("formal_id") and entry["card_id"] == sample.card_id:
-                return np.array(entry["fingerprint"], dtype=np.int64)
+        path = formal.formal_path()
+        # Check links even on cache hits; a replaced library must still pass the
+        # formal reader's validation before any fingerprints are reused.
+        if path.is_symlink():
+            raise ValueError("正式参考库不能使用符号链接")
+        if path.exists():
+            stat = path.stat()
+            stamp = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+            value = _cleaned_fingerprints(path, stamp).get((sample.card_id, sample.review.get("formal_id")))
+            if value is not None:
+                return value.copy()
         raise ValueError("已清理图片的样本缺少有效正式参考")
     slot = sample.record.get("slot")
     if type(slot) is not int or not 0 <= slot < 4 or sample.record.get("available") is not True:
         raise ValueError("请使用可正常出牌的单张手牌样本")
     path = sample.file("frame")
-    if path.stat().st_size > 4 * 1024 * 1024:
+    stat = path.stat()
+    if stat.st_size > 4 * 1024 * 1024:
         raise ValueError("原始截图过大")
+    # Cache only the small fingerprint, never the decoded screenshot. Re-stat on
+    # every call so edited/replaced files cannot reuse an earlier appearance.
+    stamp = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+    return _frame_fingerprint(path, stamp, slot).copy()
+
+
+@lru_cache(maxsize=4)
+def _cleaned_fingerprints(path: Path, stamp: tuple[int, ...]) -> dict[tuple[str, str], np.ndarray]:
+    from crX.utils import formal_library as formal
+
+    return {
+        (entry["card_id"], entry["id"]): np.array(entry["fingerprint"], dtype=np.int64)
+        for entry in formal._read_entries(path)
+    }
+
+
+@lru_cache(maxsize=4096)
+def _frame_fingerprint(path: Path, stamp: tuple[int, ...], slot: int) -> np.ndarray:
+    from crX.bot.card_detection import COLORS_KEYS, extract_card_fingerprint
+
     frame = cv2.imread(str(path))
     if frame is None or frame.shape not in ((*GAME_SCREEN_SIZE[::-1], 3), (*LEGACY_SCREEN_SIZE[::-1], 3)):
         raise ValueError("原始截图需要为 360×640 或 419×633 历史样本")
@@ -358,11 +386,12 @@ def base_match(fingerprint) -> tuple[str, int]:
     return detection.CARD_DETECTION_ALIASES.get(card_id, card_id), int(distances[index])
 
 
-def _evidence(root):
+def _evidence(root, *, samples=None):
     from crX.utils.card_review import scan_samples
 
     evidence = []
-    samples, _ = scan_samples(root)
+    if samples is None:
+        samples, _ = scan_samples(root)
     for sample in samples:
         if (
             sample.status not in ("confirmed", "trial", "included", "covered", "conflict")
@@ -393,7 +422,7 @@ def sync_library(root: Path) -> None:
         if errors:
             raise ValueError("样本记录不完整，本轮不调整补库")
         sources = {sample.key: sample for sample in samples}
-        evidence = _evidence(root)
+        evidence = _evidence(root, samples=samples)
         stats = read_match_stats(root)
         counts: Counter = Counter()
         for entry in entries:

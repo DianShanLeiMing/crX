@@ -610,6 +610,33 @@ def select(tab, sample):
     tab._select()
 
 
+@pytest.mark.parametrize("missing_image", [False, True])
+@pytest.mark.parametrize("stage", ["待确认", "待上传"])
+def test_loaded_thumbnails_stop_redrawing_while_idle(review_ui, monkeypatch, missing_image, stage):
+    from unittest.mock import Mock
+
+    ui, tab, add, _destination = review_ui
+    if missing_image:
+        monkeypatch.setattr("crX.interface.card_review.load_card_thumbnail", lambda _sample: None)
+    sample = add("idle-thumbnail")
+    if stage == "待上传":
+        select(tab, sample)
+        tab.card_var.set("knight")
+        tab.stage_buttons["confirm"].invoke()
+        finish(ui, tab)
+        switch(ui, tab, stage)
+    _wait_ui(ui, lambda: sample.key in tab._thumbnail_images and not tab._thumbnail_busy)
+    ui.update()
+    tree = tab.reference_tree if stage == "待上传" else tab.thumbnail_tree
+    updates = Mock(wraps=tree.item)
+    monkeypatch.setattr(tree, "item", updates)
+    heartbeat = []
+    tab._later(200, lambda: heartbeat.append(True))
+    _wait_ui(ui, lambda: heartbeat)
+    assert not [call for call in updates.call_args_list if call.kwargs]
+    assert tab._thumbnail_after is None
+
+
 def switch(ui, tab, label):
     tab.stage_tabs.select(tab.stage_pages[label])
     ui.update()
@@ -700,6 +727,49 @@ def test_pending_list_shows_all_groups_and_updates_after_processing(review_ui, m
     assert tab.tree.get_children() == (first.key,)
     switch(ui, tab, "待确认")
     assert not tab.tree.get_children()
+
+
+def test_approval_keeps_unchanged_list_and_thumbnail_rows(review_ui, monkeypatch):
+    from unittest.mock import Mock
+
+    ui, tab, add, _destination = review_ui
+    first, other = add("first"), add("other", channel=4)
+    deletes = Mock(wraps=tab.tree.delete)
+    thumbnails = Mock(wraps=tab.thumbnail_tree.delete)
+    monkeypatch.setattr(tab.tree, "delete", deletes)
+    monkeypatch.setattr(tab.thumbnail_tree, "delete", thumbnails)
+    select(tab, first)
+    tab.card_var.set("knight")
+    tab.stage_buttons["confirm"].invoke()
+    finish(ui, tab)
+    assert tab.tree.get_children() == tab.thumbnail_tree.get_children() == (other.key,)
+    assert tab.tree.selection() == (other.key,)
+    assert deletes.call_args_list == thumbnails.call_args_list
+    assert deletes.call_count == 1 and deletes.call_args.args == (first.key,)
+    tab.refresh()
+    finish(ui, tab)
+    assert deletes.call_count == thumbnails.call_count == 1
+
+
+def test_conflict_moves_to_front_without_losing_selection_or_thumbnails(review_ui):
+    ui, tab, add, _destination = review_ui
+    samples = [add("first"), add("second", channel=4), add("third", channel=8)]
+    _wait_ui(ui, lambda: all(sample.key in tab._thumbnail_images for sample in samples))
+    previous = tab.tree.get_children()
+    selected = previous[0]
+    tab.tree.selection_set(selected)
+    tab.tree.focus(selected)
+    tab._select()
+    tab.note_var.set("保留编辑中的备注")
+    images = dict(tab._thumbnail_images)
+    conflict = previous[-1]
+    tab.samples[conflict].review["work_reason"] = "需复核"
+    tab._render_list()
+    ui.update()
+    assert tab.tree.get_children() == tab.thumbnail_tree.get_children() == (conflict, *previous[:-1])
+    assert tab.tree.selection() == tab.thumbnail_tree.selection() == (selected,)
+    assert tab.note_var.get() == "保留编辑中的备注"
+    assert dict(tab._thumbnail_images) == images
 
 
 def test_batch_approval_uses_visible_selection_and_preserves_edits(review_ui):

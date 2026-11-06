@@ -653,13 +653,23 @@ class CardReviewTab(ttk.Frame):
         for tree in (self.thumbnail_tree, self.reference_tree):
             if tree.exists(key):
                 photo = self._thumbnail_images.get(key)
-                tree.item(key, image=photo or "", text="" if photo else "无图")
+                image = (str(photo),) if photo else ()
+                text = "" if photo else "无图"
+                if tuple(tree.item(key, "image")) != image or tree.item(key, "text") != text:
+                    tree.item(key, image=photo or "", text=text)
 
     def _render_thumbnails(self, keys):
-        if self.thumbnail_tree.get_children() != keys:
-            self.thumbnail_tree.delete(*self.thumbnail_tree.get_children())
-            for key in keys:
+        previous = self.thumbnail_tree.get_children()
+        desired = set(keys)
+        removed = tuple(key for key in previous if key not in desired)
+        if removed:
+            self.thumbnail_tree.delete(*removed)
+        order_changed = tuple(key for key in previous if key in desired) != keys
+        for key in keys:
+            if not self.thumbnail_tree.exists(key):
                 self.thumbnail_tree.insert("", "end", iid=key, text="加载中")
+        if order_changed:
+            self.thumbnail_tree.set_children("", *keys)
         visible = set(keys) | set(self.reference_tree.get_children())
         for key in list(self._thumbnail_images):
             if key not in visible:
@@ -1032,8 +1042,12 @@ class CardReviewTab(ttk.Frame):
         else:
             self.row_samples = {sample.key: [sample] for sample in visible}
         desired = tuple(sample.key for sample in visible)
-        if tuple(self.tree.get_children()) != desired:
-            self.tree.delete(*self.tree.get_children())
+        desired_set = set(desired)
+        previous = self.tree.get_children()
+        removed = tuple(key for key in previous if key not in desired_set)
+        if removed:
+            self.tree.delete(*removed)
+        order_changed = tuple(key for key in previous if key in desired_set) != desired
         for sample in visible:
             choice = sample_card_choice(sample)
             card = CARD_NAMES_ZH.get(choice, "")
@@ -1053,9 +1067,12 @@ class CardReviewTab(ttk.Frame):
                 row["references"] = f"{count} 份"
             values = tuple(row[column] for column in columns)
             if self.tree.exists(sample.key):
-                self.tree.item(sample.key, values=values)
+                if self.tree.item(sample.key, "values") != values:
+                    self.tree.item(sample.key, values=values)
             else:
                 self.tree.insert("", "end", iid=sample.key, values=values)
+        if order_changed:
+            self.tree.set_children("", *desired)
         self._layout_rows()
         self._render_thumbnails(desired)
         remaining = tuple(key for key in selection if key in desired)

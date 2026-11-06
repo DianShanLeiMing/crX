@@ -141,6 +141,75 @@ def test_native_bgr_fingerprint_extraction(tmp_path):
     assert np.all(value.sum(axis=1) == 891)
 
 
+def test_cleaned_samples_share_validated_library_and_reload_on_replacement(tmp_path, monkeypatch):
+    from dataclasses import replace
+    from unittest.mock import Mock
+
+    from crX.utils import formal_library as formal
+    from crX.utils.card_review import atomic_json
+
+    path = tmp_path / "formal.json"
+    value = fingerprint().tolist()
+    identifier = formal._signature("knight", value)
+    atomic_json(path, {"version": 1, "entries": [{"id": identifier, "card_id": "knight", "fingerprint": value}]})
+    monkeypatch.setattr(formal, "formal_path", lambda: path)
+    reader = Mock(wraps=formal._read_entries)
+    monkeypatch.setattr(formal, "_read_entries", reader)
+    sample = add_group_sample(tmp_path, "cleaned", "sample-000")
+    sample.review = {
+        "work_result": "included",
+        "confirmed_card_id": "knight",
+        "formal_id": identifier,
+        "published_reference_id": identifier,
+        "images_cleaned": True,
+    }
+    library.sample_fingerprint(sample)[:] = -1
+    other = replace(sample, name="sample-001")
+    assert np.array_equal(library.sample_fingerprint(other), value)
+    assert reader.call_count == 1
+    wrong_card = replace(sample, review={**sample.review, "confirmed_card_id": "cannon"})
+    with pytest.raises(ValueError, match="缺少有效正式参考"):
+        library.sample_fingerprint(wrong_card)
+    atomic_json(path, {"version": 1, "entries": []})
+    with pytest.raises(ValueError, match="缺少有效正式参考"):
+        library.sample_fingerprint(sample)
+    assert reader.call_count == 2
+    path.write_text('{"version": 1, "entries": [null]}', encoding="utf-8")
+    with pytest.raises(ValueError, match="卡名无效"):
+        library.sample_fingerprint(sample)
+    path.unlink()
+    with pytest.raises(ValueError, match="缺少有效正式参考"):
+        library.sample_fingerprint(sample)
+
+
+def test_fingerprint_reuses_decode_but_invalidates_changed_or_missing_frame(tmp_path, monkeypatch):
+    import os
+
+    sample = add_group_sample(tmp_path, "cached", "sample-000")
+    original = library.cv2.imread
+    calls = []
+
+    def read(path):
+        calls.append(path)
+        return original(path)
+
+    monkeypatch.setattr(library.cv2, "imread", read)
+    expected = library.sample_fingerprint(sample)
+    modified = library.sample_fingerprint(sample)
+    modified[:] = -1
+    assert np.array_equal(library.sample_fingerprint(sample), expected)
+    assert len(calls) == 1
+
+    path = sample.file("frame")
+    stat = path.stat()
+    os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+    assert np.array_equal(library.sample_fingerprint(sample), expected)
+    assert len(calls) == 2
+    path.unlink()
+    with pytest.raises(OSError):
+        library.sample_fingerprint(sample)
+
+
 def test_capture_limits_similar_samples_across_fights(tmp_path):
     import cv2
 
