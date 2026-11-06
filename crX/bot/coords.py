@@ -14,6 +14,8 @@ REFERENCE_SCREEN_SIZE = (360, 640)
 GAME_SCREEN_SIZE = (720, 1280)
 GAME_SCREEN_DPI = 320
 SCREEN_SCALE = GAME_SCREEN_SIZE[0] // REFERENCE_SCREEN_SIZE[0]
+# Dataset preparation only; exclude the top HUD and bottom hand, without resizing.
+BATTLEFIELD_DATA_REGION_LTRB = (0, 120, 720, 1030)
 # Historical samples retain their original geometry; never use it for device input.
 LEGACY_SCREEN_SIZE = (419, 633)
 LEGACY_HAND_CARD_TOP_LEFTS = ((115, 529), (182, 529), (249, 529), (316, 529))

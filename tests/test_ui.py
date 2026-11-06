@@ -53,6 +53,7 @@ def test_tabs_settings_themes_and_running_state(desktop_ui):
             "统计",
             "卡牌样本",
             "异常流程",
+            "YOLO 数据",
             "设置",
         ]
         assert ui.get_all_values()[UIField.MAX_FIGHTS] == "0"
@@ -103,6 +104,259 @@ def test_tabs_settings_themes_and_running_state(desktop_ui):
         assert str(ui.main_btn.cget("text")) == "启动"
     finally:
         ui.set_button_state("idle")
+
+
+def test_battlefield_capture_preview_recrop_and_running_guard(desktop_ui, tmp_path):
+    import threading
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    ui, _root = desktop_ui
+    tab = ui.battlefield_data_tab
+    original_callback = tab.capture_callback
+    original_root = tab.root_var.get()
+    main_thread = threading.get_ident()
+    screenshot_threads = []
+    frame = np.zeros((640, 360, 3), dtype=np.uint8)
+    frame[:, :, 0] = 250
+
+    def screenshot():
+        screenshot_threads.append(threading.get_ident())
+        return frame
+
+    try:
+        tab.root_var.set(str(tmp_path))
+        tab.capture_callback = lambda: lambda: SimpleNamespace(screenshot=screenshot)
+        tab._capture(single=True)
+        assert tab.busy
+        assert str(ui.main_btn.cget("state")) == "disabled"
+        _wait_ui(ui, lambda: not tab.busy and tab.frame_image is not None)
+        assert screenshot_threads and main_thread not in screenshot_threads
+        assert np.array_equal(tab.frame_image, frame)
+        original_session = tab.session
+        assert len(original_session.metadata["frames"]) == 1
+        assert tab._transform is not None
+        assert [tab.more_menu.entrycget(index, "label") for index in range(3)] == [
+            "导入图片或视频…",
+            "导入图片目录或录制包…",
+            "打开已有批次…",
+        ]
+        tab.crop_vars[0].set("12")
+        _wait_ui(ui, lambda: tab._crop_preview_id is None)
+        x, _y, scale_x, _scale_y = tab._transform
+        selection = tab.raw_canvas.find_all()[-1]
+        assert tab.raw_canvas.coords(selection)[0] == pytest.approx(x + 12 * scale_x)
+
+        x, y, scale_x, scale_y = tab._transform
+        tab._begin_crop(SimpleNamespace(x=x + 10 * scale_x, y=y + 30 * scale_y))
+        tab._end_crop(SimpleNamespace(x=x + 300 * scale_x, y=y + 480 * scale_y))
+        assert tab._crop() == (10, 30, 300, 480)
+        tab._recrop()
+        _wait_ui(ui, lambda: not tab.busy and tab.session is not original_session and tab.frame_image is not None)
+        assert tab.session.metadata["crop_size"] == [290, 450]
+        assert original_session.metadata["crop_ltrb"] == [0, 60, 360, 515]
+
+        ui.set_button_state("running")
+        tab._capture(single=True)
+        assert len(screenshot_threads) == 1
+        assert all(str(widget.cget("state")) == "disabled" for widget, _ in tab._controls)
+    finally:
+        tab.stop()
+        _wait_ui(ui, lambda: not tab.busy)
+        ui.set_button_state("idle")
+        tab.capture_callback = original_callback
+        tab.root_var.set(original_root)
+        tab._reset_crop()
+
+
+def test_battlefield_import_navigation_replaces_previous_preview(desktop_ui, tmp_path):
+    import numpy as np
+    from PIL import Image
+
+    ui, _root = desktop_ui
+    tab = ui.battlefield_data_tab
+    original_root = tab.root_var.get()
+    folder = tmp_path / "source"
+    folder.mkdir()
+    Image.new("RGB", (360, 640), (255, 0, 0)).save(folder / "01.png")
+    Image.new("RGB", (360, 640), (0, 255, 0)).save(folder / "02.png")
+    try:
+        tab.root_var.set(str(tmp_path / "output"))
+        tab._import(folder)
+        _wait_ui(ui, lambda: not tab.busy and tab.frame_image is not None)
+        assert len(tab.session.metadata["frames"]) == 2
+        assert np.array_equal(tab.frame_image[0, 0], [0, 0, 255])
+        tab._navigate(1)
+        _wait_ui(ui, lambda: not tab.busy)
+        assert np.array_equal(tab.frame_image[0, 0], [0, 255, 0])
+        assert tab.position_var.get() == "2 / 2 张"
+    finally:
+        tab.stop()
+        _wait_ui(ui, lambda: not tab.busy)
+        tab.root_var.set(original_root)
+
+
+def test_data_path_buttons_create_and_open_current_targets_without_file_dialogs(desktop_ui, tmp_path, monkeypatch):
+    import threading
+    from pathlib import Path
+
+    from crX.utils import open_folder as open_paths
+
+    ui, _root = desktop_ui
+    capture, split = ui.battlefield_data_tab, ui.dataset_split_tab
+    previous = capture.root_var.get(), split.classes_var.get(), split.destination_var.get()
+    save_dir = tmp_path / "screenshots"
+    classes = tmp_path / "annotated" / "classes.txt"
+    destination = tmp_path / "datasets"
+    opened = []
+    main_thread = threading.get_ident()
+    monkeypatch.setattr(open_paths, "is_windows", lambda: True)
+    monkeypatch.setattr(
+        open_paths.os, "startfile", lambda path: opened.append((Path(path), threading.get_ident())), raising=False
+    )
+    for name in ("askdirectory", "askopenfilename"):
+        monkeypatch.setattr(
+            "crX.interface.battlefield_data.filedialog." + name,
+            lambda **_kwargs: pytest.fail("Opening a configured target must not show a file picker"),
+        )
+    try:
+        capture.root_var.set(str(save_dir))
+        capture._browse_root()
+        _wait_ui(ui, lambda: not capture.busy)
+        assert save_dir.is_dir() and opened[-1][0] == save_dir
+
+        split.classes_var.set(str(classes))
+        split._browse_classes()
+        _wait_ui(ui, lambda: not split.busy)
+        assert classes.is_file() and opened[-1][0] == classes
+        assert classes.read_bytes() == b""
+        classes.write_text("enemy_knight\nfriendly_knight\n", encoding="utf-8")
+        split._browse_classes()
+        _wait_ui(ui, lambda: not split.busy)
+        assert classes.read_text(encoding="utf-8") == "enemy_knight\nfriendly_knight\n"
+
+        split.destination_var.set(str(destination))
+        split._browse_destination()
+        _wait_ui(ui, lambda: not split.busy)
+        assert destination.is_dir() and opened[-1][0] == destination
+        assert all(thread_id != main_thread for _path, thread_id in opened)
+        assert len(opened) == 4
+        capture._draw()
+        assert len(opened) == 4  # Image preview remains an in-app operation.
+
+        ui.set_button_state("running")
+        capture._browse_root()
+        split._browse_classes()
+        split._browse_destination()
+        assert len(opened) == 4
+    finally:
+        capture.stop()
+        split.stop()
+        _wait_ui(ui, lambda: not capture.busy and not split.busy)
+        ui.set_button_state("idle")
+        capture.root_var.set(previous[0])
+        split.classes_var.set(previous[1])
+        split.destination_var.set(previous[2])
+
+
+def test_battlefield_stop_retains_partial_batch_and_stop_message(desktop_ui, tmp_path):
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    ui, _root = desktop_ui
+    tab = ui.battlefield_data_tab
+    original_callback, original_root = tab.capture_callback, tab.root_var.get()
+    try:
+        tab.root_var.set(str(tmp_path))
+        tab.interval_var.set("60")
+        tab.capture_callback = lambda: lambda: SimpleNamespace(screenshot=lambda: np.zeros((640, 360, 3), np.uint8))
+        tab._capture()
+        _wait_ui(ui, lambda: tab.session is not None and len(tab.session.metadata["frames"]) == 1)
+        tab.stop()
+        _wait_ui(ui, lambda: not tab.busy and tab.frame_image is not None)
+        assert len(tab.session.metadata["frames"]) == 1
+        assert tab.message_var.get().startswith("已停止")
+    finally:
+        tab.stop()
+        _wait_ui(ui, lambda: not tab.busy)
+        tab.capture_callback = original_callback
+        tab.root_var.set(original_root)
+        tab.interval_var.set("1")
+
+
+def test_dataset_directory_picker_loads_and_exports_whole_battles(desktop_ui, tmp_path, monkeypatch):
+    from crX.utils.dataset_split import scan_annotations
+    from tests.test_dataset_split import make_annotations
+
+    ui, _root = desktop_ui
+    tab = ui.dataset_split_tab
+    source = make_annotations(tmp_path / "source")
+    original = (tab.source_var.get(), tab.classes_var.get(), tab.destination_var.get())
+    monkeypatch.setattr("crX.interface.dataset_split.filedialog.askdirectory", lambda **_kwargs: str(source))
+    try:
+        assert [ui.yolo_data_tabs.tab(item, "text") for item in ui.yolo_data_tabs.tabs()] == [
+            "截图与裁剪",
+            "标注与划分",
+        ]
+        tab.destination_var.set(str(tmp_path / "datasets"))
+        tab._browse_source()
+        assert tab.busy
+        assert str(ui.main_btn.cget("state")) == "disabled"
+        _wait_ui(ui, lambda: not tab.busy)
+        assert tab.plan is not None
+        assert "训练集" in tab.report.get("1.0", "end")
+        assert str(tab.export_button.cget("state")) == "normal"
+        tab._export()
+        _wait_ui(ui, lambda: not tab.busy)
+        assert tab.output is not None and (tab.output / "data.yaml").is_file()
+        assert {item.group for item in tab.plan.train}.isdisjoint(item.group for item in tab.plan.val)
+        assert len(scan_annotations(source, source / "classes.txt").images) == 8
+        tab.percent_var.set("30")
+        assert tab.plan is None and str(tab.export_button.cget("state")) == "disabled"
+    finally:
+        tab.stop()
+        _wait_ui(ui, lambda: not tab.busy)
+        tab.source_var.set(original[0])
+        tab.classes_var.set(original[1])
+        tab.destination_var.set(original[2])
+        tab.percent_var.set("20")
+
+
+def test_dataset_invalid_input_guidance_and_running_state_block_export(desktop_ui, tmp_path):
+    from tests.test_dataset_split import make_annotations
+
+    ui, _root = desktop_ui
+    tab = ui.dataset_split_tab
+    source = make_annotations(tmp_path / "source", groups=(3,))
+    original = (tab.source_var.get(), tab.classes_var.get())
+    try:
+        tab.source_var.set(str(source))
+        tab.classes_var.set(str(source / "classes.txt"))
+        classes_path = source / "classes.txt"
+        original_classes = classes_path.read_bytes()
+        classes_path.write_text("", encoding="utf-8")
+        tab._load()
+        _wait_ui(ui, lambda: not tab.busy)
+        report = tab.report.get("1.0", "end")
+        assert "类别表不能为空" in report
+        assert "enemy_knight\nfriendly_knight\nenemy_archers\nfriendly_archers" in report
+        assert "按实际标注的类别和顺序修改" in report
+        assert "enemy_knight" not in tab.message_var.get()
+        classes_path.write_bytes(original_classes)
+        tab._load()
+        _wait_ui(ui, lambda: not tab.busy)
+        assert "至少需要两场" in tab.message_var.get()
+        assert tab.plan is None and str(tab.export_button.cget("state")) == "disabled"
+        ui.set_button_state("running")
+        tab._load()
+        assert not tab.busy
+        assert all(str(widget.cget("state")) == "disabled" for widget, _ in tab._controls)
+    finally:
+        ui.set_button_state("idle")
+        tab.source_var.set(original[0])
+        tab.classes_var.set(original[1])
 
 
 def test_deck_checkbox_order_priority_and_json_roundtrip(desktop_ui, tmp_path, monkeypatch):

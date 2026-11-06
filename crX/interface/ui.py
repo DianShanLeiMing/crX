@@ -12,8 +12,10 @@ from ttkbootstrap.widgets import ToolTip
 from ttkbootstrap.widgets.scrolled import ScrolledFrame
 
 from crX.emulators import EmulatorType, get_available_emulators
+from crX.interface.battlefield_data import BattlefieldDataTab
 from crX.interface.card_review import CardReviewTab
 from crX.interface.config import DEFAULTS, JOBS, MAX_FIGHT_LIMIT, THEME_LABELS, selected_decks_from_settings
+from crX.interface.dataset_split import DatasetSplitTab
 from crX.interface.enums import BATTLE_STAT_LABELS, UIField, has_start_ready_job
 from crX.interface.failure_review import FailureReviewTab
 from crX.interface.widgets import DualRingGauge
@@ -70,6 +72,11 @@ class CrXUI(ttk.Window):
         self.device_tab = ttk.Frame(self.notebook, padding=16)
         self.stats_tab = ttk.Frame(self.notebook, padding=16)
         self.settings_tab = ttk.Frame(self.notebook, padding=16)
+        self.yolo_data_tabs = ttk.Notebook(self.notebook)
+        self.battlefield_data_tab = BattlefieldDataTab(self.yolo_data_tabs, busy_callback=self._update_clear_busy)
+        self.dataset_split_tab = DatasetSplitTab(self.yolo_data_tabs, busy_callback=self._update_clear_busy)
+        self.yolo_data_tabs.add(self.battlefield_data_tab, text="截图与裁剪")
+        self.yolo_data_tabs.add(self.dataset_split_tab, text="标注与划分")
         self.card_samples_tab = CardReviewTab(
             self.notebook,
             count_callback=self._update_sample_count,
@@ -84,6 +91,7 @@ class CrXUI(ttk.Window):
             (self.stats_tab, "统计"),
             (self.card_samples_tab, "卡牌样本"),
             (self.failure_samples_tab, "异常流程"),
+            (self.yolo_data_tabs, "YOLO 数据"),
             (self.settings_tab, "设置"),
         ):
             self.notebook.add(tab, text=title)
@@ -471,7 +479,13 @@ class CrXUI(ttk.Window):
         return not self._samples_clearing() and has_start_ready_job(self.get_all_values())
 
     def _samples_clearing(self):
-        return self.card_samples_tab.clearing or self.card_samples_tab.formalizing or self.failure_samples_tab.clearing
+        return (
+            self.card_samples_tab.clearing
+            or self.card_samples_tab.formalizing
+            or self.failure_samples_tab.clearing
+            or self.battlefield_data_tab.busy
+            or self.dataset_split_tab.busy
+        )
 
     def _update_clear_busy(self, _busy=None):
         self.main_btn.configure(state="disabled" if self._samples_clearing() else "normal")
@@ -483,6 +497,8 @@ class CrXUI(ttk.Window):
         self._state = state
         self.card_samples_tab.set_running(state == "running")
         self.failure_samples_tab.set_running(state == "running")
+        self.battlefield_data_tab.set_running(state == "running")
+        self.dataset_split_tab.set_running(state == "running")
         self._update_clear_busy()
         self.main_btn.configure(
             text="停止" if state == "running" else "启动", bootstyle="danger" if state == "running" else "success"

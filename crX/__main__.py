@@ -12,6 +12,7 @@ from crX.bot.worker import WorkerProcess, stop_worker_process
 from crX.emulators import EmulatorType
 from crX.emulators.adb import AdbController
 from crX.emulators.adb_base import validate_device_serial
+from crX.emulators.base import CLASH_ROYALE_PACKAGE, EmulatorNotReadyError
 from crX.emulators.mumu import MuMuEmulatorController
 from crX.interface.config import DEFAULTS, MAX_FIGHT_LIMIT, selected_decks_from_settings
 from crX.interface.enums import UIField, has_start_ready_job
@@ -78,6 +79,7 @@ class BotApplication:
         self.ui.main_btn.configure(command=self._on_main_button)
         self.ui.config_callback = self._on_config_change
         self.ui.device_callback = self._device_action
+        self.ui.battlefield_data_tab.capture_callback = self._prepare_dataset_capture
         self.ui.open_logs_callback = lambda: open_folder(log_dir)
         self.ui.open_recordings_callback = lambda: open_folder(
             get_recordings_dir(custom_path=self.ui.get_all_values()[UIField.RECORDING_FOLDER_PATH])
@@ -94,6 +96,9 @@ class BotApplication:
             self._on_start()
 
     def _on_start(self):
+        if self.ui.battlefield_data_tab.busy or self.ui.dataset_split_tab.busy:
+            self.ui.set_status("请先停止战场数据准备，再启动对战任务")
+            return
         if self._device_busy:
             self.ui.set_status("请等待设备检查完成")
             return
@@ -144,7 +149,7 @@ class BotApplication:
             self.ui.set_status(f"无法保存设置：{error}")
 
     def _device_action(self, action):
-        if self._device_busy or self.process is not None:
+        if self._device_busy or self.process is not None or self.ui.battlefield_data_tab.busy:
             return
         values = self.ui.get_all_values()
         self._device_busy = True
@@ -192,6 +197,28 @@ class BotApplication:
                 self.device_results.put(("status", str(error)))
 
         threading.Thread(target=run, name="device-check", daemon=True).start()
+
+    def _prepare_dataset_capture(self):
+        """Snapshot Tk values now; connect/capture only on the data preparation thread."""
+        if self._device_busy or self.process is not None:
+            raise ValueError("请等待设备检查结束，并停止自动对战任务后再采集")
+        values = self.ui.get_all_values()
+
+        def connect():
+            if EmulatorType(values[UIField.EMULATOR]) == EmulatorType.MUMU:
+                device = MuMuEmulatorController(
+                    self.logger, values[UIField.MUMU_PATH], values[UIField.MUMU_INSTANCE], values[UIField.ADB_PATH]
+                )
+            else:
+                device = AdbController(self.logger, values[UIField.ADB_SERIAL] or None, values[UIField.ADB_PATH])
+            device.start()
+            if not device.is_app_installed(CLASH_ROYALE_PACKAGE):
+                raise EmulatorNotReadyError("所选设备中未安装皇室战争国服客户端")
+            device.configure()
+            device.verify_screen()
+            return device
+
+        return connect
 
     def _drain_stats(self):
         if self.stats_queue is None:
@@ -242,6 +269,8 @@ class BotApplication:
 
     def _on_close(self):
         self._closing = True
+        self.ui.battlefield_data_tab.stop()
+        self.ui.dataset_split_tab.stop()
         stop_worker_process(self.process, self.shutdown_event)
         self._close_queue()
         self.ui.destroy()
