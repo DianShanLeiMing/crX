@@ -26,10 +26,16 @@
     "arrows": {
       "preferred": "e53c3427b48c04e6",
       "numbers": {
-        "e53c3427b48c04e6": 0
+        "e53c3427b48c04e6": 0,
+        "1a7b2c8980c5be3e": 1,
+        "7c6124cc05659c7d": 2,
+        "294841031ae383de": 3
       },
       "order": [
-        "e53c3427b48c04e6"
+        "e53c3427b48c04e6",
+        "1a7b2c8980c5be3e",
+        "7c6124cc05659c7d",
+        "294841031ae383de"
       ]
     },
     "baby_dragon": {
@@ -54,11 +60,19 @@
       "preferred": "a13a956b60a66864",
       "numbers": {
         "a13a956b60a66864": 0,
-        "9c5e1cd9e363ae4b": 1
+        "9c5e1cd9e363ae4b": 1,
+        "1f8940c382f2332b": 2,
+        "576cbf087ee504f6": 3,
+        "d3839b6f04e06d4c": 4,
+        "b215ae25000fbed6": 5
       },
       "order": [
         "a13a956b60a66864",
-        "9c5e1cd9e363ae4b"
+        "9c5e1cd9e363ae4b",
+        "1f8940c382f2332b",
+        "576cbf087ee504f6",
+        "d3839b6f04e06d4c",
+        "b215ae25000fbed6"
       ]
     },
     "barb_barrel": {
@@ -114,11 +128,17 @@
       "preferred": "2b10359500a76aab",
       "numbers": {
         "2b10359500a76aab": 0,
-        "8c99ef347da29627": 1
+        "8c99ef347da29627": 1,
+        "9959232d841fbca5": 2,
+        "24603b0c59e5dbb9": 3,
+        "e143ff54ee46621e": 4
       },
       "order": [
         "2b10359500a76aab",
-        "8c99ef347da29627"
+        "8c99ef347da29627",
+        "9959232d841fbca5",
+        "24603b0c59e5dbb9",
+        "e143ff54ee46621e"
       ]
     },
     "berserker": {
@@ -252,10 +272,16 @@
     "electro_wizard": {
       "preferred": "8b34db4127cd7ca7",
       "numbers": {
-        "8b34db4127cd7ca7": 0
+        "8b34db4127cd7ca7": 0,
+        "0465f6754505a067": 1,
+        "c69b705014257a5c": 2,
+        "27f485eee1b5bbc6": 3
       },
       "order": [
-        "8b34db4127cd7ca7"
+        "8b34db4127cd7ca7",
+        "0465f6754505a067",
+        "c69b705014257a5c",
+        "27f485eee1b5bbc6"
       ]
     },
     "elite_barbarians": {
@@ -566,14 +592,16 @@
         "be0074d81ab6610f": 1,
         "6f814f868453ecd1": 2,
         "527c6b66950bb5a2": 3,
-        "9c29de18ba78d4ca": 4
+        "9c29de18ba78d4ca": 4,
+        "7add0bbda7727239": 5
       },
       "order": [
         "00d8d21914c44c61",
         "be0074d81ab6610f",
         "6f814f868453ecd1",
         "527c6b66950bb5a2",
-        "9c29de18ba78d4ca"
+        "9c29de18ba78d4ca",
+        "7add0bbda7727239"
       ]
     },
     "giant": {
@@ -1116,11 +1144,19 @@
       "preferred": "755ce3d9c6b433a5",
       "numbers": {
         "755ce3d9c6b433a5": 0,
-        "e83fbb1d94114063": 1
+        "e83fbb1d94114063": 1,
+        "6b2508cc44a2bb24": 2,
+        "0908bb7d9106e14c": 3,
+        "4b2dbc77bac62003": 4,
+        "0ef2e8e7a7d3d616": 5
       },
       "order": [
         "755ce3d9c6b433a5",
-        "e83fbb1d94114063"
+        "e83fbb1d94114063",
+        "6b2508cc44a2bb24",
+        "0908bb7d9106e14c",
+        "4b2dbc77bac62003",
+        "0ef2e8e7a7d3d616"
       ]
     },
     "princess": {
@@ -1172,11 +1208,15 @@
       "preferred": null,
       "numbers": {
         "9dae1af417a10230": 1,
-        "dfe671841d03af1e": 2
+        "dfe671841d03af1e": 2,
+        "48118f5edc2799a6": 3,
+        "e47112a1a3c1602a": 4
       },
       "order": [
         "9dae1af417a10230",
-        "dfe671841d03af1e"
+        "dfe671841d03af1e",
+        "48118f5edc2799a6",
+        "e47112a1a3c1602a"
       ]
     },
     "royal_delivery": {
@@ -1192,11 +1232,17 @@
       "preferred": "00534efabdef5e8b",
       "numbers": {
         "00534efabdef5e8b": 0,
-        "497150d0eda073b0": 1
+        "497150d0eda073b0": 1,
+        "f30222a1442e1631": 2,
+        "32e29f04815bb7b7": 3,
+        "d61ca1e048744698": 4
       },
       "order": [
         "00534efabdef5e8b",
-        "497150d0eda073b0"
+        "497150d0eda073b0",
+        "f30222a1442e1631",
+        "32e29f04815bb7b7",
+        "d61ca1e048744698"
       ]
     },
     "royal_giant": {
