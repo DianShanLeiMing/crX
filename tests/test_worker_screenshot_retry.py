@@ -39,13 +39,42 @@ def test_single_timeout_recovers_frame_and_restores_adapter(monkeypatch):
     assert run.call_count == 2
     assert device.screenshot == original and "screenshot" not in vars(device)
     assert run.call_args_list[0].args[0] == ["adb", "-s", device.device_serial, "exec-out", "screencap", "-p"]
-    assert run.call_args_list[1].args[0] == ["adb", "-s", device.device_serial, "shell", "screencap", "-p"]
+    assert run.call_args_list[1].args[0] == ["adb", "-s", device.device_serial, "shell", "-T", "screencap", "-p"]
     assert all(call.kwargs == {"binary": True} for call in run.call_args_list)
 
 
 def test_repeated_timeout_is_propagated_after_one_retry(monkeypatch):
     device, signal, run = device_with_capture(monkeypatch, ["timeout", "timeout"])
     with pytest.raises(subprocess.TimeoutExpired), worker.screenshot_retry_policy(device, Logger(), signal):
+        device.screenshot()
+    assert run.call_count == 2 and "screenshot" not in vars(device)
+
+
+@pytest.mark.parametrize("translated", [False, True])
+def test_shell_fallback_preserves_png_pixels(monkeypatch, translated):
+    device, signal, run = device_with_capture(monkeypatch, [])
+    frame = np.asarray(np.random.default_rng(42).integers(0, 256, (640, 360, 3)), dtype=np.uint8)
+    ok, encoded = cv2.imencode(".png", frame)
+    assert ok
+    data = encoded.tobytes()
+    assert b"\r\n" in data
+    if translated:
+        data = data.replace(b"\n", b"\r\n")
+    command = ["adb", "-s", device.device_serial, "exec-out", "screencap", "-p"]
+    run.side_effect = [subprocess.TimeoutExpired(command, 20), subprocess.CompletedProcess([], 0, data, b"")]
+    with worker.screenshot_retry_policy(device, Logger(), signal):
+        np.testing.assert_array_equal(device.screenshot(), frame)
+    assert run.call_count == 2
+
+
+def test_corrupt_shell_fallback_is_rejected_without_more_retries(monkeypatch):
+    device, signal, run = device_with_capture(monkeypatch, [])
+    command = ["adb", "-s", device.device_serial, "exec-out", "screencap", "-p"]
+    run.side_effect = [
+        subprocess.TimeoutExpired(command, 20),
+        subprocess.CompletedProcess([], 0, b"not a PNG", b""),
+    ]
+    with pytest.raises(ValueError, match="截图解码失败"), worker.screenshot_retry_policy(device, Logger(), signal):
         device.screenshot()
     assert run.call_count == 2 and "screenshot" not in vars(device)
 

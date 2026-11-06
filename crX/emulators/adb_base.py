@@ -176,7 +176,7 @@ class AdbBasedController(BaseEmulatorController):
 
     def screenshot_via_shell(self) -> np.ndarray:
         """Alternate read-only transport, selected by the worker after a timeout."""
-        return self._capture_screen(["shell", "screencap", "-p"])
+        return self._capture_screen(["shell", "-T", "screencap", "-p"])
 
     def _capture_screen(self, command: list[str]) -> np.ndarray:
         result = self.adb(command, binary_output=True)
@@ -189,7 +189,13 @@ class AdbBasedController(BaseEmulatorController):
 
         if len(result.stdout) > 32 * 1024 * 1024:
             raise ValueError("截图大小超过 32 MiB 限制")
-        img_array = np.frombuffer(result.stdout, dtype=np.uint8)
+        data = result.stdout
+        # Some Android shell transports still translate LF into CRLF. Only undo
+        # that transformation when the PNG signature proves it happened; valid
+        # binary PNG data can itself contain CRLF and must remain untouched.
+        if command[0] == "shell" and data.startswith(b"\x89PNG\r\r\n\x1a\r\n"):
+            data = data.replace(b"\r\n", b"\n")
+        img_array = np.frombuffer(data, dtype=np.uint8)
         img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
 
         if img is None:

@@ -91,6 +91,24 @@ def test_recovery_dismisses_captured_native_result(clock):
     assert 141 < x < 219 and 545 < y < 578
 
 
+@pytest.mark.parametrize("stage", ["start", "restart"])
+def test_recovery_closes_captured_promotion(clock, stage):
+    frame = image(f"failure-promotion-{stage}-20261106.png")
+    assert find_popup_close(frame) == (330, 60)
+    emulator = RewardSequence(clock, [(frame, None), (image("failure-main-recovered.png"), None)])
+    assert nav.wait_for_clash_main_menu(emulator, Logger(), timeout=12)
+    assert emulator.clicks == [(0, 330, 60)]
+
+
+def test_promotion_close_rejects_dimmed_missing_and_unrelated_screens():
+    frame = image("failure-promotion-start-20261106.png")
+    assert find_popup_close((frame * 0.35).astype(np.uint8)) is None
+    frame[48:75, 317:345] = 0
+    assert find_popup_close(frame) is None
+    assert find_popup_close(image("training-battle-zh.png")) is None
+    assert find_popup_close(image("failure-main-recovered.png")) is None
+
+
 @pytest.mark.parametrize("number", range(2, 11))
 def test_attached_reward_stages(number):
     expected = "lucky_chest" if number <= 8 else "event_reward"
