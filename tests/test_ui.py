@@ -610,6 +610,27 @@ def select(tab, sample):
     tab._select()
 
 
+@pytest.mark.parametrize("populated", [False, True])
+def test_review_content_keeps_arrow_when_parent_sash_cursor_is_active(review_ui, populated):
+    ui, tab, add, _destination = review_ui
+    if populated:
+        add("pointer")
+    ui.update()
+    for panes in (tab.body_panes, tab.review_panes):
+        y = panes.sash_coord(0)[1] + 2
+        panes.event_generate("<Motion>", x=20, y=y)
+        assert str(panes.cget("cursor")) == "sb_v_double_arrow"
+        # Tk delays restoring a sash cursor when the pointer enters a child.
+        # Check inheritance before that timer runs, including unused table space.
+        for target in (tab.tree, tab.thumbnail_tree, tab.rows_frame, tab.details, tab.controls):
+            widget = target
+            while not widget.cget("cursor"):
+                widget = widget.master
+            assert str(widget.cget("cursor")) == "arrow", str(target)
+        assert str(tab.description_label.cget("cursor")) == "sb_v_double_arrow"
+        panes.event_generate("<Leave>")
+
+
 @pytest.mark.parametrize("missing_image", [False, True])
 @pytest.mark.parametrize("stage", ["待确认", "待上传"])
 def test_loaded_thumbnails_stop_redrawing_while_idle(review_ui, monkeypatch, missing_image, stage):

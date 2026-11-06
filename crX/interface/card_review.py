@@ -233,7 +233,9 @@ class CardReviewTab(ttk.Frame):
         )
         self._update_review_theme()
         self.body_panes.add(self.review_panes, minsize=80, stretch="always")
-        table = ttk.Frame(self.review_panes)
+        # Native sash cursors are restored on a timer when entering a child.
+        # Give content panes their own cursor so that delay cannot leak into them.
+        table = ttk.Frame(self.review_panes, cursor="arrow")
         self.sample_table = table
         table.columnconfigure(0, weight=1)
         table.rowconfigure(1, weight=1)
@@ -302,7 +304,7 @@ class CardReviewTab(ttk.Frame):
         self.thumbnail_tree.bind("<Button-4>", lambda _: self._thumbnail_scroll(-1))
         self.thumbnail_tree.bind("<Button-5>", lambda _: self._thumbnail_scroll(1))
         self.thumbnail_tree.bind("<Map>", lambda _: self._queue_thumbnails())
-        self.details = ttk.Notebook(self.review_panes)
+        self.details = ttk.Notebook(self.review_panes, cursor="arrow")
         self.review_panes.add(self.details, minsize=0, height=60, stretch="never")
         self.reference_panel = ttk.Labelframe(self.details, text="同卡正式参考", padding=4)
         self.reference_panel.columnconfigure(0, weight=1)
@@ -359,6 +361,7 @@ class CardReviewTab(ttk.Frame):
         self.frame_image.bind("<Configure>", lambda _: self._resize_frame())
         self.frame_image.bind("<Map>", lambda _: self._resize_frame())
         self.controls = ScrolledFrame(self.body_panes, padding=0, autohide=True, height=160)
+        self.controls.container.configure(cursor="arrow")
         self.controls.columnconfigure(0, weight=1)
         self.body_panes.add(self.controls.container, minsize=24, height=160, stretch="never")
         edit = ttk.Frame(self.controls)
