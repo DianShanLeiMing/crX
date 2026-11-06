@@ -266,6 +266,6 @@ def test_slow_swipe_passes_duration_to_adb(monkeypatch):
     commands = []
     monkeypatch.setattr(device, "adb", commands.append)
     device.swipe(210, 520, 210, 280, duration_ms=1000)
-    assert commands == [["shell", "input", "swipe", "210", "520", "210", "280", "1000"]]
+    assert commands == [["shell", "input", "swipe", "420", "1040", "420", "560", "1000"]]
     with pytest.raises(ValueError):
         device.swipe(210, 520, 210, 280, duration_ms=0)

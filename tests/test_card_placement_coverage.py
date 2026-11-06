@@ -4,7 +4,7 @@ from collections import Counter
 
 from crX.bot.card_data import CARD_GROUPS, CARD_NAMES_ZH, PLAY_COORDS
 from crX.bot.card_detection import CARD_DETECTION_ALIASES, calculate_play_coords, get_card_group
-from crX.bot.coords import GAME_SCREEN_SIZE
+from crX.bot.coords import REFERENCE_SCREEN_SIZE
 
 
 def test_named_hand_cards_have_unique_valid_placement_profiles():
@@ -14,7 +14,7 @@ def test_named_hand_cards_have_unique_valid_placement_profiles():
     assert set(assignments) == hand_cards
     assert all(count == 1 for count in assignments.values())
 
-    width, height = GAME_SCREEN_SIZE
+    width, height = REFERENCE_SCREEN_SIZE
     for card in hand_cards:
         profile = PLAY_COORDS[get_card_group(card)]
         for side in ("left", "right"):

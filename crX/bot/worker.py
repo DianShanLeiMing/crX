@@ -25,11 +25,12 @@ def screenshot_retry_policy(emulator, logger, shutdown_event):
     The worker owns recovery policy. Adapters retain a single bounded I/O attempt;
     patching the instance also covers screenshot calls inside adapter.restart().
     """
-    original = getattr(emulator, "screenshot", None)
+    method = "screenshot_native" if callable(getattr(emulator, "screenshot_native", None)) else "screenshot"
+    original = getattr(emulator, method, None)
     if original is None:
         yield
         return
-    overridden = "screenshot" in vars(emulator)
+    overridden = method in vars(emulator)
 
     def capture():
         try:
@@ -41,17 +42,18 @@ def screenshot_retry_policy(emulator, logger, shutdown_event):
             logger.change_status("ADB 截图超时，正在使用备用通道重试一次；暂不重启游戏")
             if shutdown_event.wait(0.5):
                 raise
-            fallback = getattr(emulator, "screenshot_via_shell", original)
+            fallback_name = "screenshot_native_via_shell" if method == "screenshot_native" else "screenshot_via_shell"
+            fallback = getattr(emulator, fallback_name, original)
             return fallback()
 
-    emulator.screenshot = capture
+    setattr(emulator, method, capture)
     try:
         yield
     finally:
         if overridden:
-            emulator.screenshot = original
+            setattr(emulator, method, original)
         else:
-            del emulator.screenshot
+            delattr(emulator, method)
 
 
 class WorkerProcess(Process):

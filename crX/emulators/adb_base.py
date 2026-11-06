@@ -11,6 +11,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from crX.bot.coords import GAME_SCREEN_SIZE, REFERENCE_SCREEN_SIZE, SCREEN_SCALE
 from crX.emulators.base import BaseEmulatorController, EmulatorNotReadyError
 
 logger = logging.getLogger(__name__)
@@ -146,15 +147,23 @@ class AdbBasedController(BaseEmulatorController):
         return [serial for serial, status in self.list_devices() if status == "device"]
 
     def click(self, x_coord: int, y_coord: int, clicks: int = 1, interval: float = 0.0):
-        """Click on the screen using ADB input tap."""
+        """Map rule-reference coordinates to native pixels and tap via ADB."""
         for _ in range(max(1, clicks)):
-            self.adb(f"shell input tap {x_coord} {y_coord}")
+            self.adb(["shell", "input", "tap", str(x_coord * SCREEN_SCALE), str(y_coord * SCREEN_SCALE)])
             if clicks > 1:
                 time.sleep(max(0.0, interval))
 
     def swipe(self, x_coord1: int, y_coord1: int, x_coord2: int, y_coord2: int, duration_ms: int | None = None):
-        """Swipe on the screen using ADB input swipe."""
-        command = ["shell", "input", "swipe", str(x_coord1), str(y_coord1), str(x_coord2), str(y_coord2)]
+        """Map rule-reference endpoints to native pixels and swipe via ADB."""
+        command = [
+            "shell",
+            "input",
+            "swipe",
+            str(x_coord1 * SCREEN_SCALE),
+            str(y_coord1 * SCREEN_SCALE),
+            str(x_coord2 * SCREEN_SCALE),
+            str(y_coord2 * SCREEN_SCALE),
+        ]
         if duration_ms is not None:
             if not 1 <= duration_ms <= 10000:
                 raise ValueError("滑动时长必须为 1–10000 毫秒")
@@ -163,7 +172,7 @@ class AdbBasedController(BaseEmulatorController):
 
     def screenshot(self) -> np.ndarray:
         """
-        Capture a screenshot using ADB 'exec-out screencap -p'.
+        Capture a device frame and normalize it to the rule recognizers' reference geometry.
 
         Returns:
             np.ndarray: The screenshot as a CV2 (BGR) image.
@@ -172,10 +181,24 @@ class AdbBasedController(BaseEmulatorController):
             RuntimeError: If the ADB screencap command fails.
             ValueError: If the captured image data cannot be decoded.
         """
+        return self._recognition_frame(self.screenshot_native())
+
+    def screenshot_native(self) -> np.ndarray:
+        """Return the original device pixels for capture, recording and geometry checks."""
         return self._capture_screen(["exec-out", "screencap", "-p"])
+
+    @staticmethod
+    def _recognition_frame(image: np.ndarray) -> np.ndarray:
+        if image.shape == (*GAME_SCREEN_SIZE[::-1], 3):
+            return cv2.resize(image, REFERENCE_SCREEN_SIZE, interpolation=cv2.INTER_AREA)
+        return image
 
     def screenshot_via_shell(self) -> np.ndarray:
         """Alternate read-only transport, selected by the worker after a timeout."""
+        return self._recognition_frame(self.screenshot_native_via_shell())
+
+    def screenshot_native_via_shell(self) -> np.ndarray:
+        """Native-resolution backup transport for the worker's bounded retry."""
         return self._capture_screen(["shell", "-T", "screencap", "-p"])
 
     def _capture_screen(self, command: list[str]) -> np.ndarray:

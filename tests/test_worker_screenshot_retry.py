@@ -43,6 +43,23 @@ def test_single_timeout_recovers_frame_and_restores_adapter(monkeypatch):
     assert all(call.kwargs == {"binary": True} for call in run.call_args_list)
 
 
+def test_native_capture_retry_keeps_hd_pixels_and_restores_method(monkeypatch):
+    device, signal, run = device_with_capture(monkeypatch, [])
+    frame = np.asarray(np.random.default_rng(42).integers(0, 256, (1280, 720, 3)), dtype=np.uint8)
+    ok, encoded = cv2.imencode(".png", frame)
+    assert ok
+    command = ["adb", "-s", device.device_serial, "exec-out", "screencap", "-p"]
+    run.side_effect = [
+        subprocess.TimeoutExpired(command, 20),
+        subprocess.CompletedProcess([], 0, encoded.tobytes(), b""),
+    ]
+    original = device.screenshot_native
+    with worker.screenshot_retry_policy(device, Logger(), signal):
+        np.testing.assert_array_equal(device.screenshot_native(), frame)
+    assert run.call_count == 2
+    assert device.screenshot_native == original and "screenshot_native" not in vars(device)
+
+
 def test_repeated_timeout_is_propagated_after_one_retry(monkeypatch):
     device, signal, run = device_with_capture(monkeypatch, ["timeout", "timeout"])
     with pytest.raises(subprocess.TimeoutExpired), worker.screenshot_retry_policy(device, Logger(), signal):

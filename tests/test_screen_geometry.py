@@ -28,10 +28,40 @@ from crX.bot.state_detect import (
     is_deck_full,
 )
 from crX.emulators.adb import AdbController
+from crX.emulators.base import EmulatorNotReadyError
 from crX.utils.card_review import export_candidate, save_review, scan_samples
 from tests.test_card_review import make_sample
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def test_hd_capture_preserves_native_pixels_and_normalizes_rules(monkeypatch):
+    reference = cv2.imread(str(FIXTURES / "hand-360-native.png"))
+    native = cv2.resize(reference, (720, 1280), interpolation=cv2.INTER_NEAREST)
+    device = AdbController(Mock(), "emulator-5554")
+    monkeypatch.setattr(device, "_capture_screen", lambda _command: native)
+    assert device.screenshot_native() is native
+    np.testing.assert_array_equal(device.screenshot(), reference)
+    assert check_if_in_battle(device)
+    assert cards.check_which_cards_are_available(device) == [0, 1, 2, 3]
+    commands = []
+    monkeypatch.setattr(device, "adb", commands.append)
+    device.click(112, 568)
+    device.swipe(180, 526, 180, 283, duration_ms=1000)
+    assert commands == [
+        ["shell", "input", "tap", "224", "1136"],
+        ["shell", "input", "swipe", "360", "1052", "360", "566", "1000"],
+    ]
+
+
+def test_native_geometry_check_requires_matching_density(monkeypatch):
+    device = AdbController(Mock(), "emulator-5554")
+    monkeypatch.setattr(device, "screenshot_native", lambda: np.zeros((1280, 720, 3), np.uint8))
+    monkeypatch.setattr(device, "adb", lambda command: subprocess.CompletedProcess(command, 0, "Override density: 320"))
+    device.verify_screen()
+    monkeypatch.setattr(device, "adb", lambda command: subprocess.CompletedProcess(command, 0, "Override density: 160"))
+    with pytest.raises(EmulatorNotReadyError, match="320 DPI"):
+        device.verify_screen()
 
 
 class Screen:
@@ -51,9 +81,9 @@ def test_device_config_and_recording_share_native_geometry(monkeypatch):
     )
     monkeypatch.setattr("crX.emulators.adb.time.sleep", lambda _: None)
     device.configure()
-    assert GAME_SCREEN_SIZE == (360, 640) == (FRAME_W, FRAME_H)
-    assert GAME_SCREEN_DPI == 160
-    assert commands == [["shell", "wm", "size", "360x640"], ["shell", "wm", "density", "160"]]
+    assert GAME_SCREEN_SIZE == (720, 1280) == (FRAME_W, FRAME_H)
+    assert GAME_SCREEN_DPI == 320
+    assert commands == [["shell", "wm", "size", "720x1280"], ["shell", "wm", "density", "320"]]
 
 
 def test_native_main_and_empty_reward_survive_new_aspect_ratio():

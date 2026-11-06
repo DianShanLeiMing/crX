@@ -23,7 +23,6 @@ from crX.bot.coords import (
     CARD_PAGE_HEADING_REGION,
     CARD_PAGE_MENU_REGION,
     DECK_CARD_COST_REGIONS,
-    GAME_SCREEN_SIZE,
     ITEM_DISTRIBUTION_COLLECT_ALL_SIZE,
     ITEM_DISTRIBUTION_INTRO_TITLE_REGION,
     ITEM_DISTRIBUTION_TITLE_REGION,
@@ -44,6 +43,7 @@ from crX.bot.coords import (
     POST_BATTLE_REWARD_OBJECT_REGION,
     POST_BATTLE_REWARD_STARS_REGION,
     POST_BATTLE_REWARD_TOP_REGION,
+    REFERENCE_SCREEN_SIZE,
     SELECTED_BATTLE_MODE_REGION,
     SHOP_GIFT_BRIGHT_POINT,
     SHOP_NATIVE_GIFT_REGION,
@@ -55,7 +55,7 @@ from crX.detection.image_rec import all_pixels_are_equal, check_line_for_color, 
 
 def is_item_distribution_image(image) -> bool:
     """Identify the centered intro or settled page; neither implies a claim button."""
-    if image is None or image.shape != (*GAME_SCREEN_SIZE[::-1], 3):
+    if image is None or image.shape != (*REFERENCE_SCREEN_SIZE[::-1], 3):
         return False
     return any(
         find_image(image, "item_distribution_title", tolerance=0.93, subcrop=region) is not None
@@ -85,7 +85,7 @@ def check_if_in_battle(emulator):
     iar_bgr = emulator.screenshot()
     if iar_bgr is None:
         return False
-    if iar_bgr.shape != (*GAME_SCREEN_SIZE[::-1], 3):
+    if iar_bgr.shape != (*REFERENCE_SCREEN_SIZE[::-1], 3):
         return False
     if all(pixel_is_equal(iar_bgr[y, x], color, tol=18) for x, y, color in BATTLE_HAND_BORDER_SAMPLES):
         return True
@@ -155,7 +155,7 @@ def check_for_trophy_reward_menu(emulator) -> bool:
 
 
 def is_trophy_reward_image(iar) -> bool:
-    if iar is None or iar.shape != (*GAME_SCREEN_SIZE[::-1], 3):
+    if iar is None or iar.shape != (*REFERENCE_SCREEN_SIZE[::-1], 3):
         return False
     pixels = [
         iar[599][148],
@@ -191,7 +191,7 @@ def check_for_reward_choice_screen(emulator) -> bool:
 
 
 def is_reward_choice_image(iar) -> bool:
-    if iar is None or iar.shape != (*GAME_SCREEN_SIZE[::-1], 3):
+    if iar is None or iar.shape != (*REFERENCE_SCREEN_SIZE[::-1], 3):
         return False
     pixels = [
         iar[195][77],
@@ -249,7 +249,7 @@ def count_elixir(emulator, elixir_count) -> bool:
 
 def image_has_elixir(image, elixir_count: int) -> bool:
     """Read elixir from an already captured frame, without another device call."""
-    if image is None or image.shape != (*GAME_SCREEN_SIZE[::-1], 3) or not 1 <= elixir_count <= len(ELIXIR_COORDS):
+    if image is None or image.shape != (*REFERENCE_SCREEN_SIZE[::-1], 3) or not 1 <= elixir_count <= len(ELIXIR_COORDS):
         return False
     y, x = ELIXIR_COORDS[elixir_count - 1]
     return pixel_is_equal(image[y, x], ELIXIR_COLOR, tol=65)
@@ -275,7 +275,7 @@ def check_if_on_clash_main_menu(emulator) -> bool:
 
 
 def _is_clash_main_menu_image(image) -> bool:
-    if image is None or image.shape != (*GAME_SCREEN_SIZE[::-1], 3):
+    if image is None or image.shape != (*REFERENCE_SCREEN_SIZE[::-1], 3):
         return False
     # At 160 DPI, 9:16 moves fixed-size controls rather than stretching their artwork.
     # Require three independent native anchors plus undimmed yellow button pixels.
@@ -355,7 +355,7 @@ def is_generic_post_battle_reward(image) -> bool:
     UI detail, and a substantial illuminated object distinct from the backdrop.
     Navigation supplies the flow scope, temporal confirmation and click budget.
     """
-    if image is None or image.shape != (*GAME_SCREEN_SIZE[::-1], 3):
+    if image is None or image.shape != (*REFERENCE_SCREEN_SIZE[::-1], 3):
         return False
     hue, saturation, value = cv2.cvtColor(image, cv2.COLOR_BGR2HSV).transpose(2, 0, 1)
     warm = ((hue <= 40) | (hue >= 170)) & (saturation > 60) & (value > 60)
@@ -402,7 +402,7 @@ def detect_post_battle_reward(image) -> Literal["lucky_chest", "event_reward"] |
     HSV ranges describe chest and event backdrops. Puzzle gradients additionally
     require native artwork/text anchors. Enlarged attachments are not templates.
     """
-    if image is None or image.shape != (*GAME_SCREEN_SIZE[::-1], 3):
+    if image is None or image.shape != (*REFERENCE_SCREEN_SIZE[::-1], 3):
         return None
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     hue, saturation, value = hsv.transpose(2, 0, 1)
@@ -638,7 +638,7 @@ def check_if_battle_mode_is_selected(emulator, mode: str):
     }
     look_folder = mode2folder[mode]
     image = emulator.screenshot()
-    if image is None or image.shape != (*GAME_SCREEN_SIZE[::-1], 3):
+    if image is None or image.shape != (*REFERENCE_SCREEN_SIZE[::-1], 3):
         return False
     print(f"[DEBUG] Checking if {mode} is selected...")
     print(f"[DEBUG] Looking in folder: {look_folder}")
@@ -649,7 +649,7 @@ def check_if_battle_mode_is_selected(emulator, mode: str):
 
 def check_if_on_card_page(emulator) -> bool:
     iar = emulator.screenshot()
-    if iar is None or iar.shape != (*GAME_SCREEN_SIZE[::-1], 3):
+    if iar is None or iar.shape != (*REFERENCE_SCREEN_SIZE[::-1], 3):
         return False
     x, y = CARD_PAGE_BRIGHT_POINT
     if (
@@ -824,7 +824,7 @@ def check_if_on_battle_log_page(emulator) -> bool:
 
 def check_if_on_shop(emulator) -> bool:
     iar = emulator.screenshot()
-    if iar is None or iar.shape != (*GAME_SCREEN_SIZE[::-1], 3):
+    if iar is None or iar.shape != (*REFERENCE_SCREEN_SIZE[::-1], 3):
         return False
     x, y = SHOP_GIFT_BRIGHT_POINT
     if pixel_is_equal(iar[y, x], [3, 122, 209], tol=25) and all(
@@ -1026,7 +1026,7 @@ CARD_MASTERY_PIXEL_TOLERANCE = 15
 
 def is_deck_full(emulator) -> bool:
     iar = numpy.asarray(emulator.screenshot())
-    if iar.shape != (*GAME_SCREEN_SIZE[::-1], 3):
+    if iar.shape != (*REFERENCE_SCREEN_SIZE[::-1], 3):
         return False
     if all(
         numpy.count_nonzero(

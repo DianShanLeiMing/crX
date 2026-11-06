@@ -55,12 +55,12 @@ class AdbController(AdbBasedController):
 
     def verify_screen(self):
         # Actual capture geometry is authoritative, not the window dimensions.
-        if self.screenshot().shape != (SCREEN_HEIGHT, SCREEN_WIDTH, 3):
-            raise EmulatorNotReadyError("截图必须为 360x640 BGR 图像，请调整模拟器显示设置")
+        if self.screenshot_native().shape != (SCREEN_HEIGHT, SCREEN_WIDTH, 3):
+            raise EmulatorNotReadyError("截图必须为 720x1280 BGR 图像，请调整模拟器显示设置")
         density = self.adb(["shell", "wm", "density"])
         values = re.findall(r"(?:Physical|Override) density:\s*(\d+)", density.stdout or "")
         if density.returncode or not values or int(values[-1]) != SCREEN_DENSITY:
-            raise EmulatorNotReadyError("当前生效的屏幕密度必须为 160 DPI")
+            raise EmulatorNotReadyError("当前生效的屏幕密度必须为 320 DPI")
 
     def restart(self):
         from crX.bot.nav import wait_for_clash_main_menu

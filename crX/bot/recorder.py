@@ -4,17 +4,17 @@ Writes one self-contained folder per fight (the "pack" format consumed by the
 royalestrat ``user_data`` importer):
 
     recordings/<slug>/
-      capture.mkv            # lossless FFV1 video, 360x640, BGR, 3 fps  (only if dimension/color-exact)
+      capture.mkv            # lossless FFV1 video, 720x1280, BGR, 3 fps  (only if dimension/color-exact)
        --- or, when cv2's FFV1 crops odd dims / subsamples chroma (the common case): ---
-      frames/000000.png ...  # lossless PNG, 360x640, BGR, 3 fps         (fallback)
+      frames/000000.png ...  # lossless PNG, 720x1280, BGR, 3 fps         (fallback)
       plays.jsonl            # one JSON line per deploy: {frame_index, card_index (hand slot 0-3), x, y, elapsed_s}
       manifest.json
 
-Even with the 360x640 frame size, a backend can subsample chroma or otherwise
+Even with the 720x1280 frame size, a backend can subsample chroma or otherwise
 change pixels. _ffv1_available() probes for this and falls back to
 PNG (lossless, exact dims, exact BGR) whenever FFV1 is not pixel-faithful.
 
-Channel order is load-bearing: ``emulator.screenshot()`` is BGR and we keep it
+Channel order is load-bearing: ``emulator.screenshot_native()`` is BGR and we keep it
 BGR end to end via cv2 (no PIL RGB flip). A fixed-cadence background thread grabs
 frames at ``fps`` while the worker thread logs the plays it makes inline.
 
@@ -36,11 +36,11 @@ from typing import Any
 import cv2
 import numpy as np
 
-from crX.bot.coords import GAME_SCREEN_SIZE
+from crX.bot.coords import GAME_SCREEN_SIZE, REFERENCE_SCREEN_SIZE, SCREEN_SCALE
 from crX.utils.platform import get_recordings_dir
 
 # Fixed capture geometry (absolute emulator resolution). VideoWriter wants (w, h);
-# screenshots are (h, w, c) == (640, 360, 3).
+# screenshots are (h, w, c) == (1280, 720, 3).
 FRAME_W, FRAME_H = GAME_SCREEN_SIZE
 DEFAULT_FPS = 3.0
 # Skip starting a new recording once the recordings drive is over 90% full
@@ -126,8 +126,8 @@ class FightPackRecorder:
         entry = {
             "frame_index": self._frame_count,  # atomic int read under the GIL
             "card_index": int(card_index),
-            "x": int(x),
-            "y": int(y),
+            "x": int(x) * SCREEN_SCALE,
+            "y": int(y) * SCREEN_SCALE,
             "elapsed_s": round(float(elapsed_s), 2),
         }
         with self._lock:
@@ -239,7 +239,8 @@ class FightPackRecorder:
         next_t = time.time()
         while not self._stop.is_set():
             try:
-                frame = self._emulator.screenshot()
+                capture = getattr(self._emulator, "screenshot_native", self._emulator.screenshot)
+                frame = capture()
             except Exception as e:
                 self._log(f"Capture screenshot failed: {e}")
                 frame = None
@@ -280,6 +281,7 @@ class FightPackRecorder:
             "fight_mode": self.fight_mode,
             "fps": achieved_fps,
             "resolution": [FRAME_W, FRAME_H],
+            "reference_resolution": list(REFERENCE_SCREEN_SIZE),
             "frames_source": self.frames_source,
             "n_frames": self._frame_count,
             "n_plays": len(self._plays),

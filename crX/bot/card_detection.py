@@ -16,12 +16,12 @@ from crX.bot.card_samples import active_card_samples
 from crX.bot.coords import (
     CARD_FINGERPRINT_SIZE,
     CHAMPION_ABILITY_DISMISS_COORD,
-    GAME_SCREEN_SIZE,
     HAND_AVAILABLE_TOP_LEFTS,
     HAND_CARD_SIZE,
     HAND_CARD_TOP_LEFTS,
     LEGACY_HAND_CARD_TOP_LEFTS,
     LEGACY_SCREEN_SIZE,
+    REFERENCE_SCREEN_SIZE,
 )
 from crX.bot.state_detect import image_has_elixir
 from crX.utils.card_library import runtime_entries
@@ -259,7 +259,7 @@ def get_all_pixel_data(emulator, chosen_card_index):
 
 
 def extract_card_fingerprint(image, chosen_card_index):
-    if image is None or image.shape not in ((*GAME_SCREEN_SIZE[::-1], 3), (*LEGACY_SCREEN_SIZE[::-1], 3)):
+    if image is None or image.shape not in ((*REFERENCE_SCREEN_SIZE[::-1], 3), (*LEGACY_SCREEN_SIZE[::-1], 3)):
         raise ValueError("卡牌指纹需要 360×640 BGR 画面, 历史样本兼容 419×633")
     if not 0 <= chosen_card_index < len(toplefts):
         raise ValueError("手牌位置必须为 0–3")
@@ -329,7 +329,7 @@ def check_which_cards_are_available(emulator, check_side=False):
     global battle_iar
     battle_iar = emulator.screenshot()
     card_exists_list = []
-    if battle_iar is None or battle_iar.shape != (*GAME_SCREEN_SIZE[::-1], 3):
+    if battle_iar is None or battle_iar.shape != (*REFERENCE_SCREEN_SIZE[::-1], 3):
         return card_exists_list
 
     if check_side:

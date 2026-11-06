@@ -10,13 +10,13 @@ import numpy as np
 
 from crX.bot.coords import (
     BATTLE_RESULT_BUTTON_REGION,
-    GAME_SCREEN_SIZE,
     ITEM_DISTRIBUTION_COLLECT_ALL_REGION,
     ITEM_DISTRIBUTION_COLLECT_ALL_SIZE,
     OPPONENT_WINNER_LABEL_REGION,
     PLAYER_WINNER_LABEL_REGION,
     POPUP_CLOSE_BUTTON_SIZE,
     POPUP_CLOSE_REGION,
+    REFERENCE_SCREEN_SIZE,
     SHOP_CATALOG_REGION,
     SHOP_DAILY_FIRST_COLUMN,
     SHOP_DAILY_LABEL_OFFSETS,
@@ -61,7 +61,7 @@ def find_post_battle_button(emulator):
 
 def find_post_battle_button_in_image(iar):
     """Same-frame result button lookup for the post-battle navigation loop."""
-    if iar is None or iar.shape != (*GAME_SCREEN_SIZE[::-1], 3):
+    if iar is None or iar.shape != (*REFERENCE_SCREEN_SIZE[::-1], 3):
         return None
     pixels = [iar[551][153], iar[553][205], iar[559][184], iar[560][173]]
     colors = [[255, 187, 104], [255, 187, 104], [255, 255, 255], [255, 255, 255]]
@@ -78,7 +78,7 @@ def find_post_battle_button_in_image(iar):
 def find_battle_outcome(emulator) -> Literal["win", "loss"] | None:
     """Locate 获胜者 above the opponent's or player's crowns on one result frame."""
     image = emulator.screenshot()
-    if image is None or image.shape[:2] != GAME_SCREEN_SIZE[::-1]:
+    if image is None or image.shape[:2] != REFERENCE_SCREEN_SIZE[::-1]:
         return None
     if find_image(image, "post_battle_button", tolerance=0.9, subcrop=BATTLE_RESULT_BUTTON_REGION) is None:
         return None
@@ -102,7 +102,7 @@ def locate_free_shop_offer_icon(emulator) -> tuple[int, int] | None:
 
 
 def _shop_image_is_valid(image) -> bool:
-    return image is not None and image.shape == (*GAME_SCREEN_SIZE[::-1], 3)
+    return image is not None and image.shape == (*REFERENCE_SCREEN_SIZE[::-1], 3)
 
 
 def find_daily_shop_heading(image) -> tuple[int, int] | None:

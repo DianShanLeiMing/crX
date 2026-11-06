@@ -14,7 +14,7 @@ import numpy as np
 from PIL import Image
 
 from crX.bot.card_data import CARD_NAMES_ZH
-from crX.bot.coords import CARD_FINGERPRINT_SIZE, GAME_SCREEN_SIZE, HAND_CARD_SIZE, LEGACY_SCREEN_SIZE
+from crX.bot.coords import CARD_FINGERPRINT_SIZE, HAND_CARD_SIZE, LEGACY_SCREEN_SIZE, REFERENCE_SCREEN_SIZE
 
 STATUS_LABELS = {
     "pending": "待确认",
@@ -481,7 +481,7 @@ def load_card_thumbnail(sample: ReviewSample, *, size=CARD_THUMBNAIL_SIZE) -> Im
 
 def load_previews(sample: ReviewSample) -> dict:
     images = {}
-    for kind, bounds in (("card", (120, 148)), ("hand", (470, 72)), ("frame", GAME_SCREEN_SIZE)):
+    for kind, bounds in (("card", (120, 148)), ("hand", (470, 72)), ("frame", REFERENCE_SCREEN_SIZE)):
         try:
             with Image.open(sample.file(kind)) as image:
                 if image.width > 1000 or image.height > 1000:
@@ -508,7 +508,7 @@ def export_candidate(sample: ReviewSample) -> Path:
     if type(slot) is not int or not 0 <= slot < 4 or sample.record.get("available") is not True:
         raise ValueError("只有确认可用的单张手牌样本才能导出指纹；此样本可保留用于诊断")
     frame = cv2.imread(str(sample.file("frame")))
-    if frame is None or frame.shape not in ((*GAME_SCREEN_SIZE[::-1], 3), (*LEGACY_SCREEN_SIZE[::-1], 3)):
+    if frame is None or frame.shape not in ((*REFERENCE_SCREEN_SIZE[::-1], 3), (*LEGACY_SCREEN_SIZE[::-1], 3)):
         raise ValueError("原始截图缺失或尺寸无效，需要 360×640 画面或 419×633 历史样本")
     fingerprint = extract_card_fingerprint(frame, slot)
     path = sample_file(sample.directory, f"{sample.name}-candidate.json")

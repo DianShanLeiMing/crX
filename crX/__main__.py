@@ -181,7 +181,7 @@ class BotApplication:
                         reachable, reason = device.is_reachable()
                         if not reachable:
                             raise ValueError(reason)
-                        image = device.screenshot()
+                        image = device.screenshot_native()
                         result = (
                             "status",
                             f"已连接 {device.device_serial}；截图尺寸 {image.shape[1]}×{image.shape[0]}",

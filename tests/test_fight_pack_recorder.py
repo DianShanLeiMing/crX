@@ -22,7 +22,7 @@ class _FakeEmu:
     """Returns a valid (640, 360, 3) BGR frame on every screenshot()."""
 
     def screenshot(self) -> np.ndarray:
-        return np.zeros((640, 360, 3), dtype=np.uint8)
+        return np.zeros((1280, 720, 3), dtype=np.uint8)
 
 
 def _read_manifest(pack_dir: str) -> dict:
@@ -170,7 +170,7 @@ def test_pack_is_spec_valid(tmp_path, monkeypatch):
     # uuid is the importer's dedup key: 32-char lowercase hex, stable across re-exports.
     assert isinstance(manifest["uuid"], str) and len(manifest["uuid"]) == 32
     assert int(manifest["uuid"], 16) >= 0  # valid hex
-    assert manifest["resolution"] == [360, 640]
+    assert manifest["resolution"] == [720, 1280]
     assert manifest["fight_mode"] == "1v1_trophy"
     assert manifest["outcome"] == "win"
     assert manifest["pcb_version"] == "vTEST"
@@ -183,7 +183,7 @@ def test_pack_is_spec_valid(tmp_path, monkeypatch):
         plays = [json.loads(line) for line in f if line.strip()]
     assert len(plays) == 1
     play = plays[0]
-    assert play["card_index"] == 2 and play["x"] == 215 and play["y"] == 360
+    assert play["card_index"] == 2 and play["x"] == 430 and play["y"] == 720
     assert 0 <= play["frame_index"] <= manifest["n_frames"]
 
 

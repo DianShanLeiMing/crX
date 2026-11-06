@@ -89,8 +89,8 @@ def test_missing_game_does_not_modify_display(monkeypatch):
 
 def test_rotated_screenshot_is_rejected(monkeypatch):
     device = AdbController(Logger(), "127.0.0.1:16417")
-    monkeypatch.setattr(device, "screenshot", lambda: np.zeros((360, 640, 3), dtype=np.uint8))
-    with pytest.raises(EmulatorNotReadyError, match="360x640"):
+    monkeypatch.setattr(device, "screenshot_native", lambda: np.zeros((720, 1280, 3), dtype=np.uint8))
+    with pytest.raises(EmulatorNotReadyError, match="720x1280"):
         device.verify_screen()
 
 
