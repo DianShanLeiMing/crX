@@ -27,12 +27,13 @@ from crX.bot.state_detect import (
     is_item_distribution_image,
 )
 from crX.utils.logger import Logger
+from tests.screen_fixtures import native_replay
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def image(name):
-    return cv2.imread(str(FIXTURES / name))
+    return native_replay(cv2.imread(str(FIXTURES / name)))
 
 
 @pytest.fixture
@@ -73,7 +74,7 @@ class RewardSequence:
         elif find_popup_close(self.last_frame) is not None:
             assert (x, y) == find_popup_close(self.last_frame)
         else:
-            assert 137 < x < 301 and 536 < y < 627
+            assert 274 < x < 602 and 1072 < y < 1254
         _, delay = self.scenes[self.index]
         if delay is None and self.index + 1 < len(self.scenes):
             self.index += 1
@@ -88,22 +89,22 @@ def test_recovery_dismisses_captured_native_result(clock):
     assert nav.wait_for_clash_main_menu(emulator, Logger(), timeout=12)
     assert len(emulator.clicks) == 1
     _, x, y = emulator.clicks[0]
-    assert 141 < x < 219 and 545 < y < 578
+    assert 282 < x < 438 and 1090 < y < 1156
 
 
 @pytest.mark.parametrize("stage", ["start", "restart"])
 def test_recovery_closes_captured_promotion(clock, stage):
     frame = image(f"failure-promotion-{stage}-20261106.png")
-    assert find_popup_close(frame) == (330, 60)
+    assert find_popup_close(frame) == (660, 120)
     emulator = RewardSequence(clock, [(frame, None), (image("failure-main-recovered.png"), None)])
     assert nav.wait_for_clash_main_menu(emulator, Logger(), timeout=12)
-    assert emulator.clicks == [(0, 330, 60)]
+    assert emulator.clicks == [(0, 660, 120)]
 
 
 def test_promotion_close_rejects_dimmed_missing_and_unrelated_screens():
     frame = image("failure-promotion-start-20261106.png")
     assert find_popup_close((frame * 0.35).astype(np.uint8)) is None
-    frame[48:75, 317:345] = 0
+    frame[96:150, 634:690] = 0
     assert find_popup_close(frame) is None
     assert find_popup_close(image("training-battle-zh.png")) is None
     assert find_popup_close(image("failure-main-recovered.png")) is None
@@ -126,18 +127,18 @@ def test_non_reward_screens_and_plain_backgrounds_are_not_clickable():
             "reward-coins-native-02.png",
             "failure-item-distribution-intro-native.png",  # Distribution navigation must wait instead of tapping.
         ):
-            assert detect_post_battle_reward(cv2.imread(str(path))) is None, path.name
+            assert detect_post_battle_reward(image(path.name)) is None, path.name
     for color in ((20, 140, 235), (160, 15, 110), (100, 60, 30)):
-        assert detect_post_battle_reward(np.full((640, 360, 3), color, dtype=np.uint8)) is None
+        assert detect_post_battle_reward(np.full((1280, 720, 3), color, dtype=np.uint8)) is None
     assert detect_post_battle_reward(None) is None
     assert detect_post_battle_reward(np.zeros((200, 100, 3), dtype=np.uint8)) is None
 
 
 def test_single_visible_star_still_requires_the_chest_object():
     chest = image("post-battle-attached-02.png")
-    chest[136:197, 129:193] = chest[136, 129]
+    chest[272:394, 258:386] = chest[272, 258]
     assert detect_post_battle_reward(chest) == "lucky_chest"
-    chest[182:455, 86:275] = chest[182, 86]
+    chest[364:910, 172:550] = chest[364, 172]
     assert detect_post_battle_reward(chest) is None
 
 
@@ -261,7 +262,7 @@ def test_native_coin_bag_is_recognized_independently_of_amount(number):
     frame = image(f"reward-coins-native-{number:02}.png")
     assert detect_post_battle_reward(frame) == "event_reward"
     assert not is_clash_main_menu_image(frame)
-    frame[345:385, 105:255] = 0
+    frame[690:770, 210:510] = 0
     assert detect_post_battle_reward(frame) == "event_reward"
 
 
@@ -269,10 +270,10 @@ def test_native_coin_bag_is_recognized_independently_of_amount(number):
 def test_native_coin_bag_requires_object_and_full_reward_backdrop(number):
     frame = image(f"reward-coins-native-{number:02}.png")
     for left, top, right, bottom in (
-        (135, 270, 225, 347),
+        (270, 540, 450, 694),
         POST_BATTLE_REWARD_TOP_REGION,
-        (4, 61, 56, 556),
-        (304, 61, 356, 556),
+        (8, 122, 112, 1112),
+        (608, 122, 712, 1112),
     ):
         incomplete = frame.copy()
         incomplete[top:bottom, left:right] = 0
@@ -339,8 +340,8 @@ def test_native_revealed_puzzle_is_a_reward(number):
     assert detect_post_battle_reward(frame) == "event_reward"
     assert not is_clash_main_menu_image(frame)
     # The individual piece and collection progress are not navigation anchors.
-    frame[285:350, 145:210] = 0
-    frame[424:445, 170:215] = 0
+    frame[570:700, 290:420] = 0
+    frame[848:890, 340:430] = 0
     assert detect_post_battle_reward(frame) == "event_reward"
 
 
@@ -451,9 +452,9 @@ def test_generic_recognition_covers_reward_backdrops_without_templates(filename,
 def test_generic_recognition_rejects_all_non_reward_fixtures_and_empty_screens():
     for path in FIXTURES.glob("*.png"):
         if path.name not in GENERIC_REWARD_FIXTURES:
-            assert not is_generic_post_battle_reward(cv2.imread(str(path))), path.name
+            assert not is_generic_post_battle_reward(image(path.name)), path.name
     for color in ((20, 140, 235), (160, 15, 110), (100, 60, 30)):
-        assert not is_generic_post_battle_reward(np.full((640, 360, 3), color, dtype=np.uint8))
+        assert not is_generic_post_battle_reward(np.full((1280, 720, 3), color, dtype=np.uint8))
     assert not is_generic_post_battle_reward(None)
     assert not is_generic_post_battle_reward(np.zeros((200, 100, 3), dtype=np.uint8))
 
@@ -477,7 +478,7 @@ def test_generic_reward_requires_all_backdrop_regions_and_an_object():
         incomplete[top:bottom, left:right] = 0
         assert not is_generic_post_battle_reward(incomplete)
     main = image("failure-main-recovered.png")
-    frame[556:640] = main[556:640]  # Visible navigation must block the generic route.
+    frame[1112:1280] = main[1112:1280]  # Visible navigation must block the generic route.
     assert not is_generic_post_battle_reward(frame)
 
 
@@ -513,7 +514,7 @@ def test_generic_reward_chain_completes_only_one_battle(clock, monkeypatch):
 
 
 def test_obscured_main_menu_cannot_be_treated_as_a_generic_reward():
-    for region in ((115, 460, 245, 540), (318, 45, 352, 91), (150, 575, 210, 640)):
+    for region in ((230, 920, 490, 1080), (636, 90, 704, 182), (300, 1150, 420, 1280)):
         main = image("main-daily-bonus-360-native.png")
         left, top, right, bottom = region
         main[top:bottom, left:right] = 0
@@ -532,7 +533,7 @@ def test_generic_confirmation_restarts_after_an_unknown_frame(clock, monkeypatch
         clock,
         [
             (unclassified_reward(), 0.5),
-            (np.zeros((640, 360, 3), dtype=np.uint8), 0.5),
+            (np.zeros((1280, 720, 3), dtype=np.uint8), 0.5),
             (unclassified_reward(), None),
             (image("failure-main-recovered.png"), None),
         ],
@@ -633,7 +634,7 @@ def test_unrecognized_non_reward_pages_never_use_generic_clicks(clock, monkeypat
 @pytest.mark.parametrize("number", range(1, 5))
 def test_native_four_star_chest_failure_frames_are_recognized(number):
     frame = image(f"failure-chest-native-{number:02}.png")
-    assert frame.shape == (640, 360, 3)
+    assert frame.shape == (1280, 720, 3)
     assert detect_post_battle_reward(frame) == "lucky_chest"
     assert not is_clash_main_menu_image(frame)
 
@@ -641,7 +642,7 @@ def test_native_four_star_chest_failure_frames_are_recognized(number):
 @pytest.mark.parametrize("number", range(1, 5))
 def test_native_chest_anchor_requires_backdrop_and_foreground(number):
     frame = image(f"failure-chest-native-{number:02}.png")
-    for left, top, right, bottom in ((0, 0, 360, 71), (0, 556, 360, 627), (77, 233, 284, 425)):
+    for left, top, right, bottom in ((0, 0, 720, 142), (0, 1112, 720, 1254), (154, 466, 568, 850)):
         incomplete = frame.copy()
         incomplete[top:bottom, left:right] = 0
         assert detect_post_battle_reward(incomplete) is None
@@ -688,12 +689,12 @@ def test_native_four_star_chest_that_does_not_advance_is_still_bounded(clock):
 def test_failure_main_menus_ignore_currency_glints(filename):
     main = image(filename)
     assert is_clash_main_menu_image(main)
-    main[:35] = 0  # Resource counters are not a reliable main-menu anchor.
+    main[:70] = 0  # Resource counters are not a reliable main-menu anchor.
     assert is_clash_main_menu_image(main)
 
 
 def test_main_menu_fallback_requires_all_fixed_anchors():
-    for region in ((129, 460, 236, 536), (318, 45, 352, 91), (129, 581, 236, 640)):
+    for region in ((258, 920, 472, 1072), (636, 90, 704, 182), (258, 1162, 472, 1280)):
         main = image("failure-main-currency.png")
         left, top, right, bottom = region
         main[top:bottom, left:right] = 0
@@ -705,9 +706,9 @@ def test_main_menu_fallback_requires_all_fixed_anchors():
 def test_daily_bonus_main_ignores_button_subtitle_but_requires_all_anchors():
     main = image("main-daily-bonus-360-native.png")
     assert is_clash_main_menu_image(main)
-    main[508:532, 135:225] = 0  # Reward copy changes independently of the battle title.
+    main[1016:1064, 270:450] = 0  # Reward copy changes independently of the battle title.
     assert is_clash_main_menu_image(main)
-    for left, top, right, bottom in ((115, 460, 245, 540), (318, 45, 352, 91), (150, 575, 210, 640)):
+    for left, top, right, bottom in ((230, 920, 490, 1080), (636, 90, 704, 182), (300, 1150, 420, 1280)):
         incomplete = main.copy()
         incomplete[top:bottom, left:right] = 0
         assert not is_clash_main_menu_image(incomplete)
@@ -716,7 +717,7 @@ def test_daily_bonus_main_ignores_button_subtitle_but_requires_all_anchors():
 
 def test_startup_wait_accepts_daily_bonus_main_without_clicking(clock, monkeypatch):
     screen = RewardSequence(
-        clock, [(np.zeros((640, 360, 3), dtype=np.uint8), 11), (image("main-daily-bonus-360-native.png"), None)]
+        clock, [(np.zeros((1280, 720, 3), dtype=np.uint8), 11), (image("main-daily-bonus-360-native.png"), None)]
     )
     logger = Logger()
     messages = []
@@ -754,10 +755,10 @@ def test_recovery_result_clicks_remain_bounded(clock):
 
 def test_new_reward_backdrops_require_foreground_artwork():
     chest = image("failure-chest-rainbow.png")
-    chest[233:425, 77:284] = chest[233, 77]
+    chest[466:850, 154:568] = chest[466, 154]
     assert detect_post_battle_reward(chest) is None
     coins = image("failure-reward-coins.png")
-    coins[140:390, 130:290] = coins[140, 130]
+    coins[280:780, 260:580] = coins[280, 260]
     assert detect_post_battle_reward(coins) is None
 
 
@@ -787,7 +788,7 @@ def test_startup_wait_can_drain_recognized_rewards(clock):
 
 
 def test_startup_unknown_timeout_remembers_exact_frame_without_clicks(clock, monkeypatch):
-    unknown = np.zeros((640, 360, 3), dtype=np.uint8)
+    unknown = np.zeros((1280, 720, 3), dtype=np.uint8)
     screen = RewardSequence(clock, [(unknown, 2.0), (image("failure-main-recovered.png"), None)])
     monkeypatch.setattr(nav, "check_if_on_clan_voyage", lambda _: False)
     logger = Logger()
@@ -798,14 +799,14 @@ def test_startup_unknown_timeout_remembers_exact_frame_without_clicks(clock, mon
     assert is_clash_main_menu_image(screen.screenshot())  # A later capture must not replace the failed frame.
 
 
-@pytest.mark.parametrize("offset", [(0, 0), (-80, -150), (-50, 220), (15, 370)])
+@pytest.mark.parametrize("offset", [(0, 0), (-160, -300), (-100, 440), (30, 740)])
 def test_popup_close_follows_button_position(offset):
     # User's 240x427 attachment normalized to runtime geometry; no native capture claim.
     original = image("card-received-popup-360.png")
     coord = find_popup_close(original)
-    assert coord is not None and 310 < coord[0] < 330 and 205 < coord[1] < 230
+    assert coord is not None and 620 < coord[0] < 660 and 410 < coord[1] < 460
     dx, dy = offset
-    moved = cv2.warpAffine(original, np.array([[1, 0, dx], [0, 1, dy]], dtype=np.float32), (360, 640))
+    moved = cv2.warpAffine(original, np.array([[1, 0, dx], [0, 1, dy]], dtype=np.float32), (720, 1280))
     assert find_popup_close(moved) == (coord[0] + dx, coord[1] + dy)
 
 
@@ -813,8 +814,8 @@ def test_popup_close_requires_bright_red_x():
     original = image("card-received-popup-360.png")
     gray = cv2.cvtColor(cv2.cvtColor(original, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR)
     no_x = original.copy()
-    no_x[203:232, 307:337] = (40, 40, 230)
-    for frame in (None, original[:200], gray, (original * 0.4).astype(np.uint8), no_x):
+    no_x[406:464, 614:674] = (40, 40, 230)
+    for frame in (None, original[:400], gray, (original * 0.4).astype(np.uint8), no_x):
         assert find_popup_close(frame) is None
     for name in ("failure-main-recovered.png", "training-battle-zh.png", "loading-native-360.png"):
         assert find_popup_close(image(name)) is None
@@ -839,7 +840,7 @@ def test_close_popup_then_verify_main_without_counting_a_match(clock, entry, fil
 
 def test_popup_must_stay_at_the_same_position_before_click(clock):
     original = image("card-received-popup-360.png")
-    moved = cv2.warpAffine(original, np.array([[1, 0, -50], [0, 1, 120]], dtype=np.float32), (360, 640))
+    moved = cv2.warpAffine(original, np.array([[1, 0, -100], [0, 1, 240]], dtype=np.float32), (720, 1280))
     screen = RewardSequence(clock, [(original, 0.5), (moved, None), (image("failure-main-recovered.png"), None)])
     assert nav.get_to_main_after_fight(screen, Logger(), timeout=10)
     assert [index for index, _, _ in screen.clicks] == [1]
@@ -876,7 +877,7 @@ def test_unresponsive_popup_close_is_bounded(clock, entry):
 
 def test_fifth_closed_popup_can_still_finish_on_main(clock):
     original = image("card-received-popup-360.png")
-    moved = cv2.warpAffine(original, np.array([[1, 0, -50], [0, 1, 120]], dtype=np.float32), (360, 640))
+    moved = cv2.warpAffine(original, np.array([[1, 0, -100], [0, 1, 240]], dtype=np.float32), (720, 1280))
     scenes = [(original if index % 2 == 0 else moved, None) for index in range(nav.POPUP_CLOSE_MAX_ACTIONS)]
     screen = RewardSequence(clock, [*scenes, (image("failure-main-recovered.png"), None)])
     assert nav.get_to_main_after_fight(screen, Logger(), timeout=15)
@@ -889,16 +890,16 @@ def test_fifth_closed_popup_can_still_finish_on_main(clock):
 def test_collect_all_requires_title_and_visible_button_but_ignores_items(filename):
     # Cover both the normalized user attachment and a native emulator capture.
     original = image(filename)
-    assert find_collect_all_button(original) == (180, 583)
+    assert find_collect_all_button(original) == (360, 1166)
     changed_items = original.copy()
-    changed_items[200:530, 70:290] = (150, 90, 20)
-    assert find_collect_all_button(changed_items) == (180, 583)
+    changed_items[400:1060, 140:580] = (150, 90, 20)
+    assert find_collect_all_button(changed_items) == (360, 1166)
     no_title = original.copy()
-    no_title[90:145, 120:240] = 0
+    no_title[180:290, 240:480] = 0
     no_button = original.copy()
-    no_button[535:625, 100:260] = 0
+    no_button[1070:1250, 200:520] = 0
     gray = cv2.cvtColor(cv2.cvtColor(original, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR)
-    for frame in (None, original[:200], no_title, no_button, gray, (original * 0.4).astype(np.uint8)):
+    for frame in (None, original[:400], no_title, no_button, gray, (original * 0.4).astype(np.uint8)):
         assert find_collect_all_button(frame) is None
 
 
@@ -936,7 +937,7 @@ def test_collect_all_then_popup_then_main_without_recounting(clock, entry):
         result = nav.get_to_main_after_fight(screen, logger, timeout=15)
     assert result
     assert [index for index, _, _ in screen.clicks] == [0, 1, 2]
-    assert screen.clicks[1][1:] == (180, 583)
+    assert screen.clicks[1][1:] == (360, 1166)
     assert clock[0] - screen.entered >= nav.POST_BATTLE_MAIN_STABLE_S
     assert logger.stats["completed_fights"] == logger.stats["wins"] == logger.stats["losses"] == 0
 
@@ -953,7 +954,7 @@ def test_collect_all_is_recognized_at_entry_without_a_preceding_reward(clock, en
         result = nav.finish_pending_battle_rewards(screen, Logger())
     assert result
     assert len(screen.clicks) == 1
-    assert screen.clicks[0][1:] == (180, 583)
+    assert screen.clicks[0][1:] == (360, 1166)
 
 
 def test_unresponsive_collect_all_uses_existing_action_limit(clock, monkeypatch):
@@ -973,7 +974,7 @@ def test_unresponsive_collect_all_uses_existing_action_limit(clock, monkeypatch)
 def test_distribution_waits_for_claim_button_before_any_generic_tap(clock, monkeypatch, entry):
     original = image("item-distribution-collect-all-native.png")
     waiting = original.copy()
-    waiting[535:625, 100:260] = 0
+    waiting[1070:1250, 200:520] = 0
     original_detection = nav.detect_post_battle_reward
     # The specific page must take precedence even if the broad reward detector matches.
     monkeypatch.setattr(
@@ -989,7 +990,7 @@ def test_distribution_waits_for_claim_button_before_any_generic_tap(clock, monke
     else:
         result = nav.get_to_main_after_fight(screen, Logger(), timeout=10)
     assert result
-    assert screen.clicks == [(1, 180, 583)]
+    assert screen.clicks == [(1, 360, 1166)]
 
 
 def test_native_distribution_intro_is_recognized_without_a_claim_button():
@@ -997,7 +998,7 @@ def test_native_distribution_intro_is_recognized_without_a_claim_button():
     assert is_item_distribution_image(frame)
     assert find_collect_all_button(frame) is None
     without_title = frame.copy()
-    without_title[290:375, 120:240] = 0
+    without_title[580:750, 240:480] = 0
     assert not is_item_distribution_image(without_title)
 
 
@@ -1032,7 +1033,7 @@ def test_native_distribution_intro_waits_then_claims_without_recounting(clock, e
         result = nav.get_to_main_after_fight(screen, logger, timeout=15)
     assert result
     assert [index for index, _, _ in screen.clicks] == [1, 2]
-    assert screen.clicks[0][1:] == (180, 583)
+    assert screen.clicks[0][1:] == (360, 1166)
     assert logger.stats["completed_fights"] == logger.stats["wins"] == logger.stats["losses"] == 0
 
 
@@ -1059,7 +1060,7 @@ def test_matchmaking_waits_for_transition_then_claims_and_starts_once(clock, mon
     monkeypatch.setattr(screen, "click", click)
     logger = Logger()
     assert fight.start_fight(screen, logger, "Classic 1v1")
-    assert screen.clicks == [(2, 180, 583)]
+    assert screen.clicks == [(2, 360, 1166)]
     assert starts == [START_FIGHT_BUTTON_COORD]
     assert logger.stats["completed_fights"] == 0
 
@@ -1102,13 +1103,13 @@ def test_distribution_returns_to_daily_reward_main_menu(clock, entry):
     else:
         result = nav.get_to_main_after_fight(screen, logger, timeout=10)
     assert result
-    assert screen.clicks == [(0, 180, 583)]
+    assert screen.clicks == [(0, 360, 1166)]
     assert clock[0] - screen.entered >= nav.POST_BATTLE_MAIN_STABLE_S
     assert logger.failure_frame is None
     assert logger.stats["completed_fights"] == 0
 
 
-@pytest.mark.parametrize("region", ((115, 460, 245, 540), (318, 45, 352, 91), (150, 575, 210, 640)))
+@pytest.mark.parametrize("region", ((230, 920, 490, 1080), (636, 90, 704, 182), (300, 1150, 420, 1280)))
 def test_daily_reward_main_menu_still_requires_all_anchors(region):
     main = image("main-menu-daily-reward-native.png")
     left, top, right, bottom = region

@@ -27,6 +27,7 @@ from crX.bot.find import (
 from crX.bot.state_detect import check_if_on_shop
 from crX.emulators.adb import AdbController
 from crX.interface.enums import UIField
+from tests.screen_fixtures import native_replay
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -34,7 +35,7 @@ FIXTURES = Path(__file__).parent / "fixtures"
 def image(name):
     result = cv2.imread(str(FIXTURES / f"{name}.png"))
     assert result is not None
-    return result
+    return native_replay(result)
 
 
 class Screen:
@@ -50,7 +51,7 @@ def test_native_daily_free_offer(name):
     frame = image(name)
     coord = locate_free_shop_offer_icon(Screen(frame))
     assert check_if_on_shop(Screen(frame))
-    assert coord is not None and 30 < coord[0] < 90 and 435 < coord[1] < 546
+    assert coord is not None and 60 < coord[0] < 180 and 870 < coord[1] < 1092
     assert find_collected_shop_offer(frame) is None
 
 
@@ -65,7 +66,7 @@ def test_other_screens_are_not_claimable(name):
 def test_daily_heading_and_undimmed_label_are_both_required():
     original = image("shop-daily-free-zh")
     no_heading = original.copy()
-    no_heading[212:243, 129:232] = 0
+    no_heading[424:486, 258:464] = 0
     assert locate_free_shop_offer_icon(Screen(no_heading)) is None
     dimmed = (original.astype(float) * 0.35).astype(np.uint8)
     assert find_daily_shop_heading(dimmed) is not None
@@ -73,7 +74,7 @@ def test_daily_heading_and_undimmed_label_are_both_required():
 
 
 def test_only_free_dialog_can_be_confirmed():
-    assert find_free_shop_confirmation(image("shop-free-dialog-zh")) == (180, 404)
+    assert find_free_shop_confirmation(image("shop-free-dialog-zh")) == (360, 808)
     assert find_shop_offer_dialog_close(image("shop-paid-dialog-zh")) is not None
     for name in ("shop-paid-dialog-zh", "shop-daily-free-zh", "shop-daily-collected-zh", "training-start-zh"):
         assert find_free_shop_confirmation(image(name)) is None
@@ -129,10 +130,10 @@ class ShopDevice:
         elif point == BOTTOM_NAV_MAIN_TAB_FROM_SHOP_COORD:
             if not self.return_fails:
                 self.page = "main"
-        elif self.page == "free" and point == (50, 457):
+        elif self.page == "free" and point == (100, 914):
             self.page = "dialog"
         elif self.page == "dialog":
-            if point == (180, 404):
+            if point == (360, 808):
                 assert not self.paid, "A paid purchase must never be confirmed"
                 self.page = "free" if self.claim_fails else "collected_low"
             else:
@@ -189,26 +190,26 @@ def test_full_claim_then_recheck_does_not_count_twice(replay):
     device = ShopDevice()
     assert shop.shop_daily_state(device, replay)
     assert device.page == "main" and replay.collections == 1
-    assert device.clicks.count((180, 404)) == 1
+    assert device.clicks.count((360, 808)) == 1
     assert device.swipes == [SHOP_CATALOG_SWIPE, SHOP_DAILY_ALIGN_SWIPE, SHOP_DAILY_ALIGN_SWIPE]
     device.collected = True
     assert shop.shop_daily_state(device, replay)
     assert device.page == "main" and replay.collections == 1
-    assert device.clicks.count((180, 404)) == 1
+    assert device.clicks.count((360, 808)) == 1
 
 
 def test_paid_dialog_is_closed_without_purchase_or_count(replay):
     device = ShopDevice(paid=True)
     assert not shop.shop_daily_state(device, replay)
     assert device.page == "main" and replay.collections == 0
-    assert (180, 404) not in device.clicks
+    assert (360, 808) not in device.clicks
 
 
 def test_unverified_claim_is_not_success(replay):
     device = ShopDevice(claim_fails=True)
     assert not shop.shop_daily_state(device, replay)
     assert device.page == "main" and replay.collections == 0
-    assert device.clicks.count((180, 404)) == 1
+    assert device.clicks.count((360, 808)) == 1
 
 
 def test_missing_daily_section_is_bounded_and_not_success(replay):
@@ -241,10 +242,10 @@ def test_navigation_timeout_does_not_repeat_a_tab_click(replay, monkeypatch):
 
 def test_unrecognized_daily_status_is_not_treated_as_already_collected(replay):
     device = ShopDevice()
-    device.frames["free"][430:470, 30:110] = 0
+    device.frames["free"][860:940, 60:220] = 0
     assert not shop.shop_daily_state(device, replay)
     assert device.page == "main" and replay.collections == 0
-    assert (50, 457) not in device.clicks
+    assert (100, 914) not in device.clicks
 
 
 @pytest.mark.parametrize("claim_fails", [False, True])
@@ -265,7 +266,7 @@ def test_slow_swipe_passes_duration_to_adb(monkeypatch):
     device = AdbController(ShopLogger(), device_serial="emulator-5554")
     commands = []
     monkeypatch.setattr(device, "adb", commands.append)
-    device.swipe(210, 520, 210, 280, duration_ms=1000)
+    device.swipe(420, 1040, 420, 560, duration_ms=1000)
     assert commands == [["shell", "input", "swipe", "420", "1040", "420", "560", "1000"]]
     with pytest.raises(ValueError):
-        device.swipe(210, 520, 210, 280, duration_ms=0)
+        device.swipe(420, 1040, 420, 560, duration_ms=0)

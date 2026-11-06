@@ -18,7 +18,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from crX.bot.coords import HAND_CARD_SIZE, HAND_CARD_TOP_LEFTS, HAND_DIAGNOSTIC_REGION, REFERENCE_SCREEN_SIZE
+from crX.bot.coords import GAME_SCREEN_SIZE, HAND_CARD_SIZE, HAND_CARD_TOP_LEFTS, HAND_DIAGNOSTIC_REGION
 from crX.utils.platform import get_app_data_dir
 
 LOG = logging.getLogger(__name__)
@@ -169,7 +169,7 @@ class CardSampleCollector:
         totals(self.root)
 
     def offer(self, frame, slot: int | None, metadata: dict) -> bool:
-        if self._stop.is_set() or frame is None or frame.shape != (*REFERENCE_SCREEN_SIZE[::-1], 3):
+        if self._stop.is_set() or frame is None or frame.shape != (*GAME_SCREEN_SIZE[::-1], 3):
             return False
         if slot is None:
             left, top, right, bottom = HAND_DIAGNOSTIC_REGION
@@ -200,7 +200,7 @@ class CardSampleCollector:
             "mode": self.mode,
             "elapsed_s": round(time.monotonic() - self.started, 3),
             "captured_at": time.time(),
-            "frame_size": list(REFERENCE_SCREEN_SIZE),
+            "frame_size": list(GAME_SCREEN_SIZE),
             "color_order": "BGR",
             "crop": [left, top, right, bottom],
             "label": None,

@@ -12,6 +12,7 @@ from crX.bot.coords import SELECTED_BATTLE_MODE_REGION
 from crX.bot.state_detect import check_if_battle_mode_is_selected
 from crX.interface.enums import UIField
 from crX.utils.logger import Logger
+from tests.screen_fixtures import native_replay
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -19,7 +20,7 @@ FIXTURES = Path(__file__).parent / "fixtures"
 def red_main():
     image = cv2.imread(str(FIXTURES / "selected-1v1-red-360-native.png"))
     assert image is not None
-    return image
+    return native_replay(image)
 
 
 def test_native_red_button_is_classic_1v1_only():
@@ -37,7 +38,7 @@ def test_selected_1v1_ignores_surrounding_fill_and_badge(background):
     artwork = np.zeros(image.shape[:2], dtype=np.uint8)
     cv2.fillPoly(
         artwork,
-        [np.array([(284, 480), (305, 490), (305, 524), (266, 524), (266, 490)])],
+        [np.array([(568, 960), (610, 980), (610, 1048), (532, 1048), (532, 980)])],
         (255,),
     )
     left, top, right, bottom = SELECTED_BATTLE_MODE_REGION
@@ -62,7 +63,7 @@ def test_consecutive_rounds_do_not_reselect_the_red_1v1_button(monkeypatch):
 
 @pytest.mark.parametrize("filename", ["selected-2v2-360-native.png", "selected-trophy-360-native.png"])
 def test_a_different_mode_still_requires_selection(monkeypatch, filename):
-    screen = Mock(screenshot=Mock(return_value=cv2.imread(str(FIXTURES / filename))))
+    screen = Mock(screenshot=Mock(return_value=native_replay(cv2.imread(str(FIXTURES / filename)))))
     select = Mock(return_value=True)
     monkeypatch.setattr(states, "select_mode", select)
     assert (

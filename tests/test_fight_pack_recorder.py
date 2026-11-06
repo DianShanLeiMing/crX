@@ -19,7 +19,7 @@ from crX.utils import platform as pf
 
 
 class _FakeEmu:
-    """Returns a valid (640, 360, 3) BGR frame on every screenshot()."""
+    """Returns a valid (1280, 720, 3) BGR frame on every screenshot()."""
 
     def screenshot(self) -> np.ndarray:
         return np.zeros((1280, 720, 3), dtype=np.uint8)
@@ -32,7 +32,7 @@ def _read_manifest(pack_dir: str) -> dict:
 
 def _drive_one_fight(recorder: FightPackRecorder, *, fps: float = 20.0) -> str:
     recorder.start(_FakeEmu(), "1v1_trophy", "vTEST", fps=fps)
-    recorder.log_play(2, 215, 360, 47.3)
+    recorder.log_play(2, 430, 720, 47.3)
     time.sleep(0.5)  # let the capture thread grab several frames
     slug = recorder.finish("win")
     assert slug is not None
@@ -171,6 +171,7 @@ def test_pack_is_spec_valid(tmp_path, monkeypatch):
     assert isinstance(manifest["uuid"], str) and len(manifest["uuid"]) == 32
     assert int(manifest["uuid"], 16) >= 0  # valid hex
     assert manifest["resolution"] == [720, 1280]
+    assert manifest["coordinate_resolution"] == [720, 1280]
     assert manifest["fight_mode"] == "1v1_trophy"
     assert manifest["outcome"] == "win"
     assert manifest["pcb_version"] == "vTEST"

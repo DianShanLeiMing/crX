@@ -14,6 +14,7 @@ from crX.bot import card_samples as samples
 from crX.bot import fight
 from crX.bot.card_data import CARD_FINGERPRINT_VARIANTS, CARD_GROUPS
 from crX.utils.logger import Logger
+from tests.screen_fixtures import native_replay
 
 FIXTURE = Path(__file__).parent / "fixtures/card_hand_bgr_regression.png"
 
@@ -21,7 +22,7 @@ FIXTURE = Path(__file__).parent / "fixtures/card_hand_bgr_regression.png"
 def hand():
     image = cv2.imread(str(FIXTURE))
     assert image is not None
-    return image
+    return native_replay(image)
 
 
 def unknown_fingerprint():
@@ -113,7 +114,7 @@ def test_exact_frame_copied_before_background_write(tmp_path):
     saved = cv2.imread(str(collector.directory / record["files"]["frame"]))
     assert np.array_equal(saved, original)
     crop = cv2.imread(str(collector.directory / record["files"]["card"]))
-    assert np.array_equal(crop, original[536:602, 85:139])
+    assert np.array_equal(crop, original[1072:1204, 170:278])
     assert (collector.directory / "index.html").is_file()
 
 
@@ -137,7 +138,9 @@ def test_cross_fight_animation_dedup_keeps_one_without_rewriting_old_sample(tmp_
         frame = hand()
         left, top = HAND_CARD_TOP_LEFTS[slot]
         width, height = HAND_CARD_SIZE
-        frame[top : top + height, left : left + width] = cv2.imread(str(fixtures / filename))
+        frame[top : top + height, left : left + width] = cv2.resize(
+            cv2.imread(str(fixtures / filename)), (width, height), interpolation=cv2.INTER_NEAREST
+        )
         return frame
 
     first = samples.CardSampleCollector("1v1", tmp_path)
@@ -151,7 +154,7 @@ def test_cross_fight_animation_dedup_keeps_one_without_rewriting_old_sample(tmp_
     assert not second.directory.exists()
     assert all(path.read_bytes() == content for path, content in original.items())
     different = samples.CardSampleCollector("1v1", tmp_path)
-    frame = cv2.imread(str(fixtures / "card-evo-cannon-native-zh.png"))
+    frame = native_replay(cv2.imread(str(fixtures / "card-evo-cannon-native-zh.png")))
     assert different.offer(frame, 0, {"reason": "unknown", "available": True})
     assert different.close() and different.stats["saved"] == 1
 
@@ -203,7 +206,7 @@ def test_queue_full_and_close_are_bounded(tmp_path, monkeypatch):
 def test_real_observation_uses_one_frame_and_leaves_decision_unchanged(tmp_path, monkeypatch):
     frame = hand()
     # An affordable slot with a dark, invalid card image must be sampled as UNKNOWN.
-    frame[536:589, 85:139] = 0
+    frame[1072:1178, 170:278] = 0
     available_before = []
 
     class Device:
@@ -246,7 +249,7 @@ def test_empty_hand_sampling_requires_repeated_high_elixir(tmp_path, monkeypatch
 
 def test_selected_unknown_is_saved_even_when_periodic_observation_is_throttled(tmp_path, monkeypatch):
     frame = hand()
-    frame[536:589, 85:139] = 0
+    frame[1072:1178, 170:278] = 0
 
     class Device:
         calls = 0

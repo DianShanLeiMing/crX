@@ -36,7 +36,7 @@ from typing import Any
 import cv2
 import numpy as np
 
-from crX.bot.coords import GAME_SCREEN_SIZE, REFERENCE_SCREEN_SIZE, SCREEN_SCALE
+from crX.bot.coords import GAME_SCREEN_SIZE
 from crX.utils.platform import get_recordings_dir
 
 # Fixed capture geometry (absolute emulator resolution). VideoWriter wants (w, h);
@@ -126,8 +126,8 @@ class FightPackRecorder:
         entry = {
             "frame_index": self._frame_count,  # atomic int read under the GIL
             "card_index": int(card_index),
-            "x": int(x) * SCREEN_SCALE,
-            "y": int(y) * SCREEN_SCALE,
+            "x": int(x),
+            "y": int(y),
             "elapsed_s": round(float(elapsed_s), 2),
         }
         with self._lock:
@@ -281,7 +281,7 @@ class FightPackRecorder:
             "fight_mode": self.fight_mode,
             "fps": achieved_fps,
             "resolution": [FRAME_W, FRAME_H],
-            "reference_resolution": list(REFERENCE_SCREEN_SIZE),
+            "coordinate_resolution": list(GAME_SCREEN_SIZE),
             "frames_source": self.frames_source,
             "n_frames": self._frame_count,
             "n_plays": len(self._plays),

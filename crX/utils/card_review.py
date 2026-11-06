@@ -14,7 +14,13 @@ import numpy as np
 from PIL import Image
 
 from crX.bot.card_data import CARD_NAMES_ZH
-from crX.bot.coords import CARD_FINGERPRINT_SIZE, HAND_CARD_SIZE, LEGACY_SCREEN_SIZE, REFERENCE_SCREEN_SIZE
+from crX.bot.coords import (
+    CARD_FINGERPRINT_SIZE,
+    GAME_SCREEN_SIZE,
+    HAND_CARD_SIZE,
+    LEGACY_SCREEN_SIZE,
+    REFERENCE_SCREEN_SIZE,
+)
 
 STATUS_LABELS = {
     "pending": "待确认",
@@ -484,7 +490,7 @@ def load_previews(sample: ReviewSample) -> dict:
     for kind, bounds in (("card", (120, 148)), ("hand", (470, 72)), ("frame", REFERENCE_SCREEN_SIZE)):
         try:
             with Image.open(sample.file(kind)) as image:
-                if image.width > 1000 or image.height > 1000:
+                if image.width > max(1000, GAME_SCREEN_SIZE[0]) or image.height > max(1000, GAME_SCREEN_SIZE[1]):
                     raise ValueError("图片尺寸异常")
                 preview = image.convert("RGB")
                 preview.thumbnail(bounds)
@@ -508,8 +514,12 @@ def export_candidate(sample: ReviewSample) -> Path:
     if type(slot) is not int or not 0 <= slot < 4 or sample.record.get("available") is not True:
         raise ValueError("只有确认可用的单张手牌样本才能导出指纹；此样本可保留用于诊断")
     frame = cv2.imread(str(sample.file("frame")))
-    if frame is None or frame.shape not in ((*REFERENCE_SCREEN_SIZE[::-1], 3), (*LEGACY_SCREEN_SIZE[::-1], 3)):
-        raise ValueError("原始截图缺失或尺寸无效，需要 360×640 画面或 419×633 历史样本")
+    if frame is None or frame.shape not in (
+        (*GAME_SCREEN_SIZE[::-1], 3),
+        (*REFERENCE_SCREEN_SIZE[::-1], 3),
+        (*LEGACY_SCREEN_SIZE[::-1], 3),
+    ):
+        raise ValueError("原始截图缺失或尺寸无效，需要 720×1280 画面，兼容 360×640 或 419×633 历史样本")
     fingerprint = extract_card_fingerprint(frame, slot)
     path = sample_file(sample.directory, f"{sample.name}-candidate.json")
     atomic_json(

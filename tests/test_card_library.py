@@ -215,9 +215,10 @@ def test_capture_limits_similar_samples_across_fights(tmp_path):
 
     from crX.bot.card_samples import CardSampleCollector
     from crX.bot.coords import HAND_CARD_SIZE, HAND_CARD_TOP_LEFTS
+    from tests.screen_fixtures import native_replay
 
     sample = add_group_sample(tmp_path, "old", "sample-000", slot=0)
-    frame = cv2.imread(str(sample.file("frame")))
+    frame = native_replay(cv2.imread(str(sample.file("frame"))))
     left, top = HAND_CARD_TOP_LEFTS[0]
     collector = CardSampleCollector("1v1", tmp_path)
     width, height = HAND_CARD_SIZE

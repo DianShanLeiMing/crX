@@ -222,88 +222,88 @@ def get_card_display_name(card_id: str | None) -> str:
 PLAY_COORDS = {
     # Troops: bridge line (tanks + heavy win conditions share coords until a follow-up retune).
     "bridge_line": {
-        "left": [(99, 336)],
-        "right": [(253, 340)],
+        "left": [(198, 672)],
+        "right": [(506, 680)],
     },
     # Troops: bridge rush (Hog, Ram, Wall Breakers, …).
     "bridge_rush": {
-        "left": [(66, 284), (97, 289), (132, 286)],
-        "right": [(221, 286), (258, 287), (303, 286)],
+        "left": [(132, 568), (194, 578), (264, 572)],
+        "right": [(442, 572), (516, 574), (606, 572)],
     },
     # Troops/buildings: back field support (swarms, spawners, ranged support).
     "back_support": {
-        "left": [(59, 447), (136, 449), (143, 398), (88, 456)],
-        "right": [(212, 400), (227, 445), (295, 447), (268, 461)],
+        "left": [(118, 894), (272, 898), (286, 796), (176, 912)],
+        "right": [(424, 800), (454, 890), (590, 894), (536, 922)],
     },
     # Troops: king-tower lane (Witch, Archer Queen, …).
     "king_lane": {
-        "left": [(60, 468), (158, 402), (143, 398), (164, 478)],
-        "right": [(212, 400), (227, 445), (295, 468), (181, 476)],
+        "left": [(120, 936), (316, 804), (286, 796), (328, 956)],
+        "right": [(424, 800), (454, 890), (590, 936), (362, 952)],
     },
     # Princess (+ evo): deep lane, tuned separately from king_lane.
     "princess": {  # 公主
-        "left": [(60, 468), (206, 404), (164, 476), (189, 406)],
-        "right": [(295, 468), (158, 402), (181, 478), (143, 398)],
+        "left": [(120, 936), (412, 808), (328, 952), (378, 812)],
+        "right": [(590, 936), (316, 804), (362, 956), (286, 796)],
     },
     # Buildings: defensive structures in the back field.
     "defense_building": {
-        "left": [(192, 324), (164, 355), (156, 366), (174, 343)],
-        "right": [(192, 324), (192, 338), (184, 364), (181, 385)],
+        "left": [(384, 648), (328, 710), (312, 732), (348, 686)],
+        "right": [(384, 648), (384, 676), (368, 728), (362, 770)],
     },
     # Buildings: siege (Mortar, X-Bow).
     "siege_building": {
-        "left": [(105, 314), (107, 315)],
-        "right": [(251, 314), (256, 315)],
+        "left": [(210, 628), (214, 630)],
+        "right": [(502, 628), (512, 630)],
     },
     # Spells: center field behind bridge (Mirror, Barb Barrel, Royal Delivery).
     "center_spell": {
-        "left": [(100, 162)],
-        "right": [(259, 162)],
+        "left": [(200, 324)],
+        "right": [(518, 324)],
     },
     # Spells: standard lane target (Fireball, Log, …).
     "lane_spell": {
-        "left": [(101, 187)],
-        "right": [(253, 187)],
+        "left": [(202, 374)],
+        "right": [(506, 374)],
     },
     # Area spells: enemy Princess Tower, offset slightly inward and toward the river.
-    # Calibrated on native 360x640 captures; tower centers are approximately (86,130)/(274,130).
-    "large_spell": {"left": [(102, 146)], "right": [(258, 146)]},
-    # Poison: closer to the tower center, retaining an 8 px inward/river offset.
-    "poison": {"left": [(94, 138)], "right": [(266, 138)]},
+    # Migrated to 720x1280; tower centers are approximately (172,260)/(548,260).
+    "large_spell": {"left": [(204, 292)], "right": [(516, 292)]},
+    # Poison: closer to the tower center, retaining a 16 px inward/river offset.
+    "poison": {"left": [(188, 276)], "right": [(532, 276)]},
     # Spells: small reactive (Zap, Void, Clone, Rage, Goblin Curse, …).
     "reactive_spell": {
-        "left": [(101, 187)],
-        "right": [(253, 187)],
+        "left": [(202, 374)],
+        "right": [(506, 374)],
     },
     # Troops: 1-elixir spirits (played on your side).
     # Same coords as defense_building until spirit lane is tuned.
     "spirit": {
-        "left": [(192, 324), (164, 355), (156, 366), (174, 343)],
-        "right": [(192, 324), (192, 338), (184, 364), (181, 385)],
+        "left": [(384, 648), (328, 710), (312, 732), (348, 686)],
+        "right": [(384, 648), (384, 676), (368, 728), (362, 770)],
     },
     "tornado": {  # 飓风法术
-        "left": [(43, 184)],
-        "right": [(305, 180)],
+        "left": [(86, 368)],
+        "right": [(610, 360)],
     },
     "rocket": {  # 火箭
-        "left": [(109, 163)],
-        "right": [(242, 164)],
+        "left": [(218, 326)],
+        "right": [(484, 328)],
     },
     "goblin_barrel": {  # 哥布林飞桶
-        "left": [(99, 163), (100, 163), (101, 163)],
-        "right": [(258, 163), (259, 163), (259, 163)],
+        "left": [(198, 326), (200, 326), (202, 326)],
+        "right": [(516, 326), (518, 326), (518, 326)],
     },
     "graveyard": {  # 骷髅召唤
-        "left": [(76, 159)],
-        "right": [(279, 158)],
+        "left": [(152, 318)],
+        "right": [(558, 316)],
     },
     "miner": {  # 掘地矿工
-        "left": [(74, 158), (77, 105), (123, 114), (122, 155)],
-        "right": [(235, 154), (237, 112), (291, 112), (278, 159)],
+        "left": [(148, 316), (154, 210), (246, 228), (244, 310)],
+        "right": [(470, 308), (474, 224), (582, 224), (556, 318)],
     },
     "goblin_drill": {  # 哥布林钻机
-        "left": [(78, 151), (105, 185)],
-        "right": [(262, 179), (287, 156)],
+        "left": [(156, 302), (210, 370)],
+        "right": [(524, 358), (574, 312)],
     },
 }
 

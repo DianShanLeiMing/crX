@@ -9,6 +9,7 @@ import numpy as np
 from PIL import Image
 
 from crX.bot import card_detection as cd
+from tests.screen_fixtures import native_replay
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = REPO_ROOT / "tests" / "fixtures" / "card_hand_bgr_regression.png"
@@ -44,7 +45,7 @@ def test_bot_uses_raw_bgr_screenshot() -> None:
 
 
 def test_bgr_path_identifies_hand() -> None:
-    bgr = _load_bgr()
+    bgr = native_replay(_load_bgr())
     cd.check_which_cards_are_available(_BgrEmulator(bgr))
     for slot, expected in EXPECTED.items():
         corners = cd.get_all_pixel_data(None, slot)

@@ -10,13 +10,13 @@ import numpy as np
 
 from crX.bot.coords import (
     BATTLE_RESULT_BUTTON_REGION,
+    GAME_SCREEN_SIZE,
     ITEM_DISTRIBUTION_COLLECT_ALL_REGION,
     ITEM_DISTRIBUTION_COLLECT_ALL_SIZE,
     OPPONENT_WINNER_LABEL_REGION,
     PLAYER_WINNER_LABEL_REGION,
     POPUP_CLOSE_BUTTON_SIZE,
     POPUP_CLOSE_REGION,
-    REFERENCE_SCREEN_SIZE,
     SHOP_CATALOG_REGION,
     SHOP_DAILY_FIRST_COLUMN,
     SHOP_DAILY_LABEL_OFFSETS,
@@ -61,9 +61,9 @@ def find_post_battle_button(emulator):
 
 def find_post_battle_button_in_image(iar):
     """Same-frame result button lookup for the post-battle navigation loop."""
-    if iar is None or iar.shape != (*REFERENCE_SCREEN_SIZE[::-1], 3):
+    if iar is None or iar.shape != (*GAME_SCREEN_SIZE[::-1], 3):
         return None
-    pixels = [iar[551][153], iar[553][205], iar[559][184], iar[560][173]]
+    pixels = [iar[1102][306], iar[1106][410], iar[1118][368], iar[1120][346]]
     colors = [[255, 187, 104], [255, 187, 104], [255, 255, 255], [255, 255, 255]]
     pixel_match = True
     for i, p in enumerate(pixels):
@@ -71,14 +71,14 @@ def find_post_battle_button_in_image(iar):
             pixel_match = False
             break
     if pixel_match:
-        return (172, 556)
+        return (344, 1112)
     return find_image(iar, "post_battle_button", tolerance=0.9, subcrop=BATTLE_RESULT_BUTTON_REGION)
 
 
 def find_battle_outcome(emulator) -> Literal["win", "loss"] | None:
     """Locate 获胜者 above the opponent's or player's crowns on one result frame."""
     image = emulator.screenshot()
-    if image is None or image.shape[:2] != REFERENCE_SCREEN_SIZE[::-1]:
+    if image is None or image.shape[:2] != GAME_SCREEN_SIZE[::-1]:
         return None
     if find_image(image, "post_battle_button", tolerance=0.9, subcrop=BATTLE_RESULT_BUTTON_REGION) is None:
         return None
@@ -96,13 +96,13 @@ def locate_free_shop_offer_icon(emulator) -> tuple[int, int] | None:
     if region is None:
         return None
     coord = find_image(image, "shop_daily_free", tolerance=0.94, subcrop=region)
-    if coord is None or not _is_bright_green(image, coord, (53, 26)):
+    if coord is None or not _is_bright_green(image, coord, (106, 52)):
         return None
-    return coord[0] + 17, coord[1] + 12
+    return coord[0] + 34, coord[1] + 24
 
 
 def _shop_image_is_valid(image) -> bool:
-    return image is not None and image.shape == (*REFERENCE_SCREEN_SIZE[::-1], 3)
+    return image is not None and image.shape == (*GAME_SCREEN_SIZE[::-1], 3)
 
 
 def find_daily_shop_heading(image) -> tuple[int, int] | None:
@@ -118,7 +118,7 @@ def _daily_shop_offer_region(image) -> tuple[int, int, int, int] | None:
     left, right = SHOP_DAILY_FIRST_COLUMN
     start, end = SHOP_DAILY_LABEL_OFFSETS
     top, bottom = heading[1] + start, min(SHOP_CATALOG_REGION[3], heading[1] + end)
-    return (left, top, right, bottom) if bottom - top >= 26 else None
+    return (left, top, right, bottom) if bottom - top >= 52 else None
 
 
 def find_collected_shop_offer(image) -> tuple[int, int] | None:
@@ -165,7 +165,7 @@ def find_shop_offer_dialog_close(image) -> tuple[int, int] | None:
     if not _shop_image_is_valid(image):
         return None
     coord = find_image(image, "shop_offer_dialog_close", tolerance=0.92, subcrop=SHOP_DIALOG_CLOSE_REGION)
-    return (coord[0] + 8, coord[1] + 10) if coord is not None else None
+    return (coord[0] + 16, coord[1] + 20) if coord is not None else None
 
 
 def find_free_shop_confirmation(image) -> tuple[int, int] | None:
@@ -173,9 +173,9 @@ def find_free_shop_confirmation(image) -> tuple[int, int] | None:
     if find_shop_offer_dialog_close(image) is None:
         return None
     coord = find_image(image, "shop_free_confirmation", tolerance=0.94, subcrop=SHOP_FREE_CONFIRM_REGION)
-    if coord is None or not _is_bright_green(image, coord, (61, 29)):
+    if coord is None or not _is_bright_green(image, coord, (122, 58)):
         return None
-    return coord[0] + 31, coord[1] + 14
+    return coord[0] + 62, coord[1] + 28
 
 
 def find_shop_recommendations(image) -> tuple[int, int] | None:

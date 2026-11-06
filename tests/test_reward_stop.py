@@ -11,13 +11,14 @@ from crX.bot.state_detect import check_if_battle_rewards_finished
 from crX.interface.enums import UIField
 from crX.utils.image_handler import open_from_path
 from crX.utils.logger import Logger
+from tests.screen_fixtures import native_replay
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
 class Screen:
     def __init__(self, filename):
-        self.image = open_from_path(str(FIXTURES / filename))
+        self.image = native_replay(open_from_path(str(FIXTURES / filename)))
 
     def screenshot(self):
         return self.image
@@ -46,7 +47,7 @@ def test_other_screens_do_not_stop_rewards(filename):
 
 def test_crown_bar_alone_is_not_enough_without_main_menu():
     screen = Screen("rewards-finished-zh.png")
-    screen.image[:40] = 0
+    screen.image[:80] = 0
     assert not check_if_battle_rewards_finished(screen)
 
 
@@ -58,14 +59,14 @@ def test_unsupported_screen_geometry_is_not_a_finished_reward():
 
 def test_empty_bar_without_crown_does_not_stop():
     screen = Screen("rewards-finished-zh.png")
-    screen.image[389:448, 167:198] = 0
+    screen.image[778:896, 334:396] = 0
     assert not check_if_battle_rewards_finished(screen)
 
 
 def test_crown_without_empty_bar_does_not_stop():
     screen = Screen("rewards-pending-zh.png")
     crown = Screen("rewards-finished-zh.png").image
-    screen.image[389:448, 167:198] = crown[389:448, 167:198]
+    screen.image[778:896, 334:396] = crown[778:896, 334:396]
     assert not check_if_battle_rewards_finished(screen)
 
 

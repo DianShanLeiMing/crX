@@ -7,13 +7,14 @@ import pytest
 from crX.bot.find import find_post_battle_button
 from crX.bot.state_detect import check_for_post_battle_button
 from crX.utils.image_handler import open_from_path
+from tests.screen_fixtures import native_replay
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
 class CapturedScreen:
     def __init__(self, filename: str):
-        self.image = open_from_path(str(FIXTURES / filename))
+        self.image = native_replay(open_from_path(str(FIXTURES / filename)))
 
     def screenshot(self):
         return self.image
@@ -26,7 +27,7 @@ def test_chinese_result_button_is_detected_and_clickable(filename):
     assert coord is not None
     x, y = coord
     # The returned location must lie inside the visible button, not on its border.
-    assert 143 < x < 218 and 564 < y < 600
+    assert 286 < x < 436 and 1128 < y < 1200
     assert check_for_post_battle_button(emulator)
 
 

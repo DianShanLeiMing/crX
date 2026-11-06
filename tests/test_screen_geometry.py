@@ -1,4 +1,4 @@
-"""Real 9:16 captures supplement the explicitly scaled historical replay fixtures."""
+"""Native rules tested on explicit 720p synthetic replays; historical files stay intact."""
 
 import subprocess
 from pathlib import Path
@@ -9,7 +9,8 @@ import numpy as np
 import pytest
 
 from crX.bot import card_detection as cards
-from crX.bot.coords import GAME_SCREEN_DPI, GAME_SCREEN_SIZE
+from crX.bot.card_samples import CardSampleCollector
+from crX.bot.coords import GAME_SCREEN_DPI, GAME_SCREEN_SIZE, HAND_CARD_TOP_LEFTS
 from crX.bot.find import (
     find_battle_outcome,
     find_collected_shop_offer,
@@ -29,29 +30,70 @@ from crX.bot.state_detect import (
 )
 from crX.emulators.adb import AdbController
 from crX.emulators.base import EmulatorNotReadyError
-from crX.utils.card_review import export_candidate, save_review, scan_samples
+from crX.utils.card_library import sample_fingerprint
+from crX.utils.card_review import export_candidate, load_previews, save_review, scan_samples
+from tests.screen_fixtures import native_replay
 from tests.test_card_review import make_sample
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
-def test_hd_capture_preserves_native_pixels_and_normalizes_rules(monkeypatch):
+def test_hd_capture_and_rules_preserve_native_pixels(monkeypatch):
     reference = cv2.imread(str(FIXTURES / "hand-360-native.png"))
     native = cv2.resize(reference, (720, 1280), interpolation=cv2.INTER_NEAREST)
     device = AdbController(Mock(), "emulator-5554")
     monkeypatch.setattr(device, "_capture_screen", lambda _command: native)
     assert device.screenshot_native() is native
-    np.testing.assert_array_equal(device.screenshot(), reference)
+    assert device.screenshot() is native
+    assert device.screenshot_via_shell() is native
+    np.testing.assert_array_equal(device.screenshot(), native)
     assert check_if_in_battle(device)
     assert cards.check_which_cards_are_available(device) == [0, 1, 2, 3]
     commands = []
     monkeypatch.setattr(device, "adb", commands.append)
-    device.click(112, 568)
-    device.swipe(180, 526, 180, 283, duration_ms=1000)
+    device.click(224, 1136)
+    device.swipe(360, 1052, 360, 566, duration_ms=1000)
     assert commands == [
         ["shell", "input", "tap", "224", "1136"],
         ["shell", "input", "swipe", "360", "1052", "360", "566", "1000"],
     ]
+
+
+def test_card_fingerprint_counts_pixels_between_old_sampling_positions():
+    frame = np.full((1280, 720, 3), cards.COLORS["Green"], np.uint8)
+    left, top = HAND_CARD_TOP_LEFTS[0]
+    # Nearest-neighbor reduction to 360p would discard these four odd pixels.
+    for y, x in ((1, 1), (1, 3), (3, 1), (3, 3)):
+        frame[top + y, left + x] = cards.COLORS["Red"]
+    fingerprint = cards.extract_card_fingerprint(frame, 0)
+    assert fingerprint[0]["Red"] == 1
+    assert fingerprint[0]["Green"] == 890
+    assert all(sum(corner.values()) == 891 for corner in fingerprint)
+
+
+def test_live_rules_reject_historical_360p_frame():
+    frame = cv2.imread(str(FIXTURES / "hand-360-native.png"))
+    screen = Mock(screenshot=Mock(return_value=frame))
+    assert not check_if_in_battle(screen)
+    assert cards.check_which_cards_are_available(screen) == []
+    assert not image_has_elixir(frame, 10)
+
+
+def test_native_card_sample_can_be_reviewed_and_exported(tmp_path):
+    frame = Screen("hand-360-native.png").image
+    collector = CardSampleCollector("1v1", tmp_path)
+    assert collector.offer(frame, 0, {"reason": "unknown", "available": True})
+    assert collector.close()
+    sample = scan_samples(tmp_path)[0][0]
+    source = sample.file("frame").read_bytes()
+    previews = load_previews(sample)
+    assert all(previews[kind] is not None for kind in ("card", "hand", "frame"))
+    save_review(sample, "confirmed", "bats")
+    sample = scan_samples(tmp_path)[0][0]
+    expected = np.array([list(row.values()) for row in cards.extract_card_fingerprint(frame, 0)])
+    np.testing.assert_array_equal(sample_fingerprint(sample), expected)
+    assert export_candidate(sample).is_file()
+    assert sample.file("frame").read_bytes() == source
 
 
 def test_native_geometry_check_requires_matching_density(monkeypatch):
@@ -66,7 +108,7 @@ def test_native_geometry_check_requires_matching_density(monkeypatch):
 
 class Screen:
     def __init__(self, filename):
-        self.image = cv2.imread(str(FIXTURES / filename))
+        self.image = native_replay(cv2.imread(str(FIXTURES / filename)))
         assert self.image is not None
 
     def screenshot(self):
@@ -106,7 +148,7 @@ def test_native_hand_availability_identities_and_full_elixir():
         "rune_giant",
     ]
     assert all(image_has_elixir(screen.image, amount) for amount in range(1, 11))
-    screen.image[610:] = 0
+    screen.image[1220:] = 0
     assert not any(image_has_elixir(screen.image, amount) for amount in range(1, 11))
 
 
@@ -129,7 +171,7 @@ def test_hand_cooldown_and_card_glow_do_not_end_the_battle(filename):
 def test_native_training_result_button_and_non_battle_frames():
     screen = Screen("training-result-360-native.png")
     point = find_post_battle_button_in_image(screen.image)
-    assert point is not None and 135 < point[0] < 225 and 560 < point[1] < 605
+    assert point is not None and 270 < point[0] < 450 and 1120 < point[1] < 1210
     for filename in (
         "training-result-360-native.png",
         "main-360-native.png",

@@ -10,6 +10,7 @@ from crX.bot.find import find_battle_outcome
 from crX.interface.enums import UIField
 from crX.utils.image_handler import open_from_path
 from crX.utils.logger import Logger
+from tests.screen_fixtures import native_replay
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -17,23 +18,23 @@ FIXTURES = Path(__file__).parent / "fixtures"
 class ResultScreen:
     def __init__(self, filename):
         self.filename = filename
-        self.image = open_from_path(str(FIXTURES / filename))
+        self.image = native_replay(open_from_path(str(FIXTURES / filename)))
         self.on_main = False
         self.clicks = []
 
     def screenshot(self):
         if self.on_main:
-            return open_from_path(str(FIXTURES / "post-battle-main-native.png"))
+            return native_replay(open_from_path(str(FIXTURES / "post-battle-main-native.png")))
         return self.image
 
     def click(self, x, y):
         self.clicks.append((x, y))
         if self.filename == "training-result-zh.png":
-            assert 143 < x < 218 and 564 < y < 600
+            assert 286 < x < 436 and 1128 < y < 1200
         elif self.filename.startswith(("battle-loss-native-", "battle-win-native-")):
-            assert 143 < x < 217 and 544 < y < 583
+            assert 286 < x < 434 and 1088 < y < 1166
         else:
-            assert 185 < x < 275 and 556 < y < 612
+            assert 370 < x < 550 and 1112 < y < 1224
         self.on_main = True
 
 
@@ -75,7 +76,7 @@ def test_winner_label_without_result_button_is_not_a_result():
 
 def test_labels_on_both_sides_are_unknown():
     screen = ResultScreen("battle-loss-zh.png")
-    screen.image[217:298, 107:249] = screen.image[35:116, 107:249].copy()
+    screen.image[434:596, 214:498] = screen.image[70:232, 214:498].copy()
     assert find_battle_outcome(screen) is None
 
 

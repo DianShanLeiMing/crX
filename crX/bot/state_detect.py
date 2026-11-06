@@ -23,6 +23,7 @@ from crX.bot.coords import (
     CARD_PAGE_HEADING_REGION,
     CARD_PAGE_MENU_REGION,
     DECK_CARD_COST_REGIONS,
+    GAME_SCREEN_SIZE,
     ITEM_DISTRIBUTION_COLLECT_ALL_SIZE,
     ITEM_DISTRIBUTION_INTRO_TITLE_REGION,
     ITEM_DISTRIBUTION_TITLE_REGION,
@@ -43,7 +44,6 @@ from crX.bot.coords import (
     POST_BATTLE_REWARD_OBJECT_REGION,
     POST_BATTLE_REWARD_STARS_REGION,
     POST_BATTLE_REWARD_TOP_REGION,
-    REFERENCE_SCREEN_SIZE,
     SELECTED_BATTLE_MODE_REGION,
     SHOP_GIFT_BRIGHT_POINT,
     SHOP_NATIVE_GIFT_REGION,
@@ -55,7 +55,7 @@ from crX.detection.image_rec import all_pixels_are_equal, check_line_for_color, 
 
 def is_item_distribution_image(image) -> bool:
     """Identify the centered intro or settled page; neither implies a claim button."""
-    if image is None or image.shape != (*REFERENCE_SCREEN_SIZE[::-1], 3):
+    if image is None or image.shape != (*GAME_SCREEN_SIZE[::-1], 3):
         return False
     return any(
         find_image(image, "item_distribution_title", tolerance=0.93, subcrop=region) is not None
@@ -85,7 +85,7 @@ def check_if_in_battle(emulator):
     iar_bgr = emulator.screenshot()
     if iar_bgr is None:
         return False
-    if iar_bgr.shape != (*REFERENCE_SCREEN_SIZE[::-1], 3):
+    if iar_bgr.shape != (*GAME_SCREEN_SIZE[::-1], 3):
         return False
     if all(pixel_is_equal(iar_bgr[y, x], color, tol=18) for x, y, color in BATTLE_HAND_BORDER_SAMPLES):
         return True
@@ -122,8 +122,8 @@ def check_if_in_battle(emulator):
         bright_count = sum(1 for pixel in pixels[:-1] if is_bright(pixel) or is_filled_crown(pixel))
         return bright_count >= bright_required and is_scoreboard_purple(pixels[-1])
 
-    coords_1v1 = [(534, 42), (538, 66), (552, 45), (552, 66), (625, 99)]
-    coords_2v2 = [(540, 46), (539, 69), (554, 45), (554, 65), (622, 98)]
+    coords_1v1 = [(1068, 84), (1076, 132), (1104, 90), (1104, 132), (1250, 198)]
+    coords_2v2 = [(1080, 92), (1078, 138), (1108, 90), (1108, 130), (1244, 196)]
     if check_mode(coords_1v1):
         return True
     if check_mode(coords_2v2):
@@ -155,18 +155,18 @@ def check_for_trophy_reward_menu(emulator) -> bool:
 
 
 def is_trophy_reward_image(iar) -> bool:
-    if iar is None or iar.shape != (*REFERENCE_SCREEN_SIZE[::-1], 3):
+    if iar is None or iar.shape != (*GAME_SCREEN_SIZE[::-1], 3):
         return False
     pixels = [
-        iar[599][148],
-        iar[624][155],
-        iar[614][163],
-        iar[610][172],
-        iar[603][180],
-        iar[600][189],
-        iar[607][198],
-        iar[617][202],
-        iar[630][211],
+        iar[1198][296],
+        iar[1248][310],
+        iar[1228][326],
+        iar[1220][344],
+        iar[1206][360],
+        iar[1200][378],
+        iar[1214][396],
+        iar[1234][404],
+        iar[1260][422],
     ]
     colors = [
         [255, 184, 68],
@@ -191,21 +191,21 @@ def check_for_reward_choice_screen(emulator) -> bool:
 
 
 def is_reward_choice_image(iar) -> bool:
-    if iar is None or iar.shape != (*REFERENCE_SCREEN_SIZE[::-1], 3):
+    if iar is None or iar.shape != (*GAME_SCREEN_SIZE[::-1], 3):
         return False
     pixels = [
-        iar[195][77],
-        iar[198][88],
-        iar[196][101],
-        iar[196][124],
-        iar[198][143],
-        iar[198][167],
-        iar[196][180],
-        iar[196][201],
-        iar[196][229],
-        iar[198][255],
-        iar[199][268],
-        iar[202][281],
+        iar[390][154],
+        iar[396][176],
+        iar[392][202],
+        iar[392][248],
+        iar[396][286],
+        iar[396][334],
+        iar[392][360],
+        iar[392][402],
+        iar[392][458],
+        iar[396][510],
+        iar[398][536],
+        iar[404][562],
     ]
     colors = [
         [255, 73, 173],
@@ -228,16 +228,16 @@ def is_reward_choice_image(iar) -> bool:
 
 
 ELIXIR_COORDS = [
-    [620, 119],
-    [620, 135],
-    [620, 158],
-    [620, 182],
-    [620, 210],
-    [620, 232],
-    [620, 257],
-    [620, 284],
-    [620, 309],
-    [620, 334],
+    [1240, 238],
+    [1240, 270],
+    [1240, 316],
+    [1240, 364],
+    [1240, 420],
+    [1240, 464],
+    [1240, 514],
+    [1240, 568],
+    [1240, 618],
+    [1240, 668],
 ]
 ELIXIR_COLOR = [240, 137, 244]
 
@@ -249,7 +249,7 @@ def count_elixir(emulator, elixir_count) -> bool:
 
 def image_has_elixir(image, elixir_count: int) -> bool:
     """Read elixir from an already captured frame, without another device call."""
-    if image is None or image.shape != (*REFERENCE_SCREEN_SIZE[::-1], 3) or not 1 <= elixir_count <= len(ELIXIR_COORDS):
+    if image is None or image.shape != (*GAME_SCREEN_SIZE[::-1], 3) or not 1 <= elixir_count <= len(ELIXIR_COORDS):
         return False
     y, x = ELIXIR_COORDS[elixir_count - 1]
     return pixel_is_equal(image[y, x], ELIXIR_COLOR, tol=65)
@@ -259,9 +259,9 @@ def check_pixels_for_win_in_battle_log(emulator) -> bool:
     """Method to check pixels that appear in the battle
     log to determine if the previous game was a win
     """
-    line1 = check_line_for_color(emulator, x_1=40, y_1=136, x_2=94, y_2=156, color=(255, 51, 102))
-    line2 = check_line_for_color(emulator, x_1=40, y_1=154, x_2=99, y_2=139, color=(255, 51, 102))
-    line3 = check_line_for_color(emulator, x_1=40, y_1=146, x_2=95, y_2=149, color=(255, 51, 102))
+    line1 = check_line_for_color(emulator, x_1=80, y_1=272, x_2=188, y_2=312, color=(255, 51, 102))
+    line2 = check_line_for_color(emulator, x_1=80, y_1=308, x_2=198, y_2=278, color=(255, 51, 102))
+    line3 = check_line_for_color(emulator, x_1=80, y_1=292, x_2=190, y_2=298, color=(255, 51, 102))
     if line1 and line2 and line3:
         return False
     return True
@@ -275,9 +275,9 @@ def check_if_on_clash_main_menu(emulator) -> bool:
 
 
 def _is_clash_main_menu_image(image) -> bool:
-    if image is None or image.shape != (*REFERENCE_SCREEN_SIZE[::-1], 3):
+    if image is None or image.shape != (*GAME_SCREEN_SIZE[::-1], 3):
         return False
-    # At 160 DPI, 9:16 moves fixed-size controls rather than stretching their artwork.
+    # At 320 DPI, 9:16 moves fixed-size controls rather than stretching their artwork.
     # Require three independent native anchors plus undimmed yellow button pixels.
     if all(pixel_is_equal(image[y, x], [0, 187, 255], tol=25) for x, y in MAIN_NATIVE_YELLOW_POINTS):
         # A native frame must pass every anchor; historical pixel fallbacks must
@@ -291,13 +291,13 @@ def _is_clash_main_menu_image(image) -> bool:
             )
         )
     pixels = [
-        image[14][180],
-        image[14][279],
-        image[19][256],
-        image[17][343],
-        image[587][224],
-        image[590][143],
-        image[628][143],
+        image[28][360],
+        image[28][558],
+        image[38][512],
+        image[34][686],
+        image[1174][448],
+        image[1180][286],
+        image[1256][286],
     ]
     colors_1 = [
         [255, 255, 255],
@@ -355,7 +355,7 @@ def is_generic_post_battle_reward(image) -> bool:
     UI detail, and a substantial illuminated object distinct from the backdrop.
     Navigation supplies the flow scope, temporal confirmation and click budget.
     """
-    if image is None or image.shape != (*REFERENCE_SCREEN_SIZE[::-1], 3):
+    if image is None or image.shape != (*GAME_SCREEN_SIZE[::-1], 3):
         return False
     hue, saturation, value = cv2.cvtColor(image, cv2.COLOR_BGR2HSV).transpose(2, 0, 1)
     warm = ((hue <= 40) | (hue >= 170)) & (saturation > 60) & (value > 60)
@@ -388,10 +388,10 @@ def is_generic_post_battle_reward(image) -> bool:
     )
     contrast = numpy.abs(_region(image, POST_BATTLE_REWARD_OBJECT_REGION).astype(float) - background).max(axis=2)
     foreground = ((contrast > 45) & (_region(value, POST_BATTLE_REWARD_OBJECT_REGION) > 160)).astype(numpy.uint8)
-    foreground = cv2.morphologyEx(foreground, cv2.MORPH_CLOSE, numpy.ones((3, 3), dtype=numpy.uint8))
+    foreground = cv2.morphologyEx(foreground, cv2.MORPH_CLOSE, numpy.ones((5, 5), dtype=numpy.uint8))
     _, _, components, _ = cv2.connectedComponentsWithStats(foreground)
     return any(
-        width >= 25 and height >= 35 and 600 <= area < foreground.size * 0.7
+        width >= 50 and height >= 70 and 2400 <= area < foreground.size * 0.7
         for _, _, width, height, area in components[1:]
     )
 
@@ -402,7 +402,7 @@ def detect_post_battle_reward(image) -> Literal["lucky_chest", "event_reward"] |
     HSV ranges describe chest and event backdrops. Puzzle gradients additionally
     require native artwork/text anchors. Enlarged attachments are not templates.
     """
-    if image is None or image.shape != (*REFERENCE_SCREEN_SIZE[::-1], 3):
+    if image is None or image.shape != (*GAME_SCREEN_SIZE[::-1], 3):
         return None
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     hue, saturation, value = hsv.transpose(2, 0, 1)
@@ -472,9 +472,9 @@ def detect_post_battle_reward(image) -> Literal["lucky_chest", "event_reward"] |
         centers = [
             (x + width / 2, y + height / 2)
             for x, y, width, height, area in components[1:]
-            if 12 <= width <= 40 and 12 <= height <= 40 and 0.3 < area / (width * height) < 0.75
+            if 24 <= width <= 80 and 24 <= height <= 80 and 0.3 < area / (width * height) < 0.75
         ]
-        aligned = 1 <= len(centers) <= 5 and max(y for _, y in centers) - min(y for _, y in centers) < 8
+        aligned = 1 <= len(centers) <= 5 and max(y for _, y in centers) - min(y for _, y in centers) < 16
         background = orange if orange is not None else purple
         foreground = 1 - _region(background, POST_BATTLE_REWARD_OBJECT_REGION).mean()
         if aligned and foreground > 0.12:
@@ -514,7 +514,7 @@ def check_if_battle_rewards_finished(emulator) -> bool:
 def check_if_on_trophy_road_deck_page(emulator) -> bool:
     """True if the card/deck page is showing the Trophy Road game type."""
     image = emulator.screenshot()
-    pixels = [image[103][41], image[98][54], image[129][61], image[117][50], image[110][43]]
+    pixels = [image[206][82], image[196][108], image[258][122], image[234][100], image[220][86]]
     colors = [[255, 255, 255], [155, 63, 4], [237, 99, 0], [255, 255, 255], [255, 255, 255]]
     return all_pixels_are_equal(pixels, colors, 25)
 
@@ -522,7 +522,7 @@ def check_if_on_trophy_road_deck_page(emulator) -> bool:
 def check_if_on_classic_1v1_deck_page(emulator) -> bool:
     """True if the card/deck page is showing the Classic 1v1 game type."""
     image = emulator.screenshot()
-    pixels = [image[102][20], image[108][79], image[102][42], image[110][44], image[117][44]]
+    pixels = [image[204][40], image[216][158], image[204][84], image[220][88], image[234][88]]
     colors = [[195, 45, 44], [190, 44, 41], [255, 255, 255], [255, 255, 255], [255, 255, 255]]
     return all_pixels_are_equal(pixels, colors, 25)
 
@@ -531,13 +531,13 @@ def check_if_on_classic_2v2_deck_page(emulator) -> bool:
     """True if the card/deck page is showing the Classic 2v2 game type."""
     image = emulator.screenshot()
     pixels = [
-        image[100][19],
-        image[103][73],
-        image[100][286],
-        image[104][336],
-        image[102][43],
-        image[109][46],
-        image[116][43],
+        image[200][38],
+        image[206][146],
+        image[200][572],
+        image[208][672],
+        image[204][86],
+        image[218][92],
+        image[232][86],
     ]
     colors = [
         [197, 45, 45],
@@ -554,19 +554,19 @@ def check_if_on_classic_2v2_deck_page(emulator) -> bool:
 def check_if_on_confirm_randomize_deck_page(emulator) -> bool:
     """True if the "replace deck?" confirm dialog is up after randomizing a full deck."""
     image = emulator.screenshot()
-    pixels = [image[383][90], image[392][217], image[348][212], image[264][87], image[421][69]]
+    pixels = [image[766][180], image[784][434], image[696][424], image[528][174], image[842][138]]
     colors = [[98, 95, 252], [255, 187, 104], [243, 238, 227], [243, 238, 227], [243, 238, 227]]
     return all_pixels_are_equal(pixels, colors, 25)
 
 
 CLAN_VOYAGE_PIXELS: list[tuple[tuple[int, int], list[int]]] = [
-    ((42, 610), [73, 87, 108]),
-    ((150, 610), [78, 175, 255]),
-    ((205, 612), [78, 175, 255]),
-    ((26, 121), [20, 102, 223]),
-    ((291, 122), [20, 102, 221]),
-    ((206, 599), [102, 185, 251]),
-    ((13, 615), [73, 87, 108]),
+    ((84, 1220), [73, 87, 108]),
+    ((300, 1220), [78, 175, 255]),
+    ((410, 1224), [78, 175, 255]),
+    ((52, 242), [20, 102, 223]),
+    ((582, 244), [20, 102, 221]),
+    ((412, 1198), [102, 185, 251]),
+    ((26, 1230), [73, 87, 108]),
 ]
 
 
@@ -587,15 +587,15 @@ def check_if_on_clan_voyage(emulator) -> bool:
 def check_if_on_clash_main_burger_button_options_menu(emulator) -> bool:
     iar = emulator.screenshot()
     pixels = [
-        iar[42][220],
-        iar[41][236],
-        iar[41][242],
-        iar[42][252],
-        iar[44][279],
-        iar[32][205],
-        iar[34][289],
-        iar[51][213],
-        iar[50][289],
+        iar[84][440],
+        iar[82][472],
+        iar[82][484],
+        iar[84][504],
+        iar[88][558],
+        iar[64][410],
+        iar[68][578],
+        iar[102][426],
+        iar[100][578],
     ]
     colors = [
         [255, 255, 255],
@@ -638,7 +638,7 @@ def check_if_battle_mode_is_selected(emulator, mode: str):
     }
     look_folder = mode2folder[mode]
     image = emulator.screenshot()
-    if image is None or image.shape != (*REFERENCE_SCREEN_SIZE[::-1], 3):
+    if image is None or image.shape != (*GAME_SCREEN_SIZE[::-1], 3):
         return False
     print(f"[DEBUG] Checking if {mode} is selected...")
     print(f"[DEBUG] Looking in folder: {look_folder}")
@@ -649,7 +649,7 @@ def check_if_battle_mode_is_selected(emulator, mode: str):
 
 def check_if_on_card_page(emulator) -> bool:
     iar = emulator.screenshot()
-    if iar is None or iar.shape != (*REFERENCE_SCREEN_SIZE[::-1], 3):
+    if iar is None or iar.shape != (*GAME_SCREEN_SIZE[::-1], 3):
         return False
     x, y = CARD_PAGE_BRIGHT_POINT
     if (
@@ -659,14 +659,14 @@ def check_if_on_card_page(emulator) -> bool:
     ):
         return True
     pixels = [
-        iar[438][50],
-        iar[117][51],
-        iar[59][70],
-        iar[65][154],
-        iar[63][93],
-        iar[68][125],
-        iar[78][159],
-        iar[78][72],
+        iar[876][100],
+        iar[234][102],
+        iar[118][140],
+        iar[130][308],
+        iar[126][186],
+        iar[136][250],
+        iar[156][318],
+        iar[156][144],
     ]
     colors1 = [
         [222, 0, 235],
@@ -705,32 +705,32 @@ def check_if_on_card_page(emulator) -> bool:
     if all_pixels_are_equal(pixels, colors3, tol=25):
         return True
     pixels4 = [
-        iar[59][67],
-        iar[60][80],
-        iar[61][101],
-        iar[61][113],
-        iar[61][121],
-        iar[64][136],
-        iar[66][149],
-        iar[65][160],
-        iar[68][64],
-        iar[68][71],
-        iar[68][79],
-        iar[68][88],
-        iar[73][137],
-        iar[73][148],
-        iar[72][156],
-        iar[73][164],
-        iar[589][83],
-        iar[593][86],
-        iar[601][86],
-        iar[614][84],
-        iar[607][150],
-        iar[603][150],
-        iar[598][152],
-        iar[596][154],
-        iar[593][158],
-        iar[591][164],
+        iar[118][134],
+        iar[120][160],
+        iar[122][202],
+        iar[122][226],
+        iar[122][242],
+        iar[128][272],
+        iar[132][298],
+        iar[130][320],
+        iar[136][128],
+        iar[136][142],
+        iar[136][158],
+        iar[136][176],
+        iar[146][274],
+        iar[146][296],
+        iar[144][312],
+        iar[146][328],
+        iar[1178][166],
+        iar[1186][172],
+        iar[1202][172],
+        iar[1228][168],
+        iar[1214][300],
+        iar[1206][300],
+        iar[1196][304],
+        iar[1192][308],
+        iar[1186][316],
+        iar[1182][328],
     ]
     colors4 = [
         [27, 112, 237],
@@ -768,23 +768,23 @@ def check_if_on_card_page(emulator) -> bool:
 PRINCESS_FINGERPRINT_TOL = 25
 PRINCESS_FINGERPRINTS: dict[str, tuple[list[tuple[int, int]], list[list[int]]]] = {
     "info location #1": (
-        [(518, 263), (521, 292), (521, 317), (529, 295), (529, 283), (529, 312)],
+        [(1036, 526), (1042, 584), (1042, 634), (1058, 590), (1058, 566), (1058, 624)],
         [[255, 187, 105], [255, 187, 105], [255, 187, 105], [255, 255, 255], [255, 254, 254], [255, 175, 78]],
     ),
     "info location #2": (
-        [(324, 265), (336, 264), (337, 267), (334, 313), (322, 317), (322, 319)],
+        [(648, 530), (672, 528), (674, 534), (668, 626), (644, 634), (644, 638)],
         [[255, 187, 105], [255, 175, 78], [255, 175, 78], [255, 175, 78], [255, 187, 105], [255, 187, 105]],
     ),
     "info location #3": (
-        [(299, 266), (311, 264), (314, 320), (306, 315), (300, 294), (308, 284)],
+        [(598, 532), (622, 528), (628, 640), (612, 630), (600, 588), (616, 568)],
         [[255, 187, 105], [255, 175, 78], [255, 175, 78], [255, 187, 105], [255, 187, 105], [255, 255, 255]],
     ),
     "upgrade location #1": (
-        [(299, 267), (299, 284), (301, 321), (299, 308), (300, 315)],
+        [(598, 534), (598, 568), (602, 642), (598, 616), (600, 630)],
         [[119, 235, 107], [98, 194, 89], [119, 235, 107], [250, 254, 250], [201, 226, 198]],
     ),
     "upgrade location #2": (
-        [(516, 265), (519, 319), (519, 325), (519, 275), (524, 302), (519, 311)],
+        [(1032, 530), (1038, 638), (1038, 650), (1038, 550), (1048, 604), (1038, 622)],
         [[119, 235, 107], [119, 235, 107], [119, 235, 107], [254, 255, 254], [255, 255, 255], [248, 253, 248]],
     ),
 }
@@ -793,16 +793,16 @@ PRINCESS_FINGERPRINTS: dict[str, tuple[list[tuple[int, int]], list[list[int]]]] 
 def check_if_on_battle_log_page(emulator) -> bool:
     iar = emulator.screenshot()
     pixels = [
-        iar[73][137],
-        iar[72][161],
-        iar[72][169],
-        iar[73][198],
-        iar[74][222],
-        iar[65][314],
-        iar[80][314],
-        iar[71][314],
-        iar[63][79],
-        iar[78][272],
+        iar[146][274],
+        iar[144][322],
+        iar[144][338],
+        iar[146][396],
+        iar[148][444],
+        iar[130][628],
+        iar[160][628],
+        iar[142][628],
+        iar[126][158],
+        iar[156][544],
     ]
     colors = [
         [255, 255, 255],
@@ -824,7 +824,7 @@ def check_if_on_battle_log_page(emulator) -> bool:
 
 def check_if_on_shop(emulator) -> bool:
     iar = emulator.screenshot()
-    if iar is None or iar.shape != (*REFERENCE_SCREEN_SIZE[::-1], 3):
+    if iar is None or iar.shape != (*GAME_SCREEN_SIZE[::-1], 3):
         return False
     x, y = SHOP_GIFT_BRIGHT_POINT
     if pixel_is_equal(iar[y, x], [3, 122, 209], tol=25) and all(
@@ -836,7 +836,7 @@ def check_if_on_shop(emulator) -> bool:
         )
     ):
         return True
-    pixels = [iar[596][14], iar[616][16], iar[14][182], iar[15][284], iar[607][110]]
+    pixels = [iar[1192][28], iar[1232][32], iar[28][364], iar[30][568], iar[1214][220]]
     colors = [[140, 107, 73], [151, 116, 77], [57, 160, 214], [22, 186, 59], [255, 225, 137]]
     for i, p in enumerate(pixels):
         if not pixel_is_equal(p, colors[i], tol=25):
@@ -853,16 +853,16 @@ def check_for_free_offer_confirmation_condition_1(emulator) -> bool:
     """
     iar = emulator.screenshot()
     pixels = [
-        iar[394][153],
-        iar[391][174],
-        iar[395][207],
-        iar[405][154],
-        iar[412][204],
-        iar[215][295],
-        iar[209][299],
-        iar[256][67],
-        iar[398][272],
-        iar[286][292],
+        iar[788][306],
+        iar[782][348],
+        iar[790][414],
+        iar[810][308],
+        iar[824][408],
+        iar[430][590],
+        iar[418][598],
+        iar[512][134],
+        iar[796][544],
+        iar[572][584],
     ]
     colors = [
         [119, 235, 107],
@@ -880,153 +880,153 @@ def check_for_free_offer_confirmation_condition_1(emulator) -> bool:
 
 
 _WAR_PAGE_ALT_PIXELS: tuple[tuple[int, int, int, int, int], ...] = (
-    (307, 54, 152, 117, 254),
-    (326, 58, 154, 119, 253),
-    (340, 41, 162, 129, 255),
-    (326, 30, 129, 161, 177),
-    (18, 613, 74, 88, 110),
-    (58, 613, 74, 88, 110),
-    (97, 615, 74, 88, 109),
-    (134, 611, 75, 89, 110),
-    (160, 611, 104, 187, 255),
-    (193, 614, 78, 175, 255),
-    (222, 615, 74, 88, 109),
-    (271, 620, 73, 87, 108),
-    (315, 619, 73, 87, 109),
-    (343, 619, 73, 87, 109),
-    (174, 611, 255, 255, 255),
+    (614, 108, 152, 117, 254),
+    (652, 116, 154, 119, 253),
+    (680, 82, 162, 129, 255),
+    (652, 60, 129, 161, 177),
+    (36, 1226, 74, 88, 110),
+    (116, 1226, 74, 88, 110),
+    (194, 1230, 74, 88, 109),
+    (268, 1222, 75, 89, 110),
+    (320, 1222, 104, 187, 255),
+    (386, 1228, 78, 175, 255),
+    (444, 1230, 74, 88, 109),
+    (542, 1240, 73, 87, 108),
+    (630, 1238, 73, 87, 109),
+    (686, 1238, 73, 87, 109),
+    (348, 1222, 255, 255, 255),
 )
 _WAR_PAGE_ALT2_PIXELS: tuple[tuple[int, int, int, int, int], ...] = (
-    (204, 608, 75, 111, 146),
-    (204, 616, 77, 115, 150),
-    (274, 621, 79, 117, 152),
-    (272, 612, 77, 113, 148),
-    (277, 591, 73, 106, 139),
-    (15, 48, 124, 79, 255),
-    (15, 37, 141, 101, 255),
-    (16, 24, 145, 107, 255),
-    (17, 18, 147, 110, 255),
-    (342, 54, 136, 96, 254),
-    (344, 42, 144, 108, 255),
-    (344, 33, 157, 124, 255),
+    (408, 1216, 75, 111, 146),
+    (408, 1232, 77, 115, 150),
+    (548, 1242, 79, 117, 152),
+    (544, 1224, 77, 113, 148),
+    (554, 1182, 73, 106, 139),
+    (30, 96, 124, 79, 255),
+    (30, 74, 141, 101, 255),
+    (32, 48, 145, 107, 255),
+    (34, 36, 147, 110, 255),
+    (684, 108, 136, 96, 254),
+    (688, 84, 144, 108, 255),
+    (688, 66, 157, 124, 255),
 )
 _WAR_BOOT_PIXELS: tuple[tuple[int, int, int, int, int], ...] = (
-    (20, 608, 75, 89, 111),
-    (52, 606, 75, 89, 111),
-    (106, 615, 74, 88, 109),
-    (238, 615, 74, 88, 109),
-    (286, 616, 74, 88, 109),
-    (350, 620, 73, 87, 108),
-    (155, 615, 78, 175, 255),
-    (177, 613, 111, 134, 153),
-    (199, 613, 78, 175, 255),
-    (127, 394, 255, 190, 43),
-    (186, 394, 255, 190, 43),
-    (193, 375, 255, 196, 54),
+    (40, 1216, 75, 89, 111),
+    (104, 1212, 75, 89, 111),
+    (212, 1230, 74, 88, 109),
+    (476, 1230, 74, 88, 109),
+    (572, 1232, 74, 88, 109),
+    (700, 1240, 73, 87, 108),
+    (310, 1230, 78, 175, 255),
+    (354, 1226, 111, 134, 153),
+    (398, 1226, 78, 175, 255),
+    (254, 788, 255, 190, 43),
+    (372, 788, 255, 190, 43),
+    (386, 750, 255, 196, 54),
 )
 _WAR_BOOT_PIXELS_ALT: tuple[tuple[int, int, int, int, int], ...] = (
-    (127, 396, 255, 190, 43),
-    (142, 397, 255, 190, 43),
-    (153, 398, 255, 190, 43),
-    (130, 428, 255, 190, 43),
-    (135, 410, 224, 167, 38),
-    (142, 416, 255, 255, 254),
-    (153, 416, 255, 255, 255),
-    (174, 421, 255, 255, 255),
-    (113, 615, 74, 88, 109),
-    (235, 613, 74, 88, 110),
-    (257, 613, 74, 88, 110),
-    (158, 607, 104, 187, 255),
+    (254, 792, 255, 190, 43),
+    (284, 794, 255, 190, 43),
+    (306, 796, 255, 190, 43),
+    (260, 856, 255, 190, 43),
+    (270, 820, 224, 167, 38),
+    (284, 832, 255, 255, 254),
+    (306, 832, 255, 255, 255),
+    (348, 842, 255, 255, 255),
+    (226, 1230, 74, 88, 109),
+    (470, 1226, 74, 88, 110),
+    (514, 1226, 74, 88, 110),
+    (316, 1214, 104, 187, 255),
 )
 _FINAL_RESULTS_PAGE_PIXELS: tuple[tuple[int, int, int, int, int], ...] = (
-    (22, 150, 142, 82, 255),
-    (50, 156, 142, 82, 255),
-    (64, 156, 142, 82, 255),
-    (85, 154, 142, 82, 255),
-    (101, 154, 142, 82, 255),
-    (117, 154, 142, 82, 255),
-    (131, 154, 245, 240, 253),
-    (147, 155, 199, 186, 225),
-    (156, 156, 255, 255, 255),
-    (166, 156, 142, 82, 255),
-    (178, 156, 255, 255, 255),
-    (198, 156, 245, 240, 253),
-    (204, 156, 11, 7, 19),
-    (216, 157, 155, 141, 184),
-    (233, 161, 216, 205, 238),
-    (241, 161, 142, 82, 255),
-    (259, 159, 142, 82, 255),
-    (282, 157, 142, 82, 255),
-    (301, 155, 142, 82, 255),
-    (325, 155, 142, 82, 255),
-    (339, 155, 142, 82, 255),
-    (21, 608, 75, 89, 111),
-    (38, 605, 75, 89, 111),
-    (63, 605, 75, 89, 111),
-    (78, 605, 75, 89, 111),
-    (101, 608, 75, 89, 111),
-    (115, 611, 75, 89, 110),
-    (134, 612, 74, 88, 110),
-    (152, 613, 78, 175, 255),
-    (174, 616, 255, 255, 255),
-    (187, 618, 255, 255, 255),
-    (210, 619, 78, 175, 255),
-    (231, 619, 73, 87, 109),
-    (251, 616, 74, 88, 109),
-    (276, 613, 74, 88, 110),
-    (298, 609, 75, 89, 110),
-    (320, 606, 75, 89, 111),
-    (332, 607, 75, 89, 111),
+    (44, 300, 142, 82, 255),
+    (100, 312, 142, 82, 255),
+    (128, 312, 142, 82, 255),
+    (170, 308, 142, 82, 255),
+    (202, 308, 142, 82, 255),
+    (234, 308, 142, 82, 255),
+    (262, 308, 245, 240, 253),
+    (294, 310, 199, 186, 225),
+    (312, 312, 255, 255, 255),
+    (332, 312, 142, 82, 255),
+    (356, 312, 255, 255, 255),
+    (396, 312, 245, 240, 253),
+    (408, 312, 11, 7, 19),
+    (432, 314, 155, 141, 184),
+    (466, 322, 216, 205, 238),
+    (482, 322, 142, 82, 255),
+    (518, 318, 142, 82, 255),
+    (564, 314, 142, 82, 255),
+    (602, 310, 142, 82, 255),
+    (650, 310, 142, 82, 255),
+    (678, 310, 142, 82, 255),
+    (42, 1216, 75, 89, 111),
+    (76, 1210, 75, 89, 111),
+    (126, 1210, 75, 89, 111),
+    (156, 1210, 75, 89, 111),
+    (202, 1216, 75, 89, 111),
+    (230, 1222, 75, 89, 110),
+    (268, 1224, 74, 88, 110),
+    (304, 1226, 78, 175, 255),
+    (348, 1232, 255, 255, 255),
+    (374, 1236, 255, 255, 255),
+    (420, 1238, 78, 175, 255),
+    (462, 1238, 73, 87, 109),
+    (502, 1232, 74, 88, 109),
+    (552, 1226, 74, 88, 110),
+    (596, 1218, 75, 89, 110),
+    (640, 1212, 75, 89, 111),
+    (664, 1214, 75, 89, 111),
 )
 _BATTLE_DAYS_STARTED_POPUP_PIXELS: tuple[tuple[int, int, int, int, int], ...] = (
-    (46, 313, 142, 82, 255),
-    (64, 315, 142, 82, 255),
-    (71, 315, 142, 82, 255),
-    (95, 316, 2, 1, 2),
-    (113, 316, 245, 241, 253),
-    (130, 316, 3, 3, 4),
-    (150, 318, 60, 35, 108),
-    (171, 322, 255, 255, 255),
-    (194, 322, 142, 82, 255),
-    (210, 323, 255, 255, 255),
-    (235, 323, 116, 67, 208),
-    (253, 323, 4, 2, 7),
-    (271, 323, 142, 82, 255),
-    (290, 323, 142, 82, 255),
-    (314, 321, 142, 82, 255),
-    (328, 319, 142, 82, 255),
-    (40, 611, 75, 89, 110),
-    (52, 611, 75, 89, 110),
-    (71, 608, 75, 89, 111),
-    (90, 609, 75, 89, 110),
-    (102, 611, 75, 89, 110),
-    (120, 611, 75, 89, 110),
-    (137, 612, 74, 88, 110),
-    (159, 611, 104, 187, 255),
-    (180, 611, 255, 255, 255),
-    (193, 611, 104, 187, 255),
-    (217, 612, 74, 88, 110),
-    (237, 613, 74, 88, 110),
-    (254, 614, 74, 88, 110),
-    (276, 615, 74, 88, 109),
-    (300, 614, 74, 88, 110),
-    (320, 612, 74, 88, 110),
+    (92, 626, 142, 82, 255),
+    (128, 630, 142, 82, 255),
+    (142, 630, 142, 82, 255),
+    (190, 632, 2, 1, 2),
+    (226, 632, 245, 241, 253),
+    (260, 632, 3, 3, 4),
+    (300, 636, 60, 35, 108),
+    (342, 644, 255, 255, 255),
+    (388, 644, 142, 82, 255),
+    (420, 646, 255, 255, 255),
+    (470, 646, 116, 67, 208),
+    (506, 646, 4, 2, 7),
+    (542, 646, 142, 82, 255),
+    (580, 646, 142, 82, 255),
+    (628, 642, 142, 82, 255),
+    (656, 638, 142, 82, 255),
+    (80, 1222, 75, 89, 110),
+    (104, 1222, 75, 89, 110),
+    (142, 1216, 75, 89, 111),
+    (180, 1218, 75, 89, 110),
+    (204, 1222, 75, 89, 110),
+    (240, 1222, 75, 89, 110),
+    (274, 1224, 74, 88, 110),
+    (318, 1222, 104, 187, 255),
+    (360, 1222, 255, 255, 255),
+    (386, 1222, 104, 187, 255),
+    (434, 1224, 74, 88, 110),
+    (474, 1226, 74, 88, 110),
+    (508, 1228, 74, 88, 110),
+    (552, 1230, 74, 88, 109),
+    (600, 1228, 74, 88, 110),
+    (640, 1224, 74, 88, 110),
 )
 _WAR_DECK_INDICATOR_TOL = 15
 _WAR_DECK_INDICATORS: dict[int, tuple[tuple[int, int, int, int, int], ...]] = {
-    1: ((0, 94, 207, 58, 546), (0, 108, 211, 55, 508), (255, 255, 255, 67, 525), (0, 93, 207, 76, 546)),
-    2: ((0, 108, 211, 131, 508), (255, 255, 255, 143, 524), (0, 109, 211, 155, 506), (0, 101, 209, 130, 526)),
-    3: ((0, 109, 211, 207, 508), (255, 255, 255, 218, 524), (0, 94, 207, 229, 543), (0, 109, 211, 230, 507)),
-    4: ((0, 109, 211, 283, 506), (255, 255, 255, 295, 526), (0, 94, 207, 302, 544), (0, 109, 211, 304, 507)),
+    1: ((0, 94, 207, 116, 1092), (0, 108, 211, 110, 1016), (255, 255, 255, 134, 1050), (0, 93, 207, 152, 1092)),
+    2: ((0, 108, 211, 262, 1016), (255, 255, 255, 286, 1048), (0, 109, 211, 310, 1012), (0, 101, 209, 260, 1052)),
+    3: ((0, 109, 211, 414, 1016), (255, 255, 255, 436, 1048), (0, 94, 207, 458, 1086), (0, 109, 211, 460, 1014)),
+    4: ((0, 109, 211, 566, 1012), (255, 255, 255, 590, 1052), (0, 94, 207, 604, 1088), (0, 109, 211, 608, 1014)),
 }
-CARD_MASTERY_COORD = (292, 445)
+CARD_MASTERY_COORD = (584, 890)
 CARD_MASTERY_BGR = (95, 214, 251)
 CARD_MASTERY_PIXEL_TOLERANCE = 15
 
 
 def is_deck_full(emulator) -> bool:
     iar = numpy.asarray(emulator.screenshot())
-    if iar.shape != (*REFERENCE_SCREEN_SIZE[::-1], 3):
+    if iar.shape != (*GAME_SCREEN_SIZE[::-1], 3):
         return False
     if all(
         numpy.count_nonzero(
@@ -1034,19 +1034,19 @@ def is_deck_full(emulator) -> bool:
             & (iar[top:bottom, left:right, 2] > 120)
             & (iar[top:bottom, left:right, 1] < 120)
         )
-        >= 25
+        >= 100
         for left, top, right, bottom in DECK_CARD_COST_REGIONS
     ):
         return True
     pixels = [
-        iar[174][37],
-        iar[174][112],
-        iar[174][186],
-        iar[174][259],
-        iar[313][37],
-        iar[314][112],
-        iar[312][186],
-        iar[312][259],
+        iar[348][74],
+        iar[348][224],
+        iar[348][372],
+        iar[348][518],
+        iar[626][74],
+        iar[628][224],
+        iar[624][372],
+        iar[624][518],
     ]
     valid_colors = [
         [175, 5, 179],
@@ -1062,7 +1062,7 @@ def is_deck_full(emulator) -> bool:
 
 def is_single_deck_layout_by_pixel(emulator) -> bool:
     iar = numpy.asarray(emulator.screenshot())
-    pixel_coords = [(85, 167), (101, 168), (85, 316), (101, 316)]
+    pixel_coords = [(170, 334), (202, 336), (170, 632), (202, 632)]
     expected_colors = [[141, 29, 0], [147, 34, 0], [145, 31, 4], [149, 34, 3]]
     return all(
         (

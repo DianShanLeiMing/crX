@@ -570,7 +570,7 @@ def get_to_main_after_fight(
             if close_actions >= POPUP_CLOSE_MAX_ACTIONS:
                 close_limit_reached = True
                 break
-            if previous_close is None or any(abs(a - b) > 3 for a, b in zip(close_coord, previous_close, strict=True)):
+            if previous_close is None or any(abs(a - b) > 6 for a, b in zip(close_coord, previous_close, strict=True)):
                 time.sleep(0.5)
                 continue
             close_actions += 1

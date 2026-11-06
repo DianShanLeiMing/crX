@@ -4,7 +4,7 @@ The bot picks a **play group** for each detected card, then taps a random point 
 
 ## Reference map
 
-Runtime geometry is now **360×640 / 160 DPI**. The historical overlay below uses 419×633; multiply x by 360/419 and y by 640/633 to compare its points with the migrated `PLAY_COORDS` table. The `large_spell` points were subsequently recalibrated on native captures as described below and no longer follow that overlay.
+Runtime geometry is now **720×1280 / 320 DPI**. Current points use native 720p coordinates; numerical examples below describe historical 360p calibration (double both axes). See [720p migration](screen-720x1280.md). The historical overlay below uses 419×633; multiply x by 720/419 and y by 1280/633 to compare its points with the migrated `PLAY_COORDS` table. The `large_spell` points were subsequently recalibrated on native captures as described below and no longer follow that overlay.
 
 ![Placement zones overlay](placement-zones-overlay.png)
 

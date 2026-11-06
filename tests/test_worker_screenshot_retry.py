@@ -19,7 +19,7 @@ def device_with_capture(monkeypatch, effects):
     device.adb_path = "adb"
     device.device_serial = "127.0.0.1:16416"
     command = ["adb", "-s", device.device_serial, "exec-out", "screencap", "-p"]
-    frame = np.zeros((640, 360, 3), dtype=np.uint8)
+    frame = np.zeros((1280, 720, 3), dtype=np.uint8)
     ok, encoded = cv2.imencode(".png", frame)
     assert ok
     result = subprocess.CompletedProcess(command, 0, encoded.tobytes(), b"")
@@ -35,7 +35,7 @@ def test_single_timeout_recovers_frame_and_restores_adapter(monkeypatch):
     device, signal, run = device_with_capture(monkeypatch, ["timeout", "ok"])
     original = device.screenshot
     with worker.screenshot_retry_policy(device, Logger(), signal):
-        assert device.screenshot().shape == (640, 360, 3)
+        assert device.screenshot().shape == (1280, 720, 3)
     assert run.call_count == 2
     assert device.screenshot == original and "screenshot" not in vars(device)
     assert run.call_args_list[0].args[0] == ["adb", "-s", device.device_serial, "exec-out", "screencap", "-p"]
@@ -70,7 +70,7 @@ def test_repeated_timeout_is_propagated_after_one_retry(monkeypatch):
 @pytest.mark.parametrize("translated", [False, True])
 def test_shell_fallback_preserves_png_pixels(monkeypatch, translated):
     device, signal, run = device_with_capture(monkeypatch, [])
-    frame = np.asarray(np.random.default_rng(42).integers(0, 256, (640, 360, 3)), dtype=np.uint8)
+    frame = np.asarray(np.random.default_rng(42).integers(0, 256, (1280, 720, 3)), dtype=np.uint8)
     ok, encoded = cv2.imencode(".png", frame)
     assert ok
     data = encoded.tobytes()

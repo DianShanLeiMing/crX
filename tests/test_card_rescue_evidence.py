@@ -180,7 +180,7 @@ def test_disagreement_report_survives_old_image_dedup_and_is_not_repeated(tmp_pa
         result = recognition(reference, baseline="cannon")
         try:
             for _ in range(2):
-                detection._record_match_sample(frame, 0, [], result, trigger="selected_card", purple_counts=[30] * 4)
+                detection._record_match_sample(frame, 0, [], result, trigger="selected_card", purple_counts=[120] * 4)
         finally:
             assert collector.close()
         assert collector.stats["saved"] == (1 if index == 0 else 0)
