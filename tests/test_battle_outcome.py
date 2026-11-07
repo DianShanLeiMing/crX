@@ -6,7 +6,8 @@ import pytest
 
 from crX.bot import fight, nav, states
 from crX.bot.coords import BATTLE_RESULT_BUTTON_REGION
-from crX.bot.find import find_battle_outcome
+from crX.bot.find import find_battle_outcome, find_post_battle_button
+from crX.bot.state_detect import check_if_battle_has_ended
 from crX.interface.enums import UIField
 from crX.utils.image_handler import open_from_path
 from crX.utils.logger import Logger
@@ -31,7 +32,7 @@ class ResultScreen:
         self.clicks.append((x, y))
         if self.filename == "training-result-zh.png":
             assert 286 < x < 436 and 1128 < y < 1200
-        elif self.filename.startswith(("battle-loss-native-", "battle-win-native-")):
+        elif self.filename.startswith(("battle-loss-native-", "battle-win-native-", "failure-result-720-")):
             assert 286 < x < 434 and 1088 < y < 1166
         else:
             assert 370 < x < 550 and 1112 < y < 1224
@@ -48,6 +49,22 @@ def test_attached_result_screens_identify_the_winning_side(result):
 @pytest.mark.parametrize("result", ["win", "loss"])
 def test_native_frames_identify_the_winning_side_despite_animation(frame, result):
     assert find_battle_outcome(ResultScreen(f"battle-{result}-native-{frame}.png")) == result
+
+
+@pytest.mark.parametrize("number", [1, 2, 3])
+def test_native_failure_results_end_elixir_wait_without_recovery(monkeypatch, number):
+    screen = ResultScreen(f"failure-result-720-20261107-{number}.png")
+    assert screen.image.shape == (1280, 720, 3)
+    assert find_post_battle_button(screen) == (310, 1100)
+    assert check_if_battle_has_ended(screen)
+    assert find_battle_outcome(screen) == "loss"
+    monkeypatch.setattr(fight, "count_elixir", lambda *_args: False)
+    monkeypatch.setattr(fight, "check_which_cards_are_available", lambda *_args: [])
+    monkeypatch.setattr(fight, "is_hero_champion_ability_visible", lambda *_args: False)
+    monkeypatch.setattr(fight, "switch_side", lambda: (0, 0))
+    monkeypatch.setattr(fight, "check_for_in_battle_with_delay", lambda *_args: False)
+    assert fight.wait_for_elixir(screen, Logger(), 8) == "no battle"
+    assert screen.clicks == []
 
 
 @pytest.mark.parametrize(
@@ -107,6 +124,9 @@ def result_flow(monkeypatch):
         ("battle-loss-zh.png", "loss", 0, 1),
         ("battle-loss-native-0.png", "loss", 0, 1),
         ("battle-win-native-0.png", "win", 1, 0),
+        ("failure-result-720-20261107-1.png", "loss", 0, 1),
+        ("failure-result-720-20261107-2.png", "loss", 0, 1),
+        ("failure-result-720-20261107-3.png", "loss", 0, 1),
         ("training-result-zh.png", None, 0, 0),
     ],
 )
