@@ -25,6 +25,35 @@ def write_image(path, frame):
     Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)).save(path)
 
 
+def test_open_wrong_folder_explains_which_batch_to_select(tmp_path):
+    directory = tmp_path / "datasets"
+    directory.mkdir()
+    with pytest.raises(ValueError, match="datasets.*metadata.json.*captures"):
+        data.PreparationSession.open(directory)
+    assert list(directory.iterdir()) == []
+
+
+def test_find_batches_handles_parent_nested_and_direct_folder(tmp_path, frame):
+    root = tmp_path / "captures"
+    first = data.PreparationSession.create(root)
+    second = data.PreparationSession.create(root / "nested")
+    first.append(frame, source="test")
+    second.append(frame, source="test")
+    unrelated = root / "not-a-batch"
+    unrelated.mkdir()
+    (unrelated / "metadata.json").write_text('{"schema":"other"}', encoding="utf-8")
+    # A valid batch's image folders must not be searched as more batches.
+    (first.directory / "raw" / "metadata.json").write_text(json.dumps({"schema": data.SCHEMA}), encoding="utf-8")
+    found = data.find_batches(root, stop=Event())
+    assert set(found.directories) == {first.directory, second.directory}
+    assert data.find_batches(first.directory, stop=Event()).directories == (first.directory,)
+    with pytest.raises(ValueError, match="没有找到采集批次"):
+        data.find_batches(unrelated, stop=Event())
+    stop = Event()
+    stop.set()
+    assert data.find_batches(root, stop=stop).directories == ()
+
+
 def test_native_capture_keeps_hd_detail_and_old_batches_stay_readable(tmp_path, frame):
     native = cv2.resize(frame, (720, 1280), interpolation=cv2.INTER_NEAREST)
     native[300, 300] = (1, 2, 3)
