@@ -75,7 +75,7 @@ class CrXUI(ttk.Window):
         self.yolo_data_tabs = ttk.Notebook(self.notebook)
         self.battlefield_data_tab = BattlefieldDataTab(self.yolo_data_tabs, busy_callback=self._update_clear_busy)
         self.dataset_split_tab = DatasetSplitTab(self.yolo_data_tabs, busy_callback=self._update_clear_busy)
-        self.yolo_data_tabs.add(self.battlefield_data_tab, text="截图与裁剪")
+        self.yolo_data_tabs.add(self.battlefield_data_tab, text="截图采集")
         self.yolo_data_tabs.add(self.dataset_split_tab, text="标注与划分")
         self.card_samples_tab = CardReviewTab(
             self.notebook,

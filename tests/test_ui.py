@@ -137,25 +137,12 @@ def test_battlefield_capture_preview_recrop_and_running_guard(desktop_ui, tmp_pa
         original_session = tab.session
         assert len(original_session.metadata["frames"]) == 1
         assert tab._transform is not None
-        assert [tab.more_menu.entrycget(index, "label") for index in range(3)] == [
-            "导入图片或视频…",
-            "导入图片目录或录制包…",
-            "打开已有批次…",
-        ]
-        tab.crop_vars[0].set("12")
-        _wait_ui(ui, lambda: tab._crop_preview_id is None)
-        x, _y, scale_x, _scale_y = tab._transform
-        selection = tab.raw_canvas.find_all()[-1]
-        assert tab.raw_canvas.coords(selection)[0] == pytest.approx(x + 12 * scale_x)
-
-        x, y, scale_x, scale_y = tab._transform
-        tab._begin_crop(SimpleNamespace(x=x + 10 * scale_x, y=y + 30 * scale_y))
-        tab._end_crop(SimpleNamespace(x=x + 300 * scale_x, y=y + 480 * scale_y))
-        assert tab._crop() == (10, 30, 300, 480)
-        tab._recrop()
-        _wait_ui(ui, lambda: not tab.busy and tab.session is not original_session and tab.frame_image is not None)
-        assert tab.session.metadata["crop_size"] == [290, 450]
-        assert original_session.metadata["crop_ltrb"] == [0, 60, 360, 515]
+        assert tab.open_session_button.cget("text") == "打开已有批次"
+        assert not hasattr(tab, "more_menu")
+        assert original_session.metadata["crop_ltrb"] == [0, 0, 360, 640]
+        assert original_session.metadata["image_mode"] == "full_frame"
+        assert not (original_session.directory / "arena").exists()
+        assert not hasattr(tab, "crop_vars") and not hasattr(tab, "crop_canvas")
 
         ui.set_button_state("running")
         tab._capture(single=True)
@@ -167,23 +154,24 @@ def test_battlefield_capture_preview_recrop_and_running_guard(desktop_ui, tmp_pa
         ui.set_button_state("idle")
         tab.capture_callback = original_callback
         tab.root_var.set(original_root)
-        tab._reset_crop()
 
 
-def test_battlefield_import_navigation_replaces_previous_preview(desktop_ui, tmp_path):
+def test_battlefield_open_navigation_replaces_previous_preview(desktop_ui, tmp_path, monkeypatch):
     import numpy as np
-    from PIL import Image
+
+    from crX.interface import battlefield_data
+    from crX.utils.battlefield_data import PreparationSession
 
     ui, _root = desktop_ui
     tab = ui.battlefield_data_tab
     original_root = tab.root_var.get()
-    folder = tmp_path / "source"
-    folder.mkdir()
-    Image.new("RGB", (360, 640), (255, 0, 0)).save(folder / "01.png")
-    Image.new("RGB", (360, 640), (0, 255, 0)).save(folder / "02.png")
+    session = PreparationSession.create(tmp_path / "captures")
+    session.append(np.full((1280, 720, 3), [0, 0, 255], np.uint8), source="test")
+    session.append(np.full((1280, 720, 3), [0, 255, 0], np.uint8), source="test")
+    monkeypatch.setattr(battlefield_data.filedialog, "askdirectory", lambda **_kwargs: str(session.directory))
     try:
         tab.root_var.set(str(tmp_path / "output"))
-        tab._import(folder)
+        tab._open_session()
         _wait_ui(ui, lambda: not tab.busy and tab.frame_image is not None)
         assert len(tab.session.metadata["frames"]) == 2
         assert np.array_equal(tab.frame_image[0, 0], [0, 0, 255])
@@ -191,10 +179,155 @@ def test_battlefield_import_navigation_replaces_previous_preview(desktop_ui, tmp
         _wait_ui(ui, lambda: not tab.busy)
         assert np.array_equal(tab.frame_image[0, 0], [0, 255, 0])
         assert tab.position_var.get() == "2 / 2 张"
+        opened = tab.session
+        wrong_folder = tmp_path / "datasets"
+        wrong_folder.mkdir()
+        monkeypatch.setattr(battlefield_data.filedialog, "askdirectory", lambda **_kwargs: str(wrong_folder))
+        tab._open_session()
+        _wait_ui(ui, lambda: not tab.busy)
+        assert "没有找到采集批次" in tab.message_var.get() and "datasets" in tab.message_var.get()
+        assert "WinError" not in tab.message_var.get()
+        assert str(wrong_folder) in tab.message_var.get()
+        assert tab.session is opened
+        assert np.array_equal(tab.frame_image[0, 0], [0, 255, 0])
+        second = PreparationSession.create(tmp_path / "captures" / "nested")
+        second.append(np.full((1280, 720, 3), [255, 0, 0], np.uint8), source="test")
+        monkeypatch.setattr(battlefield_data.filedialog, "askdirectory", lambda **_kwargs: str(tmp_path / "captures"))
+        tab._open_session()
+        _wait_ui(ui, lambda: not tab.busy)
+        assert len(tab.batch_choice.cget("values")) == 2
+        assert tab.session.directory == tab._batch_paths[0]
+        assert tab.frame_image is not None and tab.position_var.get() != "尚未采集"
+        selected = tab._batch_paths[1]
+        tab.batch_choice.current(1)
+        tab.batch_choice.event_generate("<<ComboboxSelected>>")
+        _wait_ui(ui, lambda: not tab.busy and tab.frame_image is not None)
+        assert tab.session.directory == selected
+        expected = [255, 0, 0] if selected == second.directory else [0, 0, 255]
+        assert np.array_equal(tab.frame_image[0, 0], expected)
+        monkeypatch.setattr(battlefield_data, "get_battlefield_data_dir", lambda: tmp_path)
+        monkeypatch.setattr(battlefield_data.filedialog, "askdirectory", lambda **_kwargs: str(tmp_path / "annotated"))
+        tab._analyze_all()
+        _wait_ui(ui, lambda: not tab.busy and tab._dedup_plan is not None)
+        assert len(tab._dedup_keep) == 3
+        tab._export_selected()
+        _wait_ui(ui, lambda: not tab.busy)
+        output = tmp_path / "annotated" / "images"
+        assert len(list(output.glob("*.png"))) == 3
+        assert "整理完成" in tab.message_var.get()
+        tab._export_selected()
+        _wait_ui(ui, lambda: not tab.busy)
+        assert len(list(output.glob("*.png"))) == 3
+        assert all(path.is_file() for path in output.iterdir())
+        previous_session = tab.session
+        count = len(previous_session.metadata["frames"])
+        tab._delete_current()
+        _wait_ui(ui, lambda: not tab.busy)
+        if count > 1:
+            assert len(tab.session.metadata["frames"]) == count - 1
+            assert list(tab.session.directory.glob(".deleted/*/raw.png"))
+        else:
+            assert not previous_session.directory.exists()
+            assert previous_session.directory not in tab._batch_paths
+            assert tab.session is None or tab.session.directory != previous_session.directory
+        assert tab._dedup_plan is None
+        assert str(tab.export_selected_button.cget("state")) == "disabled"
+        if tab.session is not None:
+            assert tab.frame_image is not None
+        else:
+            assert tab.frame_image is None
+
     finally:
         tab.stop()
         _wait_ui(ui, lambda: not tab.busy)
         tab.root_var.set(original_root)
+
+
+def test_loading_and_deleting_empty_batches_clears_list_and_preview(desktop_ui, tmp_path, monkeypatch):
+    from crX.interface import battlefield_data
+    from tests.test_capture_organization import batch
+
+    ui, _root = desktop_ui
+    tab = ui.battlefield_data_tab
+    source = tmp_path / "captures"
+    empty = batch(source, ())
+    first = batch(source, (50,))
+    second = batch(source, (150,))
+    monkeypatch.setattr(battlefield_data.filedialog, "askdirectory", lambda **_kwargs: str(source))
+    try:
+        tab._open_session()
+        _wait_ui(ui, lambda: not tab.busy and tab.session is not None)
+        assert len(tab._batch_paths) == 2 and not empty.directory.exists()
+        deleted = tab.session.directory
+        tab._delete_current()
+        _wait_ui(ui, lambda: not tab.busy)
+        assert not deleted.exists() and len(tab._batch_paths) == 1
+        assert tab.session is not None and tab.session.directory != deleted
+        assert tab.frame_image is not None
+        tab._delete_current()
+        _wait_ui(ui, lambda: not tab.busy)
+        assert not first.directory.exists() and not second.directory.exists()
+        assert tab.session is None and tab.frame_image is None and tab._batch_paths == ()
+        assert not tab.batch_choice.cget("values") and tab.batch_row.winfo_manager() == ""
+        last = batch(source, ())
+        tab._open_session()
+        _wait_ui(ui, lambda: not tab.busy)
+        assert not last.directory.exists() and tab.session is None
+        assert "没有可加载的非空批次" in tab.message_var.get()
+    finally:
+        tab.stop()
+        _wait_ui(ui, lambda: not tab.busy)
+
+
+def test_global_dedup_review_preserves_originals_and_exports_selection(desktop_ui, tmp_path, monkeypatch):
+    from crX.interface import battlefield_data
+    from tests.test_battlefield_dedup import capture, sample_frames
+
+    ui, _root = desktop_ui
+    tab = ui.battlefield_data_tab
+    previous = tab.root_var.get(), tab._batch_root
+    source = tmp_path / "captures"
+    frames = sample_frames()
+    capture(source, frames)
+    capture(source, [frames[0]])
+    monkeypatch.setattr(battlefield_data.filedialog, "askdirectory", lambda **_kwargs: str(tmp_path / "selected"))
+    review = None
+    try:
+        tab.root_var.set(str(source))
+        tab._batch_root = source
+        tab._analyze_all()
+        _wait_ui(ui, lambda: not tab.busy and tab._dedup_plan is not None)
+        assert len(tab._dedup_plan.images) == 4 and len(tab._dedup_keep) == 3
+        tab._review_duplicates()
+        review = tab._review_window
+        assert review is not None
+        review.withdraw()
+        _wait_ui(ui, lambda review=review: review._arrays is not None)
+        assert all(image.shape == (1280, 720, 3) for image in review._arrays)
+        review._apply_near()
+        assert len(tab._dedup_keep) == 2
+        review._reset()
+        assert len(tab._dedup_keep) == 3
+        review._choose("right")
+        assert len(tab._dedup_keep) == 2
+        group = review._group()
+        assert group.members[review.members.current()] in tab._dedup_keep
+        assert group.representative not in tab._dedup_keep
+        review.destroy()
+        review = None
+        tab._export_selected()
+        _wait_ui(ui, lambda: not tab.busy)
+        assert len(list((tmp_path / "selected/images").glob("*.png"))) == 2
+        assert len(list(source.glob("*/raw/*.png"))) == 4
+        assert "去重排除 2 张" in tab.message_var.get()
+    finally:
+        if review is not None:
+            review.destroy()
+        tab.stop()
+        _wait_ui(ui, lambda: not tab.busy)
+        tab.root_var.set(previous[0])
+        tab._batch_root = previous[1]
+        tab._invalidate_dedup()
 
 
 def test_data_path_buttons_create_and_open_current_targets_without_file_dialogs(desktop_ui, tmp_path, monkeypatch):
@@ -272,8 +405,14 @@ def test_battlefield_stop_retains_partial_batch_and_stop_message(desktop_ui, tmp
         tab.root_var.set(str(tmp_path))
         tab.interval_var.set("60")
         tab.capture_callback = lambda: lambda: SimpleNamespace(screenshot=lambda: np.zeros((640, 360, 3), np.uint8))
+        previous_session = tab.session
         tab._capture()
-        _wait_ui(ui, lambda: tab.session is not None and len(tab.session.metadata["frames"]) == 1)
+        _wait_ui(
+            ui,
+            lambda: tab.session is not None
+            and tab.session is not previous_session
+            and len(tab.session.metadata["frames"]) == 1,
+        )
         tab.stop()
         _wait_ui(ui, lambda: not tab.busy and tab.frame_image is not None)
         assert len(tab.session.metadata["frames"]) == 1
@@ -297,7 +436,7 @@ def test_dataset_directory_picker_loads_and_exports_whole_battles(desktop_ui, tm
     monkeypatch.setattr("crX.interface.dataset_split.filedialog.askdirectory", lambda **_kwargs: str(source))
     try:
         assert [ui.yolo_data_tabs.tab(item, "text") for item in ui.yolo_data_tabs.tabs()] == [
-            "截图与裁剪",
+            "截图采集",
             "标注与划分",
         ]
         tab.destination_var.set(str(tmp_path / "datasets"))

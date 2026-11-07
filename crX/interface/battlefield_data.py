@@ -1,4 +1,4 @@
-"""Prepare screenshots and crops for later battlefield annotation."""
+"""Prepare complete screenshots for later annotation."""
 
 from __future__ import annotations
 
@@ -12,17 +12,22 @@ import cv2
 import ttkbootstrap as ttk
 from PIL import Image, ImageTk
 
-from crX.bot.coords import BATTLEFIELD_DATA_REGION_LTRB, GAME_SCREEN_SIZE
+from crX.bot.coords import GAME_SCREEN_SIZE
+from crX.detection.battlefield import battlefield_region
+from crX.interface.battlefield_dedup_review import DedupReview
 from crX.utils.battlefield_data import (
     MAX_FRAMES,
+    AnnotationExport,
+    BatchSearch,
+    FrameDeletion,
     PreparationSession,
     collect_screenshots,
+    delete_frame,
+    find_batches,
     get_battlefield_data_dir,
-    import_screenshots,
-    recrop_session,
     validate_collection,
-    validate_crop,
 )
+from crX.utils.battlefield_dedup import DeduplicationPlan, analyze_batches, export_selection
 from crX.utils.open_folder import open_folder
 
 
@@ -34,23 +39,25 @@ class BattlefieldDataTab(ttk.Frame):
         self.busy = False
         self.running = False
         self.session = None
+        self._dedup_plan = None
+        self._dedup_keep = set()
+        self._dedup_scanning = False
+        self._review_window = None
         self.index = 0
         self.frame_image = None
         self._photos = []
         self._transform = None
-        self._drag_start = None
         self._needs_preview = False
         self._preview_job = False
-        self._crop_preview_id = None
         self._results = Queue()
         self._stop = threading.Event()
-        self._controls: list[tuple[ttk.Entry | ttk.Spinbox | ttk.Button | ttk.Menubutton | ttk.Checkbutton, str]] = []
+        self._controls: list[tuple[ttk.Entry | ttk.Spinbox | ttk.Button | ttk.Combobox | ttk.Checkbutton, str]] = []
         self.columnconfigure(0, weight=1)
         self.rowconfigure(5, weight=1)
 
         ttk.Label(
             self,
-            text="手动进入对战或回放，每批只采集一场。采集后拖框裁剪，再保存裁剪结果。",
+            text="每批只采集一场，直接使用完整 720×1280 截图标注和训练，不裁剪。手牌与圣水继续由现有规则识别。",
             wraplength=720,
         ).grid(row=0, column=0, sticky="w", pady=(0, 8))
         folder_row = ttk.Frame(self)
@@ -63,23 +70,20 @@ class BattlefieldDataTab(ttk.Frame):
         self._controls.append((entry, "normal"))
         self._button(folder_row, "打开", self._browse_root).grid(row=0, column=2, padx=6)
 
-        crop_row = ttk.Frame(self)
-        crop_row.grid(row=2, column=0, sticky="ew", pady=8)
-        self.crop_vars = []
-        for label, value in zip(("左", "上", "右", "下"), BATTLEFIELD_DATA_REGION_LTRB, strict=True):
-            ttk.Label(crop_row, text=label).pack(side="left", padx=(0, 4))
-            variable = tk.StringVar(value=str(value))
-            self.crop_vars.append(variable)
-            entry = ttk.Entry(crop_row, textvariable=variable, width=5)
-            entry.pack(side="left", padx=(0, 10))
-            self._controls.append((entry, "normal"))
-        self._button(crop_row, "恢复默认", self._reset_crop).pack(side="left", padx=4)
+        dedup = ttk.Frame(self)
+        dedup.grid(row=9, column=0, sticky="ew", pady=(8, 0))
+        self._button(dedup, "全局去重", self._analyze_all).pack(side="left")
+        self.review_button = self._button(dedup, "查看相似组", self._review_duplicates)
+        self.review_button.pack(side="left", padx=6)
+        self.export_selected_button = self._button(dedup, "导出图片", self._export_selected)
+        self.export_selected_button.pack(side="left")
+        self.dedup_status = tk.StringVar(value="先打开采集总目录，再全局去重；原始图片保留。")
+        ttk.Label(self, textvariable=self.dedup_status, wraplength=720).grid(row=8, column=0, sticky="ew", pady=4)
 
         sampling = ttk.Frame(self)
         sampling.grid(row=3, column=0, sticky="ew")
         self.interval_var = tk.StringVar(value="1")
-        self.count_var = tk.StringVar(value="120")
-        self.skip_similar_var = tk.BooleanVar(value=True)
+        self.count_var = tk.StringVar(value="300")
         for label, variable, start, end in (
             ("采样间隔（秒）", self.interval_var, 0.2, 60),
             ("张数上限", self.count_var, 1, MAX_FRAMES),
@@ -88,55 +92,50 @@ class BattlefieldDataTab(ttk.Frame):
             spin = ttk.Spinbox(sampling, textvariable=variable, from_=start, to=end, width=6)
             spin.pack(side="left", padx=(0, 12))
             self._controls.append((spin, "normal"))
-        skip_similar = ttk.Checkbutton(sampling, text="跳过相似截图", variable=self.skip_similar_var)
-        skip_similar.pack(side="left")
-        self._controls.append((skip_similar, "normal"))
 
         actions = ttk.Frame(self)
         actions.grid(row=4, column=0, sticky="ew", pady=8)
-        self._button(actions, "截取一张", lambda: self._capture(single=True)).grid(row=0, column=0, padx=(0, 6), pady=3)
         self.capture_button = self._button(actions, "开始连续采集", self._capture)
-        self.capture_button.grid(row=0, column=1, padx=6, pady=3)
+        self.capture_button.grid(row=0, column=0, padx=(0, 6), pady=3)
+        self._button(actions, "截取一张", lambda: self._capture(single=True)).grid(row=0, column=1, padx=6, pady=3)
         self.stop_button = ttk.Button(
             actions, text="停止", command=self.stop, state="disabled", bootstyle="danger-outline"
         )
         self.stop_button.grid(row=0, column=2, padx=6, pady=3)
-        self._button(actions, "保存裁剪结果", self._recrop).grid(row=0, column=3, padx=6, pady=3)
-        self.more_button = ttk.Menubutton(actions, text="更多")
-        self.more_button.grid(row=0, column=4, padx=6, pady=3)
-        self.more_menu = tk.Menu(self.more_button, tearoff=False)
-        self.more_menu.add_command(label="导入图片或视频…", command=self._import_file)
-        self.more_menu.add_command(label="导入图片目录或录制包…", command=self._import_folder)
-        self.more_menu.add_command(label="打开已有批次…", command=self._open_session)
-        self.more_button.configure(menu=self.more_menu)
-        self._controls.append((self.more_button, "normal"))
+        self.open_session_button = self._button(actions, "打开已有批次", self._open_session)
+        self.open_session_button.grid(row=0, column=3, padx=6, pady=3)
+        self.batch_row = ttk.Frame(actions)
+        self.batch_row.grid(row=1, column=0, columnspan=4, sticky="ew", pady=4)
+        self.batch_row.columnconfigure(1, weight=1)
+        ttk.Label(self.batch_row, text="找到的批次").grid(row=0, column=0, padx=(0, 6))
+        self.batch_choice = ttk.Combobox(self.batch_row, state="readonly", width=1)
+        self.batch_choice.grid(row=0, column=1, sticky="ew")
+        self._controls.append((self.batch_choice, "readonly"))
+        self.batch_choice.bind("<<ComboboxSelected>>", lambda _event: self._load_selected_batch())
+        self._batch_paths = ()
+        self._batch_root = None
+        self.batch_row.grid_remove()
 
         previews = ttk.Frame(self)
         previews.grid(row=5, column=0, sticky="nsew")
-        previews.columnconfigure((0, 1), weight=1, uniform="preview")
-        previews.rowconfigure(1, weight=1)
-        ttk.Label(previews, text="原图：可拖动框选裁剪区域").grid(row=0, column=0)
-        ttk.Label(previews, text="裁剪预览（仅显示缩放，保存不缩放）").grid(row=0, column=1)
+        previews.columnconfigure(0, weight=1)
+        previews.rowconfigure(0, weight=1)
         self.raw_canvas = tk.Canvas(previews, background="#202428", highlightthickness=0, width=270, height=300)
-        self.crop_canvas = tk.Canvas(previews, background="#202428", highlightthickness=0, width=270, height=300)
-        self.raw_canvas.grid(row=1, column=0, sticky="nsew", padx=(0, 4))
-        self.crop_canvas.grid(row=1, column=1, sticky="nsew", padx=(4, 0))
-        for canvas in (self.raw_canvas, self.crop_canvas):
-            canvas.bind("<Configure>", lambda _event: self._draw())
-        self.raw_canvas.bind("<ButtonPress-1>", self._begin_crop)
-        self.raw_canvas.bind("<B1-Motion>", self._drag_crop)
-        self.raw_canvas.bind("<ButtonRelease-1>", self._end_crop)
+        self.raw_canvas.grid(row=0, column=0, sticky="nsew")
+        self.raw_canvas.bind("<Configure>", lambda _event: self._draw())
 
         footer = ttk.Frame(self)
         footer.grid(row=6, column=0, sticky="ew", pady=(6, 0))
         self._button(footer, "上一张", lambda: self._navigate(-1)).pack(side="left")
         self._button(footer, "下一张", lambda: self._navigate(1)).pack(side="left", padx=6)
+        self._button(footer, "删除当前张", self._delete_current).pack(side="left", padx=6)
         self.position_var = tk.StringVar(value="尚未采集")
         ttk.Label(footer, textvariable=self.position_var).pack(side="left", padx=6)
-        self.message_var = tk.StringVar(value="采集后可拖动原图调整裁剪范围；右侧自动预览。")
+        self.message_var = tk.StringVar(
+            value="采集按对局分批保存。打开采集目录 → 全局去重 → 查看相似组 → 导出图片到 images。"
+        )
         ttk.Label(self, textvariable=self.message_var, wraplength=720).grid(row=7, column=0, sticky="ew", pady=(6, 0))
-        for variable in self.crop_vars:
-            variable.trace_add("write", self._schedule_crop_preview)
+        self._update_controls()
         self._poll_id = self.after(100, self._poll)
 
     def _button(self, parent, text, command):
@@ -155,6 +154,79 @@ class BattlefieldDataTab(ttk.Frame):
             state="normal" if self.busy and not self._preview_job and not self._stop.is_set() else "disabled"
         )
 
+        available = not self.busy and not self.running and self._dedup_plan is not None
+        self.review_button.configure(state="normal" if available and self._dedup_plan.groups else "disabled")
+        self.export_selected_button.configure(state="normal" if available and self._dedup_keep else "disabled")
+
+    def _invalidate_dedup(self):
+        self._dedup_plan = None
+        self._dedup_keep = set()
+        self.dedup_status.set("采集来源已更新，请重新全局去重。")
+        self._update_controls()
+
+    def _dedup_summary(self):
+        plan = self._dedup_plan
+        if plan is None:
+            return
+        near = sum(group.kind == "near" for group in plan.groups)
+        self.dedup_status.set(
+            f"共 {len(plan.sessions)} 批 / {len(plan.images)} 张 · 完全重复 {plan.exact_duplicates} 张 · "
+            f"近似 {near} 组（默认保留，可查看筛选） · 当前保留 {len(self._dedup_keep)} 张"
+        )
+        self._update_controls()
+
+    def _analyze_all(self):
+        if self.busy or self.running:
+            return
+        text = self.root_var.get().strip()
+        if self._batch_root is None and not text:
+            self.message_var.set("请先打开采集目录或填写保存目录。")
+            return
+        source = self._batch_root or Path(text).expanduser()
+        self._invalidate_dedup()
+        self._dedup_scanning = True
+        self.dedup_status.set(f"正在分析全部批次：{source}")
+        self._start(
+            lambda: analyze_batches(
+                source,
+                stop=self._stop,
+                progress=lambda message: self._results.put(("dedup_progress", message)),
+            )
+        )
+
+    def _review_duplicates(self):
+        if self.busy or self.running or self._dedup_plan is None:
+            return
+        plan = self._dedup_plan
+
+        def changed(keep):
+            if self._dedup_plan is plan:
+                self._dedup_keep = keep
+                self._dedup_summary()
+
+        self._review_window = DedupReview(self, plan, self._dedup_keep, changed)
+
+    def _export_selected(self):
+        if self.busy or self.running or self._dedup_plan is None:
+            return
+        destination = filedialog.askdirectory(
+            parent=self,
+            title="选择图片导出目录（只生成平铺的 images）",
+            initialdir=str(get_battlefield_data_dir()),
+        )
+        if not destination:
+            return
+        plan, keep = self._dedup_plan, set(self._dedup_keep)
+        self._start(
+            lambda: export_selection(
+                plan,
+                keep,
+                Path(destination),
+                stop=self._stop,
+                progress=lambda count: self._results.put(("annotation_progress", count)),
+            )
+        )
+
     def stop(self):
         self._stop.set()
         self.stop_button.configure(state="disabled")
@@ -163,26 +235,11 @@ class BattlefieldDataTab(ttk.Frame):
 
     def destroy(self):
         self._stop.set()
-        if self._crop_preview_id is not None:
-            self.after_cancel(self._crop_preview_id)
         self.after_cancel(self._poll_id)
         super().destroy()
 
-    def _schedule_crop_preview(self, *_args):
-        if self._crop_preview_id is not None:
-            self.after_cancel(self._crop_preview_id)
-        self._crop_preview_id = self.after(80, self._refresh_crop_preview)
-
-    def _refresh_crop_preview(self):
-        self._crop_preview_id = None
-        self._draw()
-
-    def _crop(self):
-        try:
-            return validate_crop(tuple(int(variable.get()) for variable in self.crop_vars), self._screen_size())
-        except ValueError as error:
-            width, height = self._screen_size()
-            raise ValueError(f"请输入有效裁剪范围：0≤左<右≤{width}，0≤上<下≤{height}") from error
+    def _input_bounds(self):
+        return battlefield_region(self._screen_size())
 
     def _screen_size(self):
         return tuple(self.session.metadata["screen_size"]) if self.session is not None else GAME_SCREEN_SIZE
@@ -196,7 +253,7 @@ class BattlefieldDataTab(ttk.Frame):
         except ValueError as error:
             raise ValueError("请输入有效的采样间隔和张数上限") from error
         validate_collection(count, interval)
-        crop = self._crop()
+        crop = self._input_bounds()
         size = self._screen_size()
         native_crop = tuple(
             round(value * GAME_SCREEN_SIZE[index % 2] / size[index % 2]) for index, value in enumerate(crop)
@@ -248,7 +305,6 @@ class BattlefieldDataTab(ttk.Frame):
             if self.capture_callback is None:
                 raise ValueError("设备采集尚未连接")
             device_factory = self.capture_callback()
-            skip_similar = not single and self.skip_similar_var.get()
         except (ValueError, OSError) as error:
             self.message_var.set(str(error))
             return
@@ -263,72 +319,80 @@ class BattlefieldDataTab(ttk.Frame):
                 interval=interval,
                 stop=self._stop,
                 progress=self._progress,
-                skip_similar=skip_similar,
+                skip_similar=not single,
             )
 
-        self._start(job)
-
-    def _import_file(self):
-        if self.busy or self.running:
-            return
-        source = filedialog.askopenfilename(
-            parent=self,
-            title="导入截图或录制视频",
-            filetypes=[("截图／视频", "*.png *.jpg *.jpeg *.mkv *.mp4")],
-        )
-        if source:
-            self._import(Path(source))
-
-    def _import_folder(self):
-        if self.busy or self.running:
-            return
-        source = filedialog.askdirectory(parent=self, title="选择图片目录或已解压的单场录制包")
-        if source:
-            self._import(Path(source))
-
-    def _import(self, source):
-        try:
-            root, crop, count, interval = self._collection_options()
-        except ValueError as error:
-            self.message_var.set(str(error))
-            return
-
-        def job():
-            session = PreparationSession.create(root, crop)
-            self._publish(session)
-            import_screenshots(
-                session, source, count=count, interval=interval, stop=self._stop, progress=self._progress
-            )
-
+        self._invalidate_dedup()
         self._start(job)
 
     def _open_session(self):
         if self.busy or self.running:
             return
-        source = filedialog.askdirectory(parent=self, title="选择包含 metadata.json 的战场数据批次")
+        source = filedialog.askdirectory(
+            parent=self,
+            title="选择采集目录（自动查找其中及子文件夹中的批次）",
+            initialdir=str(Path(self.root_var.get()).expanduser()),
+        )
         if source:
-            self._start(lambda: self._publish(PreparationSession.open(Path(source))))
+            self._invalidate_dedup()
+            self._start(lambda: find_batches(Path(source), stop=self._stop, cleanup_empty=True))
+            self.message_var.set(f"正在查找采集批次：{source}，可点击停止。")
 
-    def _recrop(self):
+    def _show_batches(self, result):
+        if self._stop.is_set():
+            self.message_var.set("已停止查找批次，当前图片保留。")
+            return
+        self._batch_paths = result.directories
+        self._batch_root = result.root
+        self.batch_choice.configure(values=[str(path.relative_to(result.root)) for path in result.directories])
+        summary = f"已清理 {result.removed} 个空批次。" if result.removed else ""
+        if result.warnings:
+            summary += "\n" + "\n".join(result.warnings[:3])
+        if summary:
+            self.dedup_status.set(summary)
+        if not result.directories:
+            self.batch_choice.set("")
+            self.batch_row.grid_remove()
+            self.session = None
+            self.index = 0
+            self.frame_image = None
+            self._needs_preview = False
+            self.position_var.set("暂无图片")
+            self._draw()
+            self.message_var.set(summary + "没有可加载的非空批次。")
+            return
+        self.batch_choice.current(0)
+        if len(result.directories) == 1:
+            self.batch_row.grid_remove()
+        else:
+            self.batch_row.grid()
+        self._load_selected_batch()
+
+    def _load_selected_batch(self):
+        if self.busy or self.running:
+            return
+        index = self.batch_choice.current()
+        if 0 <= index < len(self._batch_paths):
+            path = self._batch_paths[index]
+            root = self._batch_root or path.parent
+
+            def job():
+                session = PreparationSession.open(path)
+                if not session.metadata["frames"]:
+                    return find_batches(root, stop=self._stop, cleanup_empty=True)
+                self._publish(session)
+                return None
+
+            self._start(job)
+
+    def _delete_current(self):
         if self.busy or self.running:
             return
         if self.session is None or not self.session.metadata["frames"]:
-            self.message_var.set("请先采集、导入或打开一个批次。")
+            self.message_var.set("请先打开要删除的图片。")
             return
-        try:
-            root_text = self.root_var.get().strip()
-            if not root_text:
-                raise ValueError("请填写保存目录")
-            root, crop = Path(root_text).expanduser(), self._crop()
-        except ValueError as error:
-            self.message_var.set(str(error))
-            return
-        source_session = self.session
-
-        def job():
-            recrop_session(source_session, root, crop, stop=self._stop, progress=self._progress, created=self._publish)
-
-        self._start(job)
+        session, index = self.session, self.index
+        self._start(lambda: delete_frame(session, index))
 
     def _navigate(self, offset):
         if self.session is not None and self.session.metadata["frames"]:
@@ -354,14 +418,20 @@ class BattlefieldDataTab(ttk.Frame):
                 kind, value = self._results.get_nowait()
                 if kind == "session":
                     self.session, self.index = value, 0
+                    if value.directory not in self._batch_paths:
+                        self._batch_root = value.directory.parent
+                        self._batch_paths = ()
+                        self.batch_row.grid_remove()
                     self.frame_image = None
                     self._needs_preview = True
                     self.position_var.set("暂无图片")
-                    for variable, coordinate in zip(self.crop_vars, value.metadata["crop_ltrb"], strict=True):
-                        variable.set(str(coordinate))
                     self._draw()
                 elif kind == "progress":
-                    self.message_var.set(f"已保存 {value} 张原图及裁剪图。")
+                    self.message_var.set(f"已保存 {value} 张完整截图。")
+                elif kind == "dedup_progress":
+                    self.dedup_status.set(value)
+                elif kind == "annotation_progress":
+                    self.message_var.set(f"正在准备 {value} 张完整标注图片。")
                 elif kind == "preview":
                     self.frame_image = value
                     self._draw()
@@ -371,13 +441,48 @@ class BattlefieldDataTab(ttk.Frame):
                     if self.busy_callback:
                         self.busy_callback()
                     if kind == "error":
+                        if self._dedup_scanning:
+                            self._dedup_scanning = False
+                            self.dedup_status.set(
+                                "已停止全局去重，原始图片保留。"
+                                if self._stop.is_set()
+                                else "去重未完成，请检查提示后重试。"
+                            )
                         self.message_var.set(f"处理未完成：{value}。已保存的图片保留。")
+                    elif isinstance(value, DeduplicationPlan):
+                        self._dedup_scanning = False
+                        self._dedup_plan = value
+                        self._dedup_keep = set(value.default_keep)
+                        self._dedup_summary()
+                        self.message_var.set("全局去重完成：完全重复已排除；近似组默认保留，可查看后筛选，再导出图片。")
+                    elif isinstance(value, AnnotationExport):
+                        self.message_var.set(
+                            f"{'已停止' if self._stop.is_set() else '整理完成'}：新增 {value.count} 张，"
+                            f"已有相同图片跳过 {value.skipped} 张，去重排除 {value.excluded} 张 · {value.directory}"
+                        )
+                    elif isinstance(value, FrameDeletion):
+                        self._invalidate_dedup()
+                        self._needs_preview = False
+                        self.frame_image = None
+                        if value.session.metadata["frames"]:
+                            self.session, self.index = value.session, value.index
+                            self._load_preview()
+                            self.message_var.set("已删除当前张，原文件保存在该批次的 .deleted 中，可恢复。")
+                        else:
+                            directory = value.session.directory
+                            root = self._batch_root
+                            if root is None or root == directory:
+                                root = directory.parent
+                            paths = tuple(path for path in self._batch_paths if path != directory)
+                            self._show_batches(BatchSearch(root, paths))
+                            self.message_var.set(
+                                f"已删除最后一张；空批次清理未完成：{value.cleanup_error}"
+                                if value.cleanup_error
+                                else "已删除最后一张，并清理该空批次文件夹。"
+                            )
+                    elif isinstance(value, BatchSearch):
+                        self._show_batches(value)
                     elif self.session is not None:
-                        if not self._preview_job:
-                            for variable, coordinate in zip(
-                                self.crop_vars, self.session.metadata["crop_ltrb"], strict=True
-                            ):
-                                variable.set(str(coordinate))
                         count = len(self.session.metadata["frames"])
                         self.position_var.set(f"{self.index + 1 if count else 0} / {count} 张")
                         if not self._preview_job:
@@ -385,7 +490,7 @@ class BattlefieldDataTab(ttk.Frame):
                             self.message_var.set(
                                 f"{'已停止' if self._stop.is_set() else '已完成'} · 保存 {count} 张{skipped} · {self.session.directory}"
                             )
-                    # A completed capture/import needs one off-thread read of its first frame.
+                    # A completed capture/open needs one off-thread read of its first frame.
                     if (
                         self.session is not None
                         and self._needs_preview
@@ -397,16 +502,6 @@ class BattlefieldDataTab(ttk.Frame):
         except Empty:
             pass
         self._poll_id = self.after(100, self._poll)
-
-    def _reset_crop(self):
-        size = self._screen_size()
-        crop = tuple(
-            round(value * size[index % 2] / GAME_SCREEN_SIZE[index % 2])
-            for index, value in enumerate(BATTLEFIELD_DATA_REGION_LTRB)
-        )
-        for variable, value in zip(self.crop_vars, crop, strict=True):
-            variable.set(str(value))
-        self._draw()
 
     def _draw_image(self, canvas, image):
         width, height = max(1, canvas.winfo_width()), max(1, canvas.winfo_height())
@@ -421,56 +516,8 @@ class BattlefieldDataTab(ttk.Frame):
     def _draw(self):
         self._photos.clear()
         self.raw_canvas.delete("all")
-        self.crop_canvas.delete("all")
         self._transform = None
         if self.frame_image is None:
             return
         image = Image.fromarray(cv2.cvtColor(self.frame_image, cv2.COLOR_BGR2RGB))
         self._transform = self._draw_image(self.raw_canvas, image)
-        try:
-            left, top, right, bottom = self._crop()
-        except ValueError:
-            return
-        x, y, scale_x, scale_y = self._transform
-        self.raw_canvas.create_rectangle(
-            x + left * scale_x,
-            y + top * scale_y,
-            x + right * scale_x,
-            y + bottom * scale_y,
-            outline="#44dd88",
-            width=2,
-        )
-        self._draw_image(self.crop_canvas, image.crop((left, top, right, bottom)))
-
-    def _point(self, event):
-        if self._transform is None:
-            return None
-        x, y, scale_x, scale_y = self._transform
-        width, height = self._screen_size()
-        return min(width, max(0, round((event.x - x) / scale_x))), min(height, max(0, round((event.y - y) / scale_y)))
-
-    def _begin_crop(self, event):
-        self._drag_start = None
-        if not self.busy and not self.running:
-            self._drag_start = self._point(event)
-
-    def _drag_crop(self, event):
-        if self._drag_start is None or self.busy or self.running:
-            return
-        point = self._point(event)
-        if point is None:
-            return
-        x, y = self._drag_start
-        left, right = sorted((x, point[0]))
-        top, bottom = sorted((y, point[1]))
-        if left == right or top == bottom:
-            return
-        for variable, value in zip(self.crop_vars, (left, top, right, bottom), strict=True):
-            variable.set(str(value))
-        self._draw()
-
-    def _end_crop(self, event):
-        if self._drag_start is None:
-            return
-        self._drag_crop(event)
-        self._drag_start = None
