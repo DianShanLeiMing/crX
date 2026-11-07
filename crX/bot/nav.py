@@ -48,6 +48,7 @@ from crX.bot.state_detect import (
     check_if_on_clash_main_menu,
     check_if_on_shop,
     detect_post_battle_reward,
+    is_clash_main_loading_image,
     is_clash_main_menu_image,
     is_generic_post_battle_reward,
     is_item_distribution_image,
@@ -155,14 +156,20 @@ def wait_for_clash_main_menu(emulator, logger: Logger, deadspace_click=True, tim
     deadline = started + wait_timeout
     last_progress = -10
     image = None
+    loading = False
     while time.monotonic() < deadline:
         image = emulator.screenshot()
         if is_clash_main_menu_image(image):
             return True
         elapsed = int(time.monotonic() - started)
+        loading = is_clash_main_loading_image(image)
         if elapsed - last_progress >= 10:
-            logger.change_status(f"正在等待游戏主界面（已等待 {elapsed}/{wait_timeout:g} 秒）")
+            stage = "主界面资源加载完成" if loading else "游戏主界面"
+            logger.change_status(f"正在等待{stage}（已等待 {elapsed}/{wait_timeout:g} 秒）")
             last_progress = elapsed
+        if loading:
+            time.sleep(0.5)
+            continue
         if is_trophy_reward_image(image):
             handle_trophy_reward_menu(emulator, logger)
             time.sleep(2)
@@ -183,8 +190,11 @@ def wait_for_clash_main_menu(emulator, logger: Logger, deadspace_click=True, tim
             time.sleep(2)
             continue
         time.sleep(1)
-    remember_failure_frame(logger, image, reason="等待主界面超时", stage="unknown", timeout_s=wait_timeout)
-    logger.change_status("等待主界面超时，已保留最后判定画面")
+    reason = "主界面资源加载超时" if loading else "等待主界面超时"
+    remember_failure_frame(
+        logger, image, reason=reason, stage="main_loading" if loading else "unknown", timeout_s=wait_timeout
+    )
+    logger.change_status(f"{reason}，已保留最后判定画面")
     return False
 
 
@@ -496,6 +506,13 @@ def get_to_main_after_fight(
         previous_close = close_coord
         close_coord = None
         image = emulator.screenshot()
+        if is_clash_main_loading_image(image):
+            main_since = generic_since = None
+            if last_stage != "main_loading":
+                logger.change_status("已到达主界面，正在等待资源加载完成，不点击加载画面")
+            last_stage = "main_loading"
+            time.sleep(0.5)
+            continue
         if is_clash_main_menu_image(image):
             generic_since = None
             if main_since is None:
@@ -605,7 +622,9 @@ def get_to_main_after_fight(
             logger.change_status("正在等待战后奖励或加载动画，不点击未知页面")
         last_stage = "unknown"
         time.sleep(0.5)
-    if close_limit_reached:
+    if last_stage == "main_loading":
+        reason = "主界面资源加载超时"
+    elif close_limit_reached:
         reason = "弹窗关闭操作达到上限"
     elif generic_limit_reached:
         reason = "战后奖励通用推进达到上限"
@@ -639,14 +658,15 @@ def finish_pending_battle_rewards(emulator, logger) -> bool:
         if logger is None:
             logger = Logger()
         if (
-            is_item_distribution_image(image)
+            is_clash_main_loading_image(image)
+            or is_item_distribution_image(image)
             or detect_post_battle_reward(image) is not None
             or is_generic_post_battle_reward(image)
             or is_trophy_reward_image(image)
             or is_reward_choice_image(image)
             or find_popup_close(image) is not None
         ):
-            logger.change_status("开战前发现残留奖励，先完成领取")
+            logger.change_status("开战前发现加载或残留奖励，先等待加载并完成领取")
             return get_to_main_after_fight(
                 emulator, logger, timeout=max(0, deadline - time.monotonic()), allow_result_button=False
             )

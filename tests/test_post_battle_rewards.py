@@ -22,6 +22,7 @@ from crX.bot.coords import (
 from crX.bot.find import find_collect_all_button, find_popup_close
 from crX.bot.state_detect import (
     detect_post_battle_reward,
+    is_clash_main_loading_image,
     is_clash_main_menu_image,
     is_generic_post_battle_reward,
     is_item_distribution_image,
@@ -1120,3 +1121,50 @@ def test_daily_reward_main_menu_still_requires_all_anchors(region):
 def test_daily_reward_main_menu_rejects_dimmed_overlay():
     main = image("main-menu-daily-reward-native.png")
     assert not is_clash_main_menu_image((main * 0.4).astype(np.uint8))
+
+
+@pytest.mark.parametrize("entry", ("startup", "post_battle", "before_match"))
+def test_native_720_main_loading_waits_then_returns_without_clicks(clock, entry):
+    loading = image("main-loading-720-native.png")
+    assert is_clash_main_loading_image(loading)
+    assert not is_clash_main_menu_image(loading)
+    # Derived readiness fixture: remove only the spinner, retaining real 720p
+    # controls. This is an offline transition, not an independently captured menu.
+    ready = loading.copy()
+    ready[600:680, 320:400] = (140, 90, 10)
+    assert is_clash_main_menu_image(ready)
+    assert not is_clash_main_loading_image(ready)
+    screen = RewardSequence(clock, [(loading, 5), (ready, None)])
+    if entry == "startup":
+        result = nav.wait_for_clash_main_menu(screen, Logger(), timeout=10)
+    elif entry == "before_match":
+        result = nav.finish_pending_battle_rewards(screen, Logger())
+    else:
+        result = nav.get_to_main_after_fight(screen, Logger(), timeout=10)
+    assert result
+    assert clock[0] >= 5
+    assert not screen.clicks
+
+
+@pytest.mark.parametrize("entry", ("startup", "post_battle"))
+def test_native_720_loading_timeout_retains_exact_frame_and_reason(clock, entry):
+    loading = image("main-loading-720-native.png")
+    screen = RewardSequence(clock, [(loading, None)])
+    logger = Logger()
+    navigate = nav.wait_for_clash_main_menu if entry == "startup" else nav.get_to_main_after_fight
+    assert not navigate(screen, logger, timeout=3)
+    assert not screen.clicks
+    assert logger.failure_frame is not None
+    assert logger.failure_frame["details"]["reason"] == "主界面资源加载超时"
+    assert logger.failure_frame["details"]["stage"] == "main_loading"
+    assert np.array_equal(logger.failure_frame["image"], loading)
+
+
+@pytest.mark.parametrize("region", ((230, 920, 490, 1080), (636, 90, 704, 182), (300, 1150, 420, 1280)))
+def test_native_720_main_loading_still_requires_all_undimmed_controls(region):
+    loading = image("main-loading-720-native.png")
+    left, top, right, bottom = region
+    loading[top:bottom, left:right] = 0
+    assert not is_clash_main_loading_image(loading)
+    assert not is_clash_main_menu_image(loading)
+    assert not is_clash_main_loading_image((image("main-loading-720-native.png") * 0.4).astype(np.uint8))

@@ -30,6 +30,7 @@ from crX.bot.coords import (
     MAIN_BATTLE_BUTTON_REGION,
     MAIN_BATTLE_TAB_REGION,
     MAIN_BURGER_BUTTON_REGION,
+    MAIN_LOADING_SPINNER_REGION,
     MAIN_NATIVE_YELLOW_POINTS,
     POPUP_CLOSE_BUTTON_SIZE,
     POST_BATTLE_COIN_REWARD_REGION,
@@ -275,6 +276,29 @@ def check_if_on_clash_main_menu(emulator) -> bool:
 
 
 def _is_clash_main_menu_image(image) -> bool:
+    return _is_clash_main_menu_layout(image) and not _has_main_loading_spinner(image)
+
+
+def is_clash_main_loading_image(image) -> bool:
+    """Visible native main controls do not imply that resources finished loading."""
+    return _is_clash_main_menu_layout(image) and _has_main_loading_spinner(image)
+
+
+def _has_main_loading_spinner(image) -> bool:
+    left, top, right, bottom = MAIN_LOADING_SPINNER_REGION
+    blue, green, red = image[top:bottom, left:right].astype(numpy.int16).transpose(2, 0, 1)
+    bright = (blue > 210) & (green > 200) & (red > 130) & (numpy.abs(blue - green) < 70)
+    y, x = numpy.ogrid[: bottom - top, : right - left]
+    radius_squared = (x - 40) ** 2 + (y - 40) ** 2
+    ring = (radius_squared >= 24**2) & (radius_squared < 38**2)
+    center = radius_squared < 18**2
+    outside = (radius_squared >= 38**2) & (radius_squared < 45**2)
+    # A rotating white/cyan arc, hollow center and clean outer edge. This check
+    # only applies after three undimmed main-menu anchors have been verified.
+    return bool(bright[ring].mean() > 0.35 and bright[center].mean() < 0.1 and bright[outside].mean() < 0.1)
+
+
+def _is_clash_main_menu_layout(image) -> bool:
     if image is None or image.shape != (*GAME_SCREEN_SIZE[::-1], 3):
         return False
     # At 320 DPI, 9:16 moves fixed-size controls rather than stretching their artwork.
