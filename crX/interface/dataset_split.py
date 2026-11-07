@@ -46,7 +46,7 @@ class DatasetSplitTab(ttk.Frame):
 
         ttk.Label(
             self,
-            text="标注工具导出 YOLO 检测格式后，选择目录载入。\n按场次子目录划分，图片与标签必须同名；至少需要两场独立对局。",
+            text="先在截图页整理完整图片到 images，再用标注工具生成同名 YOLO 标签。\n平铺图片保留场次文件名前缀，程序按整场划分；至少需要两场独立对局。",
             wraplength=680,
         ).grid(row=0, column=0, sticky="w", pady=(0, 8))
         paths = ttk.Frame(self)
@@ -103,13 +103,13 @@ class DatasetSplitTab(ttk.Frame):
             "建议目录（也可在任意位置保持同样结构）：\n"
             f"{self.inbox}\n"
             "  classes.txt\n"
-            "  images/场次001/000000.png\n"
-            "  labels/场次001/000000.txt\n"
-            "  images/场次002/000000.png\n"
-            "  labels/场次002/000000.txt\n\n" + CLASS_LIST_GUIDE + "\n"
+            "  images/批次A-id标识__000000.png\n"
+            "  labels/批次A-id标识__000000.txt\n"
+            "  images/批次B-id标识__000000.png\n"
+            "  labels/批次B-id标识__000000.txt\n\n" + CLASS_LIST_GUIDE + "\n"
             "类别编号从 0 开始，顺序必须与标注工具一致。\n"
-            "没有目标的图片使用空 txt。标注完成后保持图片名称和裁剪范围。\n"
-            "同一场的不同片段也放在同一场次目录；程序不会根据数字文件名猜测场次。"
+            "没有目标的图片使用空 txt。标注完成后保留完整图片和原文件名。\n"
+            "标签也可放在 images 中；平铺图片按文件名前缀分场。旧场次子目录结构仍可单独载入。"
         )
         ttk.Label(self, textvariable=self.message_var, wraplength=680).grid(row=5, column=0, sticky="ew", pady=(8, 0))
         self._update_controls()

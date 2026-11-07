@@ -134,7 +134,7 @@ def test_orphan_label_is_reported(tmp_path):
 def test_flat_images_cannot_be_split_without_battle_identity(tmp_path):
     source = make_annotations(tmp_path / "source")
     (source / "images/battle-000/000000.png").rename(source / "images/flat.png")
-    with pytest.raises(ValueError, match="场次目录"):
+    with pytest.raises(ValueError, match="平铺|场次标识"):
         scan(source)
 
 

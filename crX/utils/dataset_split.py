@@ -17,12 +17,16 @@ from typing import TYPE_CHECKING
 
 from PIL import Image
 
+from crX.detection.battlefield import INPUT_CONFIG_NAME, input_config
 from crX.utils.card_review import atomic_json
 
 if TYPE_CHECKING:
     from threading import Event
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg"}
+FLAT_IMAGE_NAME = re.compile(
+    r"(?P<group>[A-Za-z0-9_-]{1,160})__(?P<frame>[0-9]{6})" r"(?:_export(?P<export>[0-9a-f]{32}))?(?:_dup[0-9]{3,})?$"
+)
 MAX_IMAGES = 50000
 MAX_IMAGE_BYTES = 16 * 1024 * 1024
 MAX_LABEL_BYTES = 512 * 1024
@@ -39,22 +43,30 @@ friendly_archers
 """
 IMPORT_GUIDE = """YOLO 标注数据导入
 
-将同一场对战的图片与标签放入同名场次目录，例如：
-  classes.txt                  每行一个类别名，行号从 0 对应标签的类别编号
-  images/battle-001/000000.png
-  labels/battle-001/000000.txt
-  images/battle-002/000000.png
-  labels/battle-002/000000.txt
+先按对局分批采集，在截图采集页打开采集总目录并「全局去重」。
+通过「查看相似组」筛选后，点击「导出图片」，只输出平铺的 images 图片。
+完全重复默认只留一张；近似候选默认保留，原始采集批次不会删除。
+文件名含采集时间、场次标识、图片编号和导出唯一标识，必须保留文件名，才能按整场划分。
+同一批图片导出到不同新目录时也不会同名；导出唯一标识不参与场次划分。
 
+标注完成后的示例：
+  classes.txt
+  images/批次名-id标识__000000_export唯一标识.png
+  images/批次名-id标识__000001_export唯一标识.png
+  labels/批次名-id标识__000000_export唯一标识.txt
+  labels/批次名-id标识__000001_export唯一标识.txt
+
+标签也可由标注工具直接保存在 images 中，与图片同名。
+classes.txt 使用标注工具导出的类别表，每行一个类别名，编号从 0 开始。
 标签为 YOLO 检测格式：class x_center y_center width height，坐标归一化至 0–1。
 必须为每张图片提供同名标签；确认没有目标的图片使用空 txt 文件。
-同一场对战（包括同一录像的不同片段）必须使用同一个场次名。
-不要将不同场次的 000000.png 合并到一个目录，也不要在标注后更换裁剪范围。
-类别名与编号须在全部场次中保持一致；若区分敌我，使用独立类别名。
+不裁剪、不缩放完整原图；全部场次的类别编号保持一致。
+仅标注战场兵种和建筑，手牌、圣水仍使用现有规则识别。
 
-在 crX 的“YOLO 数据 → 标注与划分”中载入此目录，检查后导出。
-也可选择任意其他目录，但需要保持上述结构。
-程序按整场划分，原始文件保持原样；输出可用于 YOLO26 目标检测训练。
+进入「标注与划分」，选择包含 images 的根目录和类别表。
+平铺图片会按文件名中的场次标识划分，不能随意重命名或去掉前缀。
+旧 images/场次/图片、labels/场次/标签 结构仍可单独载入，不能与平铺结构混用。
+程序不会把仅有数字、无法确认场次的平铺图片随机拆分到两边。
 """
 
 
@@ -85,6 +97,8 @@ class AnnotationScan:
     images: tuple[AnnotatedImage, ...]
     duplicates: int
     source_groups: int
+    input_profile: dict | None = None
+    profile_from_images: bool = False
 
 
 @dataclass(frozen=True)
@@ -172,22 +186,37 @@ def read_labels(path: Path, names: tuple[str, ...]) -> tuple[str, tuple[int, ...
     return "".join(line + "\n" for line in sorted(rows)), tuple(classes)
 
 
-def _image_digest(content: bytes) -> str:
+def _image_digest(content: bytes, expected_size=None) -> str:
     with Image.open(io.BytesIO(content)) as image:
         if image.format not in {"PNG", "JPEG"} or image.width * image.height > 4096 * 4096:
             raise ValueError("图片必须为 PNG/JPEG，且像素数不超过 4096×4096")
+        if expected_size is not None and image.size != tuple(expected_size):
+            raise ValueError("标注图片尺寸与完整截图配置不一致，请使用「准备标注图片」导出的完整截图，不要改尺寸或裁剪")
         rgb = image.convert("RGB")
         digest = hashlib.sha256(str(rgb.size).encode("ascii"))
         digest.update(rgb.tobytes())
         return digest.hexdigest()
 
 
+def _read_input_profile(root: Path) -> dict | None:
+    path = root / INPUT_CONFIG_NAME
+    if not path.exists():
+        return None
+    profile = json.loads(_read_limited(_inside(root, path), 8192).decode("utf-8"))
+    if profile != input_config():
+        raise ValueError("输入配置不是当前完整截图方案，请使用完整截图重新准备和标注，不能混入旧裁剪标签")
+    return profile
+
+
 def scan_annotations(root: Path, classes_path: Path, *, stop: Event | None = None, progress=None) -> AnnotationScan:
     _check_stop(stop)
     root = root.resolve(strict=True)
+    profile = _read_input_profile(root)
     names = read_classes(classes_path)
     image_root = _inside(root, root / "images")
-    label_root = _inside(root, root / "labels")
+    label_root = _inside(root, root / "labels") if (root / "labels").is_dir() else image_root
+    profile_from_images = False
+    flat_layout = None
     images = []
     seen_labels = set()
     unique = {}
@@ -210,19 +239,36 @@ def scan_annotations(root: Path, classes_path: Path, *, stop: Event | None = Non
             continue
         image_path = _inside(root, path)
         relative = path.relative_to(image_root)
-        if len(relative.parts) < 2:
-            raise ValueError("图片缺少场次目录：请使用 images/场次名/图片 和 labels/场次名/同名标签")
+        is_flat = len(relative.parts) == 1
+        if flat_layout is not None and flat_layout != is_flat:
+            raise ValueError("请勿混用平铺图片和旧场次子目录，请分别载入")
+        flat_layout = is_flat
+        if is_flat:
+            match = FLAT_IMAGE_NAME.fullmatch(path.stem)
+            if match is None:
+                raise ValueError("图片缺少场次标识：请保留整理工具生成的「批次名__图片编号」文件名")
+            group = match["group"]
+            if profile is None:
+                profile = input_config()
+                profile_from_images = True
+        else:
+            group = relative.parts[0]
         label_relative = relative.with_suffix(".txt")
         if label_relative in seen_labels:
             raise ValueError(f"图片名称存在歧义（不同扩展名对应同一标签）：{relative}")
         seen_labels.add(label_relative)
         label_path = label_root / label_relative
+        inline_label = image_root / label_relative
+        if is_flat and not label_path.is_file():
+            label_path = inline_label
         if not label_path.is_file():
             raise ValueError(f"缺少标签：labels/{label_relative.as_posix()}；无目标图片也需要空 txt")
         label_path = _inside(root, label_path)
         label_text, class_ids = read_labels(label_path, names)
-        digest = _image_digest(_read_limited(image_path, MAX_IMAGE_BYTES))
-        group = relative.parts[0]
+        if is_flat and inline_label.is_file() and inline_label.resolve() != label_path:
+            if read_labels(_inside(root, inline_label), names)[0] != label_text:
+                raise ValueError(f"同一图片存在两份不同标签：{relative}")
+        digest = _image_digest(_read_limited(image_path, MAX_IMAGE_BYTES), profile["image_size"] if profile else None)
         group_root(group)
         item = AnnotatedImage(image_path, label_path, relative.as_posix(), group, digest, label_text, class_ids)
         if digest in unique:
@@ -241,11 +287,17 @@ def scan_annotations(root: Path, classes_path: Path, *, stop: Event | None = Non
             progress(f"已检查 {len(seen_labels)} 张图片")
     if not images:
         raise ValueError("未找到标注图片；请按导入说明放置数据")
-    for path in label_root.rglob("*.txt"):
-        _check_stop(stop)
-        _inside(root, path)
-        if path.relative_to(label_root) not in seen_labels:
-            raise ValueError(f"标签没有对应图片：{path.relative_to(root)}")
+    label_roots = {label_root, image_root} if flat_layout else {label_root}
+    for directory in label_roots:
+        for path in directory.rglob("*.txt"):
+            _check_stop(stop)
+            _inside(root, path)
+            if path.resolve() == classes_path.resolve():
+                continue
+            if path.name == "classes.txt" and read_classes(path) == names:
+                continue
+            if path.relative_to(directory) not in seen_labels:
+                raise ValueError(f"标签没有对应图片：{path.relative_to(root)}")
     return AnnotationScan(
         root,
         classes_path.resolve(),
@@ -253,6 +305,8 @@ def scan_annotations(root: Path, classes_path: Path, *, stop: Event | None = Non
         tuple(replace(item, group=group_root(item.group)) for item in images),
         duplicates,
         len(parents),
+        profile,
+        profile_from_images,
     )
 
 
@@ -309,6 +363,11 @@ def describe_plan(plan: DatasetPlan) -> str:
         f"验证集：{len(plan.val)} 张 / {len({item.group for item in plan.val})} 组（实际 {len(plan.val) / len(plan.scan.images):.1%}）",
         f"目标验证比例 {plan.validation_percent}%；按整场分配，实际比例可能不同。",
         "重复画面按像素去重；同一场的所有图片始终位于同一集合。",
+        (
+            "训练输入：完整 720×1280 截图，不裁剪；导出时保留输入配置。"
+            if plan.scan.input_profile
+            else "未发现完整截图输入配置：按旧数据方式导出，无法确认训练与推理输入一致；建议使用「准备标注图片」。"
+        ),
         "",
         "类别目标数（训练 / 验证）：",
     ]
@@ -325,6 +384,9 @@ def describe_plan(plan: DatasetPlan) -> str:
 def export_split(plan: DatasetPlan, destination: Path, *, stop: Event | None = None, progress=None) -> Path:
     """Commit only complete datasets. All output names are generated locally."""
     destination = destination.resolve()
+    expected_profile = None if plan.scan.profile_from_images else plan.scan.input_profile
+    if _read_input_profile(plan.scan.root) != expected_profile:
+        raise ValueError("完整截图输入配置在载入后发生变化，请重新载入")
     if read_classes(plan.scan.classes_path) != plan.scan.names:
         raise ValueError("类别表在载入后发生变化，请重新载入")
     if destination.is_relative_to(plan.scan.root):
@@ -361,6 +423,8 @@ def export_split(plan: DatasetPlan, destination: Path, *, stop: Event | None = N
         yaml.extend(f"  {index}: {json.dumps(name, ensure_ascii=False)}" for index, name in enumerate(plan.scan.names))
         (staging / "data.yaml").write_text("\n".join(yaml) + "\n", encoding="utf-8")
         (staging / "classes.txt").write_text("\n".join(plan.scan.names) + "\n", encoding="utf-8")
+        if plan.scan.input_profile:
+            atomic_json(staging / INPUT_CONFIG_NAME, plan.scan.input_profile)
         (staging / "划分报告.txt").write_text(describe_plan(plan), encoding="utf-8")
         atomic_json(
             staging / "split.json",
