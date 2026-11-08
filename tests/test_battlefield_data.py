@@ -140,8 +140,8 @@ def test_similar_capture_ignores_hud_and_compares_to_last_saved_frame(tmp_path, 
         progress=lambda _count: None,
         skip_similar=True,
     )
-    assert skipped == 2
-    assert [entry["source_frame"] for entry in session.metadata["frames"]] == [0, 3]
+    assert skipped == 1
+    assert [entry["source_frame"] for entry in session.metadata["frames"]] == [0, 2, 3]
 
 
 def test_cancel_before_connecting_never_touches_device(tmp_path):
@@ -152,6 +152,27 @@ def test_cancel_before_connecting_never_touches_device(tmp_path):
         session, lambda: pytest.fail("should not connect"), count=1, interval=1, stop=stop, progress=None
     )
     assert session.metadata["frames"] == []
+
+
+def test_native_capture_ignores_hud_but_keeps_tiny_new_targets(tmp_path):
+    first = np.full((1280, 720, 3), 80, np.uint8)
+    hud = first.copy()
+    hud[:100] = 100
+    hud[1040:] = 120
+    troop = hud.copy()
+    troop[400:402, 300:302] = 250
+    frames = iter((first, hud, troop))
+    session = data.PreparationSession.create(tmp_path, (0, 0, 720, 1280))
+    skipped = data.collect_screenshots(
+        session,
+        lambda: SimpleNamespace(screenshot=lambda: next(frames)),
+        count=3,
+        interval=0.2,
+        stop=Event(),
+        progress=lambda _: None,
+        skip_similar=True,
+    )
+    assert skipped == 1 and len(session.metadata["frames"]) == 2
 
 
 def test_folder_import_does_not_modify_sources_or_resize(tmp_path, frame):

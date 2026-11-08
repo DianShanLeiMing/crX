@@ -264,10 +264,13 @@ class PreparationSession:
 
 
 def _similar_battlefield(current: np.ndarray, previous: np.ndarray) -> bool:
+    if current.shape == (*GAME_SCREEN_SIZE[::-1], 3) and previous.shape == current.shape:
+        left, top, right, bottom = BATTLEFIELD_DATA_REGION_LTRB
+        current, previous = current[top:bottom, left:right], previous[top:bottom, left:right]
     # Look for a local cluster of changes so a small troop is not averaged away by the arena background.
     changed = (cv2.absdiff(current, previous).max(axis=2) >= 16).astype(np.uint8)
     local_changes = cv2.boxFilter(changed, cv2.CV_32F, (12, 12), normalize=False, borderType=cv2.BORDER_CONSTANT)
-    return bool(local_changes.max() < 18)
+    return bool(local_changes.max() < 4)
 
 
 def collect_screenshots(session, device_factory, *, count, interval, stop: Event, progress, skip_similar=False) -> int:
@@ -420,7 +423,7 @@ def organize_annotation_images(
             if expected_digests is not None:
                 source = (session.directory / "raw" / entry["name"]).resolve()
                 if hashlib.sha256(frame.tobytes()).hexdigest() != expected_digests.get(source):
-                    raise ValueError(f"图片已变化，请重新全局去重：{source}")
+                    raise ValueError(f"图片已变化，请重新筛选图片：{source}")
             ok, encoded = cv2.imencode(".png", frame)
             if not ok:
                 raise ValueError("无法编码截图")
