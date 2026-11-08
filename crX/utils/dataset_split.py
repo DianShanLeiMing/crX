@@ -43,9 +43,9 @@ friendly_archers
 """
 IMPORT_GUIDE = """YOLO 标注数据导入
 
-先按对局分批采集，在截图采集页打开采集总目录并「全局去重」。
-通过「查看相似组」筛选后，点击「导出图片」，只输出平铺的 images 图片。
-完全重复默认只留一张；近似候选默认保留，原始采集批次不会删除。
+先按对局分批采集，在截图采集页打开采集总目录并「筛选图片」。
+通过「查看筛选结果」筛选后，点击「导出图片」，只输出平铺的 images 图片。
+完全重复只留一张；相似画面按内容自动保留代表帧，不按时间补留，查看筛选结果仅用于浏览。原始采集批次不会删除。
 文件名含采集时间、场次标识、图片编号和导出唯一标识，必须保留文件名，才能按整场划分。
 同一批图片导出到不同新目录时也不会同名；导出唯一标识不参与场次划分。
 
@@ -191,7 +191,7 @@ def _image_digest(content: bytes, expected_size=None) -> str:
         if image.format not in {"PNG", "JPEG"} or image.width * image.height > 4096 * 4096:
             raise ValueError("图片必须为 PNG/JPEG，且像素数不超过 4096×4096")
         if expected_size is not None and image.size != tuple(expected_size):
-            raise ValueError("标注图片尺寸与完整截图配置不一致，请使用「准备标注图片」导出的完整截图，不要改尺寸或裁剪")
+            raise ValueError("标注图片尺寸与完整截图配置不一致，请使用「导出图片」导出的完整截图，不要改尺寸或裁剪")
         rgb = image.convert("RGB")
         digest = hashlib.sha256(str(rgb.size).encode("ascii"))
         digest.update(rgb.tobytes())
@@ -366,7 +366,7 @@ def describe_plan(plan: DatasetPlan) -> str:
         (
             "训练输入：完整 720×1280 截图，不裁剪；导出时保留输入配置。"
             if plan.scan.input_profile
-            else "未发现完整截图输入配置：按旧数据方式导出，无法确认训练与推理输入一致；建议使用「准备标注图片」。"
+            else "未发现完整截图输入配置：按旧数据方式导出，无法确认训练与推理输入一致；建议使用「导出图片」。"
         ),
         "",
         "类别目标数（训练 / 验证）：",

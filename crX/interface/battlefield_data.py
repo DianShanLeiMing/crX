@@ -72,12 +72,12 @@ class BattlefieldDataTab(ttk.Frame):
 
         dedup = ttk.Frame(self)
         dedup.grid(row=9, column=0, sticky="ew", pady=(8, 0))
-        self._button(dedup, "全局去重", self._analyze_all).pack(side="left")
-        self.review_button = self._button(dedup, "查看相似组", self._review_duplicates)
+        self._button(dedup, "筛选图片", self._analyze_all).pack(side="left")
+        self.review_button = self._button(dedup, "查看筛选结果", self._review_duplicates)
         self.review_button.pack(side="left", padx=6)
         self.export_selected_button = self._button(dedup, "导出图片", self._export_selected)
         self.export_selected_button.pack(side="left")
-        self.dedup_status = tk.StringVar(value="先打开采集总目录，再全局去重；原始图片保留。")
+        self.dedup_status = tk.StringVar(value="先打开采集总目录，再筛选图片；原始图片保留。")
         ttk.Label(self, textvariable=self.dedup_status, wraplength=720).grid(row=8, column=0, sticky="ew", pady=4)
 
         sampling = ttk.Frame(self)
@@ -132,7 +132,7 @@ class BattlefieldDataTab(ttk.Frame):
         self.position_var = tk.StringVar(value="尚未采集")
         ttk.Label(footer, textvariable=self.position_var).pack(side="left", padx=6)
         self.message_var = tk.StringVar(
-            value="采集按对局分批保存。打开采集目录 → 全局去重 → 查看相似组 → 导出图片到 images。"
+            value="采集按对局分批保存。打开采集目录 → 筛选图片 → 查看筛选结果 → 导出图片到 images。"
         )
         ttk.Label(self, textvariable=self.message_var, wraplength=720).grid(row=7, column=0, sticky="ew", pady=(6, 0))
         self._update_controls()
@@ -161,17 +161,17 @@ class BattlefieldDataTab(ttk.Frame):
     def _invalidate_dedup(self):
         self._dedup_plan = None
         self._dedup_keep = set()
-        self.dedup_status.set("采集来源已更新，请重新全局去重。")
+        self.dedup_status.set("采集来源已更新，请重新筛选图片。")
         self._update_controls()
 
     def _dedup_summary(self):
         plan = self._dedup_plan
         if plan is None:
             return
-        near = sum(group.kind == "near" for group in plan.groups)
+        near = sum(group.kind != "exact" for group in plan.groups)
         self.dedup_status.set(
             f"共 {len(plan.sessions)} 批 / {len(plan.images)} 张 · 完全重复 {plan.exact_duplicates} 张 · "
-            f"近似 {near} 组（默认保留，可查看筛选） · 当前保留 {len(self._dedup_keep)} 张"
+            f"相似场景 {near} 组 · 将导出 {len(plan.default_keep)} 张"
         )
         self._update_controls()
 
@@ -197,14 +197,7 @@ class BattlefieldDataTab(ttk.Frame):
     def _review_duplicates(self):
         if self.busy or self.running or self._dedup_plan is None:
             return
-        plan = self._dedup_plan
-
-        def changed(keep):
-            if self._dedup_plan is plan:
-                self._dedup_keep = keep
-                self._dedup_summary()
-
-        self._review_window = DedupReview(self, plan, self._dedup_keep, changed)
+        self._review_window = DedupReview(self, self._dedup_plan)
 
     def _export_selected(self):
         if self.busy or self.running or self._dedup_plan is None:
@@ -216,7 +209,8 @@ class BattlefieldDataTab(ttk.Frame):
         )
         if not destination:
             return
-        plan, keep = self._dedup_plan, set(self._dedup_keep)
+        plan = self._dedup_plan
+        keep = set(plan.default_keep)
         self._start(
             lambda: export_selection(
                 plan,
@@ -444,9 +438,9 @@ class BattlefieldDataTab(ttk.Frame):
                         if self._dedup_scanning:
                             self._dedup_scanning = False
                             self.dedup_status.set(
-                                "已停止全局去重，原始图片保留。"
+                                "已停止图片筛选，原始图片保留。"
                                 if self._stop.is_set()
-                                else "去重未完成，请检查提示后重试。"
+                                else "筛选未完成，请检查提示后重试。"
                             )
                         self.message_var.set(f"处理未完成：{value}。已保存的图片保留。")
                     elif isinstance(value, DeduplicationPlan):
@@ -454,11 +448,11 @@ class BattlefieldDataTab(ttk.Frame):
                         self._dedup_plan = value
                         self._dedup_keep = set(value.default_keep)
                         self._dedup_summary()
-                        self.message_var.set("全局去重完成：完全重复已排除；近似组默认保留，可查看后筛选，再导出图片。")
+                        self.message_var.set("图片筛选完成：已按规则保留代表帧，可直接导出图片，也可查看筛选结果。")
                     elif isinstance(value, AnnotationExport):
                         self.message_var.set(
                             f"{'已停止' if self._stop.is_set() else '整理完成'}：新增 {value.count} 张，"
-                            f"已有相同图片跳过 {value.skipped} 张，去重排除 {value.excluded} 张 · {value.directory}"
+                            f"已有相同图片跳过 {value.skipped} 张，筛选排除 {value.excluded} 张 · {value.directory}"
                         )
                     elif isinstance(value, FrameDeletion):
                         self._invalidate_dedup()

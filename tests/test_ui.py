@@ -297,29 +297,27 @@ def test_global_dedup_review_preserves_originals_and_exports_selection(desktop_u
         tab._batch_root = source
         tab._analyze_all()
         _wait_ui(ui, lambda: not tab.busy and tab._dedup_plan is not None)
-        assert len(tab._dedup_plan.images) == 4 and len(tab._dedup_keep) == 3
+        assert len(tab._dedup_plan.images) == 4 and len(tab._dedup_keep) == 2
         tab._review_duplicates()
         review = tab._review_window
         assert review is not None
         review.withdraw()
-        _wait_ui(ui, lambda review=review: review._arrays is not None)
-        assert all(image.shape == (1280, 720, 3) for image in review._arrays)
-        review._apply_near()
-        assert len(tab._dedup_keep) == 2
-        review._reset()
-        assert len(tab._dedup_keep) == 3
-        review._choose("right")
-        assert len(tab._dedup_keep) == 2
+        _wait_ui(ui, lambda review=review: review._image is not None)
+        assert review._image.shape == (1280, 720, 3)
         group = review._group()
-        assert group.members[review.members.current()] in tab._dedup_keep
-        assert group.representative not in tab._dedup_keep
+        assert len(review.members.get_children()) == len(group.members)
+        excluded = next(index for index in group.members if index not in review.keep)
+        review.members.selection_set(str(excluded))
+        _wait_ui(ui, lambda review=review: review._image is not None and "已筛除" in review.preview_status.get())
+        assert review.members.set(str(excluded), "result") == "已筛除"
+        assert tab._dedup_keep == set(tab._dedup_plan.default_keep)
         review.destroy()
         review = None
         tab._export_selected()
         _wait_ui(ui, lambda: not tab.busy)
         assert len(list((tmp_path / "selected/images").glob("*.png"))) == 2
         assert len(list(source.glob("*/raw/*.png"))) == 4
-        assert "去重排除 2 张" in tab.message_var.get()
+        assert "筛选排除 2 张" in tab.message_var.get()
     finally:
         if review is not None:
             review.destroy()
@@ -327,6 +325,45 @@ def test_global_dedup_review_preserves_originals_and_exports_selection(desktop_u
         _wait_ui(ui, lambda: not tab.busy)
         tab.root_var.set(previous[0])
         tab._batch_root = previous[1]
+        tab._invalidate_dedup()
+
+
+def test_scene_review_lists_all_images_without_changing_automatic_selection(desktop_ui, tmp_path):
+    from tests.test_battlefield_dedup import capture, moving_frames, timestamp_frames
+
+    ui, _root = desktop_ui
+    tab = ui.battlefield_data_tab
+    previous = tab._batch_root
+    source = capture(tmp_path / "captures", moving_frames(10))
+    timestamp_frames(source, range(100, 110))
+    review = None
+    try:
+        tab._batch_root = source.directory.parent
+        tab._analyze_all()
+        _wait_ui(ui, lambda: not tab.busy and tab._dedup_plan is not None)
+        assert len(tab._dedup_keep) == 1
+        tab._review_duplicates()
+        review = tab._review_window
+        assert review is not None
+        review.withdraw()
+        _wait_ui(ui, lambda review=review: review._image is not None)
+        assert review._group().kind == "scene"
+        items = review.members.get_children()
+        assert len(items) == 10
+        assert sum(review.members.set(item, "result") == "将导出" for item in items) == 1
+        assert sum(review.members.set(item, "result") == "已筛除" for item in items) == 9
+        review.members.selection_set(items[-1])
+        _wait_ui(ui, lambda review=review: review._image is not None and "000009.png" in review.preview_status.get())
+        review.members.selection_set(items[1])
+        _wait_ui(ui, lambda review=review: review._image is not None and "000001.png" in review.preview_status.get())
+        assert tab._dedup_keep == set(tab._dedup_plan.default_keep)
+        assert len(tab._dedup_keep) == 1
+    finally:
+        if review is not None:
+            review.destroy()
+        tab.stop()
+        _wait_ui(ui, lambda: not tab.busy)
+        tab._batch_root = previous
         tab._invalidate_dedup()
 
 
