@@ -5,6 +5,10 @@ import time
 import zipfile
 from os import listdir, makedirs, remove
 from os.path import abspath, basename, exists, getmtime, join, normcase
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 from crX.utils.platform import get_log_dir
 from crX.utils.versioning import __version__
@@ -92,6 +96,7 @@ class Logger:
         self._console_enabled = False
         self.errored = False
         self.failure_frame: dict | None = None
+        self.navigation_stall_handler: Callable | None = None
         self.stats = dict.fromkeys(
             (
                 "wins",

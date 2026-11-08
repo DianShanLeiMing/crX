@@ -14,7 +14,7 @@ from crX.bot.states import RuntimeContext, state_tree
 from crX.emulators import EmulatorType, get_emulator_registry
 from crX.emulators.base import EmulatorNotReadyError
 from crX.interface.enums import UIField
-from crX.utils.failure_samples import FailureSampleRecorder
+from crX.utils.failure_samples import FailureSampleRecorder, record_navigation_stall
 from crX.utils.logger import ProcessLogger, attach_worker_file_logging
 
 
@@ -172,6 +172,9 @@ class WorkerProcess(Process):
     def run(self):
         attach_worker_file_logging(self.session_log_path)
         logger = ProcessLogger(self.stats_queue)
+        logger.navigation_stall_handler = lambda image, **details: record_navigation_stall(
+            logger, image, session_log_path=self.session_log_path, **details
+        )
         stop_condition_reached = False
         try:
             emulator = self._setup_emulator(self.jobs, logger)
