@@ -40,7 +40,7 @@ class DedupReview(ttk.Toplevel):
         self.tree = ttk.Treeview(groups, columns=("kind", "count", "kept"), show="headings", height=5)
         for key, title in (("kind", "相似分组"), ("count", "图片总数"), ("kept", "将导出")):
             self.tree.heading(key, text=title)
-        for key in ("count", "kept"):
+        for key in ("kind", "count", "kept"):
             self.tree.column(key, anchor="center")
         self.tree.grid(row=0, column=0, sticky="ew")
         scroll = ttk.Scrollbar(groups, orient="vertical", command=self.tree.yview)
