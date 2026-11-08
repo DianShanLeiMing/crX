@@ -19,6 +19,26 @@ def native_frame():
     return cv2.imread(str(Path(__file__).parent / "fixtures/post-battle-attached-07.png"))
 
 
+def test_early_navigation_evidence_is_flushed_without_consuming_final_failure(tmp_path, monkeypatch):
+    original = failures.FailureSampleRecorder
+    monkeypatch.setattr(failures, "FailureSampleRecorder", lambda: original(tmp_path))
+    frame = native_frame()
+    logger = Logger()
+    failures.remember_failure_frame(logger, frame, reason="existing")
+    previous = logger.failure_frame
+    failures.record_navigation_stall(logger, frame, stage="unknown", wait_s=10, session_log_path="early.txt")
+    assert logger.failure_frame is previous
+    records, errors = failures.scan_failures(tmp_path)
+    assert errors == 0 and len(records) == 1
+    data = records[0]["data"]
+    assert data["state"] == "navigation_wait" and data["recovery_attempt"] == 0
+    assert data["details"]["wait_s"] == 10
+    assert data["session_log_path"] == "early.txt"
+    assert data["capture_source"] == "failure_frame"
+    assert np.array_equal(cv2.imread(str(tmp_path / data["id"] / "frame.png")), frame)
+    assert logger.stats["restarts_after_failure"] == 0
+
+
 def test_cached_failure_is_immutable_and_saved_without_rescreenshot(tmp_path):
     frame = native_frame()
     original = frame.copy()

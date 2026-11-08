@@ -1008,6 +1008,7 @@ def test_other_screens_are_not_distribution_intros():
         "failure-item-distribution-intro-native.png",
         "item-distribution-collect-all-360.png",
         "item-distribution-collect-all-native.png",
+        "item-distribution-coins-720-native.png",
     }
     for path in FIXTURES.glob("*.png"):
         if path.name not in distribution_files:
@@ -1168,3 +1169,60 @@ def test_native_720_main_loading_still_requires_all_undimmed_controls(region):
     assert not is_clash_main_loading_image(loading)
     assert not is_clash_main_menu_image(loading)
     assert not is_clash_main_loading_image((image("main-loading-720-native.png") * 0.4).astype(np.uint8))
+
+
+@pytest.mark.parametrize("entry", ("startup", "post_battle", "before_match"))
+def test_real_720_coin_distribution_is_claimed_before_continuing(clock, entry):
+    frame = image("item-distribution-coins-720-native.png")
+    assert is_item_distribution_image(frame)
+    assert find_collect_all_button(frame) == (360, 1164)
+    screen = RewardSequence(clock, [(frame, None), (image("failure-main-recovered.png"), None)])
+    logger = Logger()
+    if entry == "startup":
+        result = nav.wait_for_clash_main_menu(screen, logger, timeout=10)
+    elif entry == "before_match":
+        result = nav.finish_pending_battle_rewards(screen, logger)
+    else:
+        result = nav.get_to_main_after_fight(screen, logger, timeout=10)
+    assert result
+    assert screen.clicks == [(0, 360, 1164)]
+    assert logger.stats["completed_fights"] == 0
+
+
+def test_real_720_distribution_still_requires_title_and_bright_claim_button():
+    frame = image("item-distribution-coins-720-native.png")
+    frame[500:1080] = 0  # Item amount/type never determines where to claim.
+    assert find_collect_all_button(frame) == (360, 1164)
+    assert find_collect_all_button((frame * 0.4).astype(np.uint8)) is None
+    frame[180:290] = 0
+    assert find_collect_all_button(frame) is None
+
+
+@pytest.mark.parametrize("entry", ("startup", "post_battle"))
+def test_unknown_wait_is_reported_before_timeout_only_once(clock, entry):
+    frame = np.zeros((1280, 720, 3), dtype=np.uint8)
+    screen = RewardSequence(clock, [(frame, None)])
+    logger = Logger()
+    reports = []
+    logger.navigation_stall_handler = lambda image, **details: reports.append((clock[0], image.copy(), details))
+    navigate = nav.wait_for_clash_main_menu if entry == "startup" else nav.get_to_main_after_fight
+    assert not navigate(screen, logger, timeout=15)
+    assert len(reports) == 1
+    when, saved, details = reports[0]
+    assert 10 <= when < 15
+    assert np.array_equal(saved, frame)
+    assert details["wait_s"] >= 10
+    assert logger.failure_frame is not None
+
+
+def test_early_wait_reporting_failure_does_not_interrupt_navigation(clock):
+    def fail(*_args, **_kwargs):
+        raise OSError("disk unavailable")
+
+    logger = Logger()
+    logger.navigation_stall_handler = fail
+    screen = RewardSequence(
+        clock, [(np.zeros((1280, 720, 3), dtype=np.uint8), 11), (image("failure-main-recovered.png"), None)]
+    )
+    assert nav.get_to_main_after_fight(screen, logger, timeout=20)
+    assert not screen.clicks

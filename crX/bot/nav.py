@@ -1,3 +1,4 @@
+import logging
 import time
 from collections.abc import Callable
 from typing import Literal
@@ -61,6 +62,23 @@ from crX.utils.failure_samples import remember_failure_frame
 from crX.utils.logger import Logger
 
 CLASH_MAIN_WAIT_TIMEOUT = 240
+NAVIGATION_STALL_REPORT_S = 10
+
+
+def _report_navigation_wait(logger, image, stage, watch):
+    """One early snapshot per navigation call, without changing recovery policy."""
+    if watch.get("stage") != stage:
+        watch.update(stage=stage, since=time.monotonic())
+    elapsed = time.monotonic() - watch["since"]
+    handler = getattr(logger, "navigation_stall_handler", None)
+    if not watch.get("reported") and elapsed >= NAVIGATION_STALL_REPORT_S and callable(handler):
+        watch["reported"] = True
+        try:
+            handler(image, stage=stage, wait_s=round(elapsed, 2))
+        except Exception:
+            logging.warning("等待页面留证失败，继续原流程", exc_info=True)
+
+
 POST_BATTLE_TIMEOUT_S = 120
 POST_BATTLE_MAIN_STABLE_S = 3.0
 POST_BATTLE_MAX_ACTIONS = 40
@@ -157,6 +175,7 @@ def wait_for_clash_main_menu(emulator, logger: Logger, deadspace_click=True, tim
     last_progress = -10
     image = None
     loading = False
+    wait_watch = {}
     while time.monotonic() < deadline:
         image = emulator.screenshot()
         if is_clash_main_menu_image(image):
@@ -168,6 +187,7 @@ def wait_for_clash_main_menu(emulator, logger: Logger, deadspace_click=True, tim
             logger.change_status(f"正在等待{stage}（已等待 {elapsed}/{wait_timeout:g} 秒）")
             last_progress = elapsed
         if loading:
+            _report_navigation_wait(logger, image, "main_loading", wait_watch)
             time.sleep(0.5)
             continue
         if is_trophy_reward_image(image):
@@ -189,6 +209,7 @@ def wait_for_clash_main_menu(emulator, logger: Logger, deadspace_click=True, tim
             handle_clan_voyage_page(emulator)
             time.sleep(2)
             continue
+        _report_navigation_wait(logger, image, "startup_unknown", wait_watch)
         time.sleep(1)
     reason = "主界面资源加载超时" if loading else "等待主界面超时"
     remember_failure_frame(
@@ -501,12 +522,16 @@ def get_to_main_after_fight(
     close_limit_reached = False
     last_stage = None
     image = None
+    wait_watch = {}
     logger.change_status("对战结束，正在返回主界面……")
     while time.monotonic() < deadline:
         previous_close = close_coord
         close_coord = None
         image = emulator.screenshot()
+        if wait_watch.get("stage") != last_stage:
+            wait_watch.pop("stage", None)
         if is_clash_main_loading_image(image):
+            _report_navigation_wait(logger, image, "main_loading", wait_watch)
             main_since = generic_since = None
             if last_stage != "main_loading":
                 logger.change_status("已到达主界面，正在等待资源加载完成，不点击加载画面")
@@ -531,6 +556,7 @@ def get_to_main_after_fight(
             generic_since = None
             collect_all = find_collect_all_button(image)
             if collect_all is None:
+                _report_navigation_wait(logger, image, "distribution_wait", wait_watch)
                 if last_stage != "distribution_wait":
                     logger.change_status("已识别道具发放动画，等待领取全部按钮，不点击开场画面")
                 last_stage = "distribution_wait"
@@ -618,6 +644,7 @@ def get_to_main_after_fight(
             time.sleep(POST_BATTLE_GENERIC_CLICK_INTERVAL_S)
             continue
         generic_since = None
+        _report_navigation_wait(logger, image, "unknown", wait_watch)
         if last_stage != "unknown":
             logger.change_status("正在等待战后奖励或加载动画，不点击未知页面")
         last_stage = "unknown"

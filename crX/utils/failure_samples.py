@@ -9,6 +9,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 
 import cv2
 import numpy as np
@@ -46,6 +47,21 @@ def remember_failure_frame(logger, image, **details):
         "captured_at": time.time(),
         "details": details,
     }
+
+
+def record_navigation_stall(logger, image, *, stage, wait_s, session_log_path=None):
+    """Flush one same-frame wait diagnostic before a timeout or manual stop."""
+    recorder = None
+    try:
+        evidence = SimpleNamespace(current_status=logger.current_status, log=logger.log)
+        remember_failure_frame(evidence, image, reason="页面持续等待，提前留证", stage=stage, wait_s=wait_s)
+        recorder = FailureSampleRecorder()
+        recorder.offer(None, evidence, state="navigation_wait", attempt=0, session_log_path=session_log_path)
+    except Exception:
+        LOG.warning("等待页面留证失败，继续原流程", exc_info=True)
+    finally:
+        if recorder is not None:
+            recorder.close()
 
 
 def _capture(emulator, timeout):
@@ -115,7 +131,8 @@ class FailureSampleRecorder:
         except queue.Full:
             self._warn("异常流程队列已满，继续恢复")
             return False
-        logger.log(f"已提交恢复前异常流程：{self.root / record['id']}")
+        phase = "等待中" if attempt == 0 else "恢复前"
+        logger.log(f"已提交{phase}异常流程：{self.root / record['id']}")
         return True
 
     def close(self, timeout=2.0):
