@@ -1503,6 +1503,15 @@
       "order": [
         "7a54af591a7354b6"
       ]
+    },
+    "hero_electro_wizard": {
+      "preferred": null,
+      "numbers": {
+        "c44326b5ae203281": 1
+      },
+      "order": [
+        "c44326b5ae203281"
+      ]
     }
   }
 }
