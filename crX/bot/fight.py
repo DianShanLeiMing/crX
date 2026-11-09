@@ -43,6 +43,7 @@ from crX.bot.state_detect import (
     check_if_in_battle,
     count_elixir,
 )
+from crX.bot.tower_health import TowerHealthMonitor
 from crX.interface.enums import BATTLE_MODE_LABELS
 from crX.utils.logger import Logger
 from crX.utils.versioning import __version__
@@ -220,6 +221,8 @@ def wait_for_elixir(
     WAIT_THRESHOLD=5000,  # noqa: N803
     PLAY_THRESHOLD=10000,  # noqa: N803
     recording_flag: bool = False,
+    *,
+    tower_monitor: TowerHealthMonitor | None = None,
 ) -> Literal["restart", "no battle"] | bool:
     """Method to wait for 4 elixir during a battle"""
     start_time = time.time()
@@ -228,7 +231,8 @@ def wait_for_elixir(
     last_lost_detection_log_second = -1
     ability_available_since = None
 
-    while not count_elixir(emulator, elixir_wait_amount):
+    observe_frame = tower_monitor.observe if tower_monitor is not None else None
+    while not count_elixir(emulator, elixir_wait_amount, observe_frame):
         # debug screenshot saving removed from production
         wait_time = time.time() - start_time
         elapsed_second = int(wait_time)
@@ -526,6 +530,7 @@ def _fight_loop(
     # Initialize battle strategy and start timing
     battle_strategy = BattleStrategy(fight_mode)
     battle_strategy.start_battle()
+    tower_monitor = TowerHealthMonitor(logger) if fight_mode in ("Classic 1v1", "Trophy Road") else None
 
     fight_deadline = time.monotonic() + 360
     while True:
@@ -565,6 +570,7 @@ def _fight_loop(
             wait_threshold,
             play_threshold,
             recording_flag,
+            tower_monitor=tower_monitor,
         )
 
         if wait_output == "restart":
@@ -618,6 +624,7 @@ def _random_fight_loop(
     fight_timeout = 5 * 60  # 5 minutes
     start_time = time.time()
     battle_detection_lost_count = 0
+    tower_monitor = TowerHealthMonitor(logger) if fight_mode_chosen in ("Classic 1v1", "Trophy Road") else None
 
     # while in battle:
     while True:
@@ -647,7 +654,9 @@ def _random_fight_loop(
         # Clean random-play flow (mirrors rl-bot RandomPlayer): wait for a random
         # elixir gate, then play only if a card is actually available.
         target = random.randint(RANDOM_PLAY_ELIXIR_MIN, RANDOM_PLAY_ELIXIR_MAX)
-        elixir_result = wait_for_elixir(emulator, logger, target, recording_flag=recording_flag)
+        elixir_result = wait_for_elixir(
+            emulator, logger, target, recording_flag=recording_flag, tower_monitor=tower_monitor
+        )
         if elixir_result == "no battle":
             break
         if elixir_result == "restart":

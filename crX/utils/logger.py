@@ -139,6 +139,10 @@ class Logger:
         if self._console_enabled:
             print(message)
 
+    def log_recognition(self, source: str, message: str, *, persist: bool = True) -> None:
+        if persist:
+            self.log(message)
+
     def error(self, message) -> None:
         self.errored = True
         self.current_status = str(message)
@@ -209,9 +213,16 @@ class ProcessLogger(Logger):
 
     def _update_log(self):
         super()._update_log()
+        self._publish(self.get_stats())
+
+    def log_recognition(self, source: str, message: str, *, persist: bool = True) -> None:
+        super().log_recognition(source, message, persist=persist)
+        self._publish({"recognition": (time.strftime("%H:%M:%S"), source, message)})
+
+    def _publish(self, update):
         from queue import Full
 
         try:
-            self._stats_queue.put_nowait(self.get_stats())
+            self._stats_queue.put_nowait(update)
         except (Full, ValueError, OSError):
             pass

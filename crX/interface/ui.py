@@ -355,12 +355,27 @@ class CrXUI(ttk.Window):
         log_frame = ttk.Frame(self.stats_splitter)
         self.stats_splitter.add(log_frame, minsize=80, stretch="always")
         ttk.Separator(log_frame, orient="horizontal").pack(fill="x", pady=(0, 6))
-        scrollbar = ttk.Scrollbar(log_frame, orient="vertical")
-        scrollbar.pack(side="right", fill="y")
-        self.log = tk.Text(log_frame, height=6, state="disabled", wrap="word", yscrollcommand=scrollbar.set)
-        self.log.pack(fill="both", expand=True)
-        scrollbar.configure(command=self.log.yview)
+        logs = ttk.Frame(log_frame)
+        logs.pack(fill="both", expand=True)
+        logs.columnconfigure(0, weight=3)
+        logs.columnconfigure(1, weight=2)
+        logs.rowconfigure(0, weight=1)
+        running_log = ttk.Labelframe(logs, text="运行日志", padding=4)
+        running_log.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
+        recognition = ttk.Labelframe(logs, text="图像识别", padding=4)
+        recognition.grid(row=0, column=1, sticky="nsew", padx=(4, 0))
+        self.log = self._create_log_text(running_log)
+        self.recognition_log = self._create_log_text(recognition)
+        self.reset_recognition_log()
         self.last_status = ""
+
+    def _create_log_text(self, parent):
+        scrollbar = ttk.Scrollbar(parent, orient="vertical")
+        scrollbar.pack(side="right", fill="y")
+        log = tk.Text(parent, width=1, height=6, state="disabled", wrap="word", yscrollcommand=scrollbar.set)
+        log.pack(fill="both", expand=True)
+        scrollbar.configure(command=log.yview)
+        return log
 
     def _create_settings(self):
         self.theme_labels = {
@@ -443,7 +458,8 @@ class CrXUI(ttk.Window):
             colors = self.style.colors
             self.stats_splitter.configure(background=colors.bg)
             self.gauge.set_colours(colors.success, colors.danger, colors.fg, canvas_bg=colors.bg)
-            self.log.configure(background=colors.inputbg, foreground=colors.inputfg, insertbackground=colors.fg)
+            for log in (self.log, self.recognition_log):
+                log.configure(background=colors.inputbg, foreground=colors.inputfg, insertbackground=colors.fg)
 
     def _notify(self, *_):
         if not self._suspend and self.config_callback:
@@ -522,12 +538,24 @@ class CrXUI(ttk.Window):
         self.status_var.set(status)
         if status != self.last_status:
             self.last_status = status
-            self.log.configure(state="normal")
-            self.log.insert("end", status + "\n")
-            if int(self.log.index("end-1c").split(".")[0]) > 300:
-                self.log.delete("1.0", "50.0")
-            self.log.see("end")
-            self.log.configure(state="disabled")
+            self._append_log_line(self.log, status)
+
+    @staticmethod
+    def _append_log_line(log, text):
+        log.configure(state="normal")
+        log.insert("end", text + "\n")
+        if int(log.index("end-1c").split(".")[0]) > 300:
+            log.delete("1.0", "50.0")
+        log.see("end")
+        log.configure(state="disabled")
+
+    def reset_recognition_log(self):
+        self.recognition_log.configure(state="normal")
+        self.recognition_log.delete("1.0", "end")
+        self._append_log_line(self.recognition_log, "[YOLO] 等待模型接入")
+
+    def append_recognition(self, timestamp: str, source: str, message: str):
+        self._append_log_line(self.recognition_log, f"{timestamp} [{source}] {message}")
 
     def _schedule_storage_update(self):
         custom = self.variables[UIField.RECORDING_FOLDER_PATH].get()

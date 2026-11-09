@@ -570,6 +570,33 @@ def test_start_waits_for_card_sync_and_uses_local_data_on_failure(monkeypatch, t
     launch.assert_called_once_with({"test": True}, "卡牌同步未完成，使用本机已有数据：远端不可用")
 
 
+def test_recognition_samples_reach_the_right_log_without_replacing_worker_stats(desktop_ui):
+    from queue import Queue
+
+    from crX.__main__ import BotApplication
+    from crX.utils.logger import Logger, ProcessLogger
+
+    ui, _root = desktop_ui
+    ui.reset_recognition_log()
+    application = BotApplication.__new__(BotApplication)
+    application.ui = ui
+    application.logger = Logger(timed=False)
+    application.stats_queue = Queue()
+    application.last_stats = {}
+    worker_logger = ProcessLogger(application.stats_queue)
+    worker_logger.change_status("正在等待圣水")
+    message = "敌方公主塔 | 左 97% | 右 59%"
+    for _ in range(2):
+        worker_logger.log_recognition("图色", message, persist=False)
+
+    application._drain_stats()
+    assert application.last_stats["current_status"] == "正在等待圣水"
+    assert ui.recognition_log.get("1.0", "end").count(f"[图色] {message}") == 2
+    assert message not in ui.log.get("1.0", "end")
+    ui.reset_recognition_log()
+    assert ui.recognition_log.get("1.0", "end").strip() == "[YOLO] 等待模型接入"
+
+
 def test_deck_checkbox_order_priority_and_json_roundtrip(desktop_ui, tmp_path, monkeypatch):
     from crX.__main__ import BotApplication, make_job_dictionary
     from crX.utils import caching

@@ -23,6 +23,9 @@ from crX.bot.coords import (
     CARD_PAGE_HEADING_REGION,
     CARD_PAGE_MENU_REGION,
     DECK_CARD_COST_REGIONS,
+    ENEMY_PRINCESS_BAR_ANCHORS,
+    ENEMY_PRINCESS_BAR_BORDER_Y_RANGE,
+    ENEMY_PRINCESS_BAR_WIDTH,
     GAME_SCREEN_SIZE,
     ITEM_DISTRIBUTION_COLLECT_ALL_SIZE,
     ITEM_DISTRIBUTION_INTRO_TITLE_REGION,
@@ -83,7 +86,10 @@ def is_bright_red_close_button(image, coord: tuple[int, int]) -> bool:
 
 
 def check_if_in_battle(emulator):
-    iar_bgr = emulator.screenshot()
+    return image_is_in_battle(emulator.screenshot())
+
+
+def image_is_in_battle(iar_bgr) -> bool:
     if iar_bgr is None:
         return False
     if iar_bgr.shape != (*GAME_SCREEN_SIZE[::-1], 3):
@@ -243,9 +249,52 @@ ELIXIR_COORDS = [
 ELIXIR_COLOR = [240, 137, 244]
 
 
-def count_elixir(emulator, elixir_count) -> bool:
+def count_elixir(emulator, elixir_count, observe_frame=None) -> bool:
     """Method to check for 4 elixir during a battle"""
-    return image_has_elixir(emulator.screenshot(), elixir_count)
+    image = emulator.screenshot()
+    if observe_frame is not None:
+        observe_frame(image)
+    return image_has_elixir(image, elixir_count)
+
+
+def _read_princess_bar(image, x, y) -> tuple[int | None, bool]:
+    """Return the contiguous fill width and whether the anchored bar track was seen."""
+    width = ENEMY_PRINCESS_BAR_WIDTH
+    top, bottom = ENEMY_PRINCESS_BAR_BORDER_Y_RANGE
+    area_top = top - 5
+    area = image[area_top : bottom + 1, x - 3 : x + width + 3].astype(numpy.int16)
+    border = numpy.max(numpy.abs(area - (35, 0, 117)), axis=2) <= 18
+    red = numpy.max(numpy.abs(area - (94, 38, 226)), axis=2) <= 24
+    empty = numpy.max(numpy.abs(area - (73, 50, 93)), axis=2) <= 20
+    track_seen = False
+    rows = numpy.flatnonzero(numpy.count_nonzero(border[5:], axis=1) >= width - 3) + 5
+    for row in sorted(rows, key=lambda row: abs(area_top + row - y)):
+        for start in (3, 2, 4, 1, 5, 0, 6):
+            columns = slice(start, start + width)
+            if numpy.count_nonzero(border[row, columns]) < width - 3:
+                continue
+            track_seen = True
+            # Read the solid interior below the highlight and above the bottom border.
+            filled = numpy.count_nonzero(red[row - 5 : row - 1, columns], axis=0) >= 3
+            unfilled = numpy.count_nonzero(empty[row - 5 : row - 1, columns], axis=0) >= 3
+            indexes = numpy.flatnonzero(filled)
+            if not len(indexes) or indexes[0] > 1:
+                continue
+            end = int(indexes[-1]) + 1
+            if numpy.count_nonzero(~filled[:end]) <= 2 and numpy.count_nonzero(~unfilled[end:]) <= 3:
+                return end, True
+    return None, track_seen
+
+
+def read_enemy_princess_bars(image) -> tuple[tuple[int | None, bool], ...]:
+    """Measure the two enemy tracks on a native 720×1280 BGR frame."""
+    if (
+        not isinstance(image, numpy.ndarray)
+        or image.shape != (*GAME_SCREEN_SIZE[::-1], 3)
+        or image.dtype != numpy.uint8
+    ):
+        return ((None, False), (None, False))
+    return tuple(_read_princess_bar(image, x, y) for x, y in ENEMY_PRINCESS_BAR_ANCHORS)
 
 
 def image_has_elixir(image, elixir_count: int) -> bool:

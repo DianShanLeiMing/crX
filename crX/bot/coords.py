@@ -17,6 +17,11 @@ GAME_SCREEN_SIZE = (720, 1280)
 GAME_SCREEN_DPI = 320
 # Dataset preparation only; exclude the top HUD and bottom hand, without resizing.
 BATTLEFIELD_DATA_REGION_LTRB = (0, 120, 720, 1030)
+# Left and right enemy Princess Tower bars in native 1v1 frames (left edge, bottom border).
+ENEMY_PRINCESS_BAR_ANCHORS = ((144, 155), (521, 155))
+ENEMY_PRINCESS_BAR_WIDTH = 79
+# Native tower layouts can move the bar vertically while keeping the same lane alignment.
+ENEMY_PRINCESS_BAR_BORDER_Y_RANGE = (130, 205)
 # Offline dataset filtering: visible Princess Tower HP digits, excluding level badges.
 TOWER_HEALTH_TEXT_REGIONS_LTRB = (
     (144, 128, 205, 151),

@@ -151,6 +151,7 @@ class BotApplication:
             self.ui.set_button_state("idle")
             return
         self.ui.set_button_state("running")
+        self.ui.reset_recognition_log()
         self.ui.notebook.select(self.ui.stats_tab)
 
     def _close_queue(self):
@@ -256,7 +257,11 @@ class BotApplication:
             return
         try:
             while True:
-                self.last_stats = self.stats_queue.get_nowait()
+                update = self.stats_queue.get_nowait()
+                if "recognition" in update:
+                    self.ui.append_recognition(*update["recognition"])
+                    continue
+                self.last_stats = update
                 self.logger.current_status = self.last_stats.get("current_status", self.logger.current_status)
         except (Empty, OSError, ValueError):
             pass
