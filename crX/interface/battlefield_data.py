@@ -6,7 +6,7 @@ import threading
 import tkinter as tk
 from pathlib import Path
 from queue import Empty, Queue
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 
 import cv2
 import ttkbootstrap as ttk
@@ -19,12 +19,14 @@ from crX.utils.battlefield_data import (
     MAX_FRAMES,
     AnnotationExport,
     BatchSearch,
+    DeletedArchiveCleanup,
     FrameDeletion,
     PreparationSession,
     collect_screenshots,
     delete_frame,
     find_batches,
     get_battlefield_data_dir,
+    purge_deleted_archives,
     validate_collection,
 )
 from crX.utils.battlefield_dedup import DeduplicationPlan, analyze_batches, export_selection
@@ -104,8 +106,11 @@ class BattlefieldDataTab(ttk.Frame):
         self.stop_button.grid(row=0, column=2, padx=6, pady=3)
         self.open_session_button = self._button(actions, "打开已有批次", self._open_session)
         self.open_session_button.grid(row=0, column=3, padx=6, pady=3)
+        self._button(actions, "清理已删除图片（整个采集目录）", self._purge_deleted).grid(
+            row=0, column=4, padx=6, pady=3
+        )
         self.batch_row = ttk.Frame(actions)
-        self.batch_row.grid(row=1, column=0, columnspan=4, sticky="ew", pady=4)
+        self.batch_row.grid(row=1, column=0, columnspan=5, sticky="ew", pady=4)
         self.batch_row.columnconfigure(1, weight=1)
         ttk.Label(self.batch_row, text="找到的批次").grid(row=0, column=0, padx=(0, 6))
         self.batch_choice = ttk.Combobox(self.batch_row, state="readonly", width=1)
@@ -388,6 +393,23 @@ class BattlefieldDataTab(ttk.Frame):
         session, index = self.session, self.index
         self._start(lambda: delete_frame(session, index))
 
+    def _purge_deleted(self):
+        if self.busy or self.running:
+            return
+        target = self.root_var.get().strip()
+        if not target:
+            self.message_var.set("请填写保存目录")
+            return
+        root = Path(target).expanduser().absolute()
+        if messagebox.askyesno(
+            "清理已删除图片",
+            f"永久清理此目录及子目录中所有采集批次的已删除图片？\n{root}",
+            parent=self,
+        ):
+            current = self.session
+            self._start(lambda: purge_deleted_archives(root, current), preview=True)
+            self.message_var.set(f"正在清理已删除图片：{root}")
+
     def _navigate(self, offset):
         if self.session is not None and self.session.metadata["frames"]:
             self.index = min(max(0, self.index + offset), len(self.session.metadata["frames"]) - 1)
@@ -454,6 +476,12 @@ class BattlefieldDataTab(ttk.Frame):
                             f"{'已停止' if self._stop.is_set() else '整理完成'}：新增 {value.count} 张，"
                             f"已有相同图片跳过 {value.skipped} 张，筛选排除 {value.excluded} 张 · {value.directory}"
                         )
+                    elif isinstance(value, DeletedArchiveCleanup):
+                        self.session = value.session
+                        summary = f"已清理 {value.count} 个批次的已删除图片。"
+                        if value.warnings:
+                            summary += f" {len(value.warnings)} 个批次处理失败，首个错误：{value.warnings[0]}"
+                        self.message_var.set(summary)
                     elif isinstance(value, FrameDeletion):
                         self._invalidate_dedup()
                         self._needs_preview = False

@@ -13,7 +13,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from threading import Event
 
 import cv2
 import numpy as np
@@ -22,9 +22,6 @@ from PIL import Image
 from crX.bot.coords import BATTLEFIELD_DATA_REGION_LTRB, GAME_SCREEN_SIZE, REFERENCE_SCREEN_SIZE
 from crX.detection.battlefield import battlefield_image
 from crX.utils.card_review import atomic_json
-
-if TYPE_CHECKING:
-    from threading import Event
 
 MAX_FRAMES = 5000
 SCHEMA = "crx-battlefield/v1"
@@ -45,7 +42,7 @@ def _batch_sort_key(path: Path):
     return ("".join(match.groups()) if match else "", path.name, str(path))
 
 
-def find_batches(root: Path, *, stop: Event, cleanup_empty=False) -> BatchSearch:
+def find_batches(root: Path, *, stop: Event, cleanup_empty=False, include_empty=False) -> BatchSearch:
     """Find capture batches without following links or descending into their images."""
     if not root.is_dir():
         raise ValueError(f"文件夹不存在：{root}")
@@ -76,7 +73,9 @@ def find_batches(root: Path, *, stop: Event, cleanup_empty=False) -> BatchSearch
             directories.clear()
             if data.get("frames") == []:
                 empty += 1
-                if cleanup_empty:
+                if include_empty:
+                    found.append(directory)
+                elif cleanup_empty:
                     try:
                         remove_empty_batch(PreparationSession.open(directory))
                         removed += 1
@@ -491,39 +490,84 @@ def remove_empty_batch(session: PreparationSession) -> None:
         raise ValueError("批次已变化或仍有图片，未删除目录")
     if any(path.name not in {"metadata.json", "raw", "arena", ".deleted"} for path in base.iterdir()):
         raise ValueError("批次含其他文件，已保留目录")
-    directories = []
-    files = []
-    for name in ("raw", "arena", ".deleted"):
+    for name in ("raw", "arena"):
         directory = base / name
         if directory.is_symlink() or directory.is_junction():
             raise ValueError("批次子目录不能是链接")
-        if not directory.exists():
-            continue
-        if not directory.is_dir():
-            raise ValueError("批次子目录无效")
-        directories.append(directory)
-        for storage in directory.iterdir():
-            if name != ".deleted":
-                raise ValueError("批次仍有未登记图片或文件，已保留目录")
-            if (
-                storage.is_symlink()
-                or storage.is_junction()
-                or not storage.is_dir()
-                or not re.fullmatch(r"[0-9]{6}-[A-Za-z0-9_-]+", storage.name)
-            ):
-                raise ValueError("已删除图片目录含其他内容，已保留批次")
-            directories.append(storage)
-            for image in storage.iterdir():
-                if image.is_symlink() or not image.is_file() or image.name not in {"raw.png", "arena.png"}:
-                    raise ValueError("已删除图片目录含其他内容，已保留批次")
-                files.append(image)
-    # Remove only known files within this validated batch, without recursive deletion.
-    for path in files:
-        path.unlink()
-    for directory in sorted(directories, key=lambda path: len(path.parts), reverse=True):
-        directory.rmdir()
+        if directory.exists() and (not directory.is_dir() or any(directory.iterdir())):
+            raise ValueError("批次仍有未登记图片或文件，已保留目录")
+    _purge_deleted_archive(base)
+    for name in ("raw", "arena"):
+        directory = base / name
+        if directory.exists():
+            directory.rmdir()
     metadata_path.unlink()
     base.rmdir()
+
+
+def _purge_deleted_archive(base: Path) -> bool:
+    archive = base / ".deleted"
+    if archive.is_symlink() or archive.is_junction():
+        raise ValueError("已删除图片目录不能是链接")
+    if not archive.exists():
+        return False
+    entries = []
+    for storage in archive.iterdir():
+        if (
+            storage.is_symlink()
+            or storage.is_junction()
+            or not storage.is_dir()
+            or not re.fullmatch(r"[0-9]{6}-[A-Za-z0-9_-]+", storage.name)
+        ):
+            raise ValueError("已删除图片目录含其他内容")
+        images = list(storage.iterdir())
+        for image in images:
+            if image.is_symlink() or not image.is_file() or image.name not in {"raw.png", "arena.png"}:
+                raise ValueError("已删除图片目录含其他内容")
+        entries.append((storage, images))
+    for storage, images in entries:
+        for image in images:
+            image.unlink()
+        storage.rmdir()
+    archive.rmdir()
+    return True
+
+
+@dataclass(frozen=True)
+class DeletedArchiveCleanup:
+    count: int
+    warnings: tuple[str, ...]
+    session: PreparationSession | None
+
+
+def purge_deleted_archives(root: Path, current: PreparationSession | None = None) -> DeletedArchiveCleanup:
+    if root.is_symlink() or root.is_junction():
+        raise ValueError("采集目录不能是链接")
+    root = root.resolve(strict=True)
+    batches = find_batches(root, stop=Event(), include_empty=True)
+    count = 0
+    warnings = []
+    for directory in batches.directories:
+        try:
+            if (
+                not directory.resolve(strict=True).is_relative_to(root)
+                or directory.is_symlink()
+                or directory.is_junction()
+            ):
+                raise ValueError("批次路径无效")
+            if (directory / "metadata.json").is_symlink():
+                raise ValueError("批次记录不能是链接")
+            session = PreparationSession.open(directory)
+            count += _purge_deleted_archive(directory)
+            if "deleted_frames" in session.metadata:
+                metadata = dict(session.metadata)
+                del metadata["deleted_frames"]
+                atomic_json(directory / "metadata.json", metadata)
+                if current is not None and current.directory == directory:
+                    current = PreparationSession(directory, metadata)
+        except (OSError, ValueError) as error:
+            warnings.append(f"{directory}：{error}")
+    return DeletedArchiveCleanup(count, tuple(warnings), current)
 
 
 def delete_frame(session: PreparationSession, index: int) -> FrameDeletion:
