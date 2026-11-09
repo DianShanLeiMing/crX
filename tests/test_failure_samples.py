@@ -9,6 +9,8 @@ import numpy as np
 import pytest
 
 from crX.bot import nav, worker
+from crX.bot.coords import QQ_LOGIN_REGION, WECHAT_LOGIN_REGION
+from crX.bot.find import is_game_login_screen
 from crX.emulators import EmulatorType
 from crX.emulators.base import EmulatorNotReadyError
 from crX.utils import failure_samples as failures
@@ -17,6 +19,77 @@ from crX.utils.logger import Logger
 
 def native_frame():
     return cv2.imread(str(Path(__file__).parent / "fixtures/post-battle-attached-07.png"))
+
+
+@pytest.fixture
+def login_frame():
+    return cv2.imread(str(Path(__file__).parent / "fixtures/failure-login-native-20261109.png"))
+
+
+@pytest.mark.parametrize("missing_region", [QQ_LOGIN_REGION, WECHAT_LOGIN_REGION])
+def test_login_screen_requires_both_provider_buttons(login_frame, missing_region):
+    assert is_game_login_screen(login_frame)
+    x1, y1, x2, y2 = missing_region
+    login_frame[y1:y2, x1:x2] = 0
+    assert not is_game_login_screen(login_frame)
+
+
+@pytest.mark.parametrize("stage", ["start", "restart"])
+def test_login_screen_stops_worker_and_preserves_exact_frame(tmp_path, monkeypatch, login_frame, stage):
+    logger = Logger()
+    events = []
+
+    class Device:
+        def __init__(self, logger, **kwargs):
+            self.logger = logger
+
+        @classmethod
+        def is_supported_on_current_platform(cls):
+            return True
+
+        def screenshot(self):
+            events.append("capture")
+            return login_frame
+
+        def restart(self):
+            events.append("restart")
+            return nav.wait_for_clash_main_menu(self, self.logger, timeout=120)
+
+    class Signal:
+        def is_set(self):
+            return False
+
+        def wait(self, _timeout):
+            events.append("wait")
+
+    monkeypatch.setattr(worker, "get_emulator_registry", lambda: {EmulatorType.ADB: Device})
+    monkeypatch.setattr(failures, "get_failure_samples_dir", lambda: tmp_path)
+    monkeypatch.setattr(worker, "finish_fight_recording", lambda *_: None)
+    process = worker.WorkerProcess.__new__(worker.WorkerProcess)
+    process.shutdown_event = Signal()
+    if stage == "start":
+        assert process._setup_emulator({"emulator": EmulatorType.ADB}, logger) is None
+        assert events == ["restart", "capture"]
+    else:
+        state_tree = worker.state_tree
+
+        def fail_first_step(device, logger, state, jobs, context):
+            return "restart" if state == "start" else state_tree(device, logger, state, jobs, context)
+
+        monkeypatch.setattr(worker, "state_tree", fail_first_step)
+        assert not process._run_bot_loop(Device(logger), {}, logger)
+        assert events == ["capture", "wait", "restart", "capture"]
+        assert logger.stats["restarts_after_failure"] == 1
+
+    records, errors = failures.scan_failures(tmp_path)
+    assert errors == 0
+    assert len(records) == (1 if stage == "start" else 2)
+    record = next(record for record in records if record["data"]["details"].get("stage") == "login_required")
+    assert record["data"]["state"] == stage
+    assert record["data"]["capture_source"] == "failure_frame"
+    assert np.array_equal(cv2.imread(str(record["directory"] / "frame.png")), login_frame)
+    assert logger.errored
+    assert "手动登录" in logger.current_status
 
 
 def test_early_navigation_evidence_is_flushed_without_consuming_final_failure(tmp_path, monkeypatch):

@@ -17,6 +17,10 @@ class EmulatorNotReadyError(RuntimeError):
     (first boot) or fold it into the bounded mid-run restart net."""
 
 
+class GameLoginRequiredError(EmulatorNotReadyError):
+    """The game is waiting for the player to sign in."""
+
+
 class BaseEmulatorController:
     """
     Base class for emulator controllers.

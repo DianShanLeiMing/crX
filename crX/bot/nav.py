@@ -39,6 +39,7 @@ from crX.bot.find import (
     find_popup_close,
     find_post_battle_button_in_image,
     find_shop_recommendations,
+    is_game_login_screen,
 )
 from crX.bot.state_detect import (
     check_if_in_battle,
@@ -57,6 +58,7 @@ from crX.bot.state_detect import (
     is_trophy_reward_image,
 )
 from crX.detection.image_rec import find_image
+from crX.emulators.base import GameLoginRequiredError
 from crX.interface.enums import BATTLE_MODE_LABELS
 from crX.utils.failure_samples import remember_failure_frame
 from crX.utils.logger import Logger
@@ -180,6 +182,10 @@ def wait_for_clash_main_menu(emulator, logger: Logger, deadspace_click=True, tim
         image = emulator.screenshot()
         if is_clash_main_menu_image(image):
             return True
+        if is_game_login_screen(image):
+            reason = "检测到皇室战争登录页，请在设备中手动登录后重新开始任务"
+            remember_failure_frame(logger, image, reason=reason, stage="login_required")
+            raise GameLoginRequiredError(reason)
         elapsed = int(time.monotonic() - started)
         loading = is_clash_main_loading_image(image)
         if elapsed - last_progress >= 10:

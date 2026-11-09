@@ -17,15 +17,27 @@ from crX.bot.coords import (
     PLAYER_WINNER_LABEL_REGION,
     POPUP_CLOSE_BUTTON_SIZE,
     POPUP_CLOSE_REGION,
+    QQ_LOGIN_REGION,
     SHOP_CATALOG_REGION,
     SHOP_DAILY_FIRST_COLUMN,
     SHOP_DAILY_LABEL_OFFSETS,
     SHOP_DIALOG_CLOSE_REGION,
     SHOP_FREE_CONFIRM_REGION,
     SHOP_RECOMMENDATIONS_REGION,
+    WECHAT_LOGIN_REGION,
 )
 from crX.bot.state_detect import is_bright_collect_all_button, is_bright_red_close_button, is_item_distribution_image
 from crX.detection.image_rec import find_image, pixel_is_equal
+
+
+def is_game_login_screen(image) -> bool:
+    """Require both provider controls on the native Chinese login screen."""
+    if image is None or image.shape != (*GAME_SCREEN_SIZE[::-1], 3):
+        return False
+    return (
+        find_image(image, "login_wechat", tolerance=0.94, subcrop=WECHAT_LOGIN_REGION) is not None
+        and find_image(image, "login_qq", tolerance=0.94, subcrop=QQ_LOGIN_REGION) is not None
+    )
 
 
 def find_fight_mode_icon(emulator, mode: str):

@@ -12,7 +12,7 @@ from crX.bot.card_samples import finish_card_samples
 from crX.bot.recorder import finish_fight_recording
 from crX.bot.states import RuntimeContext, state_tree
 from crX.emulators import EmulatorType, get_emulator_registry
-from crX.emulators.base import EmulatorNotReadyError
+from crX.emulators.base import EmulatorNotReadyError, GameLoginRequiredError
 from crX.interface.enums import UIField
 from crX.utils.failure_samples import FailureSampleRecorder, record_navigation_stall
 from crX.utils.logger import ProcessLogger, attach_worker_file_logging
@@ -125,12 +125,15 @@ class WorkerProcess(Process):
         while not self.shutdown_event.is_set():
             logger.failure_frame = None
             exception = None
+            login_required = None
             completed = context.completed_jobs
             try:
                 new_state = state_tree(emulator, logger, state, jobs, context)
-            except Exception:
+            except Exception as error:
                 logging.exception("State failed: %s", state)
                 exception = traceback.format_exc()[-8000:]
+                if isinstance(error, GameLoginRequiredError):
+                    login_required = str(error)
                 new_state = "restart"
             if new_state == "rewards_finished":
                 logger.change_status(f"检测到对战奖励已领完，任务已停止（已完成 {context.completed_fights} 局）")
@@ -158,6 +161,9 @@ class WorkerProcess(Process):
                         logging.warning("异常采样失败，继续恢复", exc_info=True)
                 finish_card_samples()
                 finish_fight_recording(None)
+                if login_required is not None:
+                    logger.error(login_required)
+                    return False
                 recoveries += 1
                 if recoveries >= 5:
                     logger.error("连续 5 次恢复失败，任务已停止，请检查设备和游戏")
