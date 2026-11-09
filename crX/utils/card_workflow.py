@@ -24,7 +24,7 @@ from crX.utils.card_review import (
 
 REVIEW_TABS = {
     "待确认": "pending",
-    "待上传": "included",
+    "待更新": "included",
 }
 COVERAGE_POLICY = 2
 MAX_STATE_BYTES = 16 * 1024 * 1024

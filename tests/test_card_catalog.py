@@ -24,7 +24,7 @@ def test_catalog_includes_zero_sample_cards_and_deduplicates_formal_sources(tmp_
     assert len(data["knight"]) == 2 and len(data["giant"]) == 1 and data["archers"] == []
     reference = next(ref for ref in data["knight"] if ref.identifier == current[first.key].review["formal_id"])
     assert {sample.key for sample in reference.sources} == {first.key, duplicate.key}
-    assert reference.status == "待上传" and reference.name == "参考1"
+    assert reference.status == "待更新" and reference.name == "参考1"
     monkeypatch.setattr(detection, "_REFERENCE_NAMES", ("knight", "knight"))
     monkeypatch.setattr(detection, "_REFERENCE_MATRIX", fingerprint()[None, ...].repeat(2, axis=0))
     deduplicated = catalog.build_catalog(list(current.values()))

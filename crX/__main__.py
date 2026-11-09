@@ -18,6 +18,7 @@ from crX.interface.config import DEFAULTS, MAX_FIGHT_LIMIT, selected_decks_from_
 from crX.interface.enums import UIField, has_start_ready_job
 from crX.interface.ui import CrXUI, no_jobs_popup
 from crX.utils.caching import USER_SETTINGS_CACHE
+from crX.utils.card_upload import update_from_remote
 from crX.utils.cli_config import arg_parser
 from crX.utils.logger import Logger, initialize_pylogging, log_dir, log_name
 from crX.utils.open_folder import open_folder
@@ -74,6 +75,7 @@ class BotApplication:
         self.last_stats = {}
         self._closing = False
         self._device_busy = False
+        self._starting = False
         self.device_results = Queue()
         self.ui.set_all_values(settings or USER_SETTINGS_CACHE.load_data())
         self.ui.main_btn.configure(command=self._on_main_button)
@@ -96,6 +98,11 @@ class BotApplication:
             self._on_start()
 
     def _on_start(self):
+        if self._closing or self._starting or self.process is not None:
+            return
+        if self.ui.card_samples_tab.formalizing:
+            self.ui.after(100, self._on_start)
+            return
         if self.ui.battlefield_data_tab.busy or self.ui.dataset_split_tab.busy:
             self.ui.set_status("请先停止战场数据准备，再启动对战任务")
             return
@@ -111,11 +118,29 @@ class BotApplication:
             no_jobs_popup()
             return
         USER_SETTINGS_CACHE.cache_data(jobs)
+        root = self.ui.card_samples_tab.root
+        self._starting = True
+        self.ui.set_button_state("starting")
+        self.logger.change_status("正在同步远端卡牌数据……")
+        self.ui.set_status(self.logger.current_status)
+
+        def sync():
+            try:
+                status = update_from_remote(root)
+            except Exception as error:
+                status = f"卡牌同步未完成，使用本机已有数据：{error}"
+            self.device_results.put(("card_sync", (jobs, status)))
+
+        threading.Thread(target=sync, name="card-startup-sync", daemon=True).start()
+
+    def _launch_worker(self, jobs, status):
+        self._starting = False
+        self.ui.set_status(status)
         self.stats_queue = mp.Queue(maxsize=100)
         self.shutdown_event = mp.Event()
         self.last_stats = {}
         self.logger = Logger()
-        self.logger.change_status("正在启动 crX")
+        self.logger.change_status(status)
         self.process = WorkerProcess(jobs, self.stats_queue, self.shutdown_event, log_name)
         try:
             self.process.start()
@@ -123,6 +148,7 @@ class BotApplication:
             self.logger.error(f"无法启动任务进程：{error}")
             self.process = None
             self._close_queue()
+            self.ui.set_button_state("idle")
             return
         self.ui.set_button_state("running")
         self.ui.notebook.select(self.ui.stats_tab)
@@ -149,7 +175,12 @@ class BotApplication:
             self.ui.set_status(f"无法保存设置：{error}")
 
     def _device_action(self, action):
-        if self._device_busy or self.process is not None or self.ui.battlefield_data_tab.busy:
+        if (
+            self._device_busy
+            or getattr(self, "_starting", False)
+            or self.process is not None
+            or self.ui.battlefield_data_tab.busy
+        ):
             return
         values = self.ui.get_all_values()
         self._device_busy = True
@@ -200,7 +231,7 @@ class BotApplication:
 
     def _prepare_dataset_capture(self):
         """Snapshot Tk values now; connect/capture only on the data preparation thread."""
-        if self._device_busy or self.process is not None:
+        if self._device_busy or getattr(self, "_starting", False) or self.process is not None:
             raise ValueError("请等待设备检查结束，并停止自动对战任务后再采集")
         values = self.ui.get_all_values()
 
@@ -246,8 +277,10 @@ class BotApplication:
         self.ui.set_status(self.logger.current_status)
         try:
             kind, result = self.device_results.get_nowait()
-            self._device_busy = False
-            if kind == "instances":
+            if kind == "card_sync":
+                self._launch_worker(*result)
+            elif kind == "instances":
+                self._device_busy = False
                 indices = [item["index"] for item in result]
                 self.ui.instance_combo.configure(values=indices)
                 if indices and self.ui.variables[UIField.MUMU_INSTANCE].get() not in indices:
@@ -258,10 +291,12 @@ class BotApplication:
                 )
                 self.logger.change_status(f"已找到 {len(result)} 个 MuMu 实例")
             elif kind == "devices":
+                self._device_busy = False
                 if len(result) == 1 and not self.ui.variables[UIField.ADB_SERIAL].get():
                     self.ui.variables[UIField.ADB_SERIAL].set(result[0])
                 self.logger.change_status("在线设备：" + (", ".join(result) or "无"))
             else:
+                self._device_busy = False
                 self.logger.change_status(result)
         except Empty:
             pass

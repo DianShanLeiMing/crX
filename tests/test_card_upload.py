@@ -66,13 +66,53 @@ def upload_store(tmp_path, monkeypatch):
     return repo, remote, root, add, checks
 
 
+def test_card_data_sync_keeps_code_and_local_hits_until_selected_reset(upload_store, tmp_path):
+    repo, remote, root, add, _checks = upload_store
+    sample = add("first")
+    identifier = sample.review["formal_id"]
+    upload.upload_references(root, [sample])
+    hits.record_hits(root, {identifier: 10})
+    upload.upload_references(root, [], metadata_only=True, update_hits=True)
+    hits.record_hits(root, {identifier: 90})
+    peer = tmp_path / "peer"
+    git(tmp_path, "clone", "--branch", "main", str(remote), str(peer))
+    git(peer, "config", "user.name", "Card test")
+    git(peer, "config", "user.email", "cards@example.invalid")
+    git(peer, "config", "commit.gpgsign", "false")
+    (peer / "notes.txt").write_text("upstream\n", encoding="utf-8")
+    shared = hits.read_shared(peer / upload.HITS_FILE)
+    shared["nodes"]["f" * 32] = {identifier: 5}
+    atomic_json(peer / upload.HITS_FILE, shared)
+    git(peer, "commit", "-am", "Upstream update")
+    git(peer, "push")
+    notes = repo / "notes.txt"
+    notes.write_text("local\n", encoding="utf-8")
+    previous = git(repo, "rev-parse", "HEAD")
+
+    upload.update_from_remote(root)
+    assert hits.totals(root)[0][identifier] == 105
+    assert git(repo, "rev-parse", "HEAD") == previous
+    assert notes.read_text(encoding="utf-8") == "local\n"
+    upload.update_from_remote(root, reset_cards=["knight"])
+    assert hits.snapshot(root) == ({identifier: 15}, set())
+
+    hits.record_hits(root, {identifier: 2})
+    upload.upload_references(root, [], metadata_only=True, update_hits=True)
+    assert hits.totals(root)[0][identifier] == 17
+    assert git(repo, "rev-parse", "HEAD") == previous
+    assert git(remote, "show", "main:notes.txt") == "upstream"
+
+
 def test_upload_only_selected_fingerprints_and_keep_unstaged_edits(upload_store):
     repo, remote, root, add, checks = upload_store
     first, other = add("first"), add("other", 4, "archers")
     working = (repo / upload.LIBRARY_FILE).read_bytes()
     (repo / "notes.txt").write_text("local change\n", encoding="utf-8")
-    result = upload.upload_references(root, [first])
+    progress = []
+    result = upload.upload_references(root, [first], progress=progress.append)
     assert "已上传 1 份" in result and checks == [True]
+    assert git(remote, "log", "-1", "--format=%s", "main") == "data(cards): 上传已审核的卡牌参考"
+    assert progress[-2:] == ["正在推送正式参考……", "推送成功，正在更新本机上传记录……"]
     document = json.loads(git(remote, "show", f"main:{upload.LIBRARY_FILE}"))
     assert [entry["id"] for entry in document["entries"]] == [first.review["formal_id"]]
     assert other.review["formal_id"] not in {entry["id"] for entry in document["entries"]}
@@ -123,7 +163,28 @@ def test_staged_changes_are_preserved_and_block_new_commit(upload_store):
     assert not (repo / ".git" / "index.lock").exists()
 
 
-def test_failed_push_retries_without_duplicate_commit(upload_store, monkeypatch):
+def test_upload_selected_clear_pushes_only_selected_statistics(upload_store):
+    _repo, remote, root, add, _checks = upload_store
+    first, other = add("first"), add("other", 4, "archers")
+    selected, untouched = (sample.review["formal_id"] for sample in (first, other))
+    upload.upload_references(root, [first, other])
+    hits.record_hits(root, {selected: 4, untouched: 8})
+    upload.upload_references(root, [], metadata_only=True, update_hits=True)
+    previous = git(remote, "show", f"main:{upload.HITS_FILE}")
+    hits.clear_local(root, [selected], allow_upload=True)
+    assert git(remote, "show", f"main:{upload.HITS_FILE}") == previous
+
+    result = upload.upload_references(root, [], metadata_only=True, update_hits=True, selected_resets=[selected])
+    assert "已清空" in result
+    shared = json.loads(git(remote, "show", f"main:{upload.HITS_FILE}"))
+    assert set(shared["resets"]) == {selected}
+    assert list(shared["nodes"].values()) == [{untouched: 8}]
+    assert git(remote, "diff-tree", "--no-commit-id", "--name-only", "-r", "main") == upload.HITS_FILE
+    assert git(remote, "log", "-1", "--format=%s", "main") == upload.COMMIT_TITLE
+
+
+@pytest.mark.parametrize("legacy_title", [False, True])
+def test_failed_push_retries_without_duplicate_commit(upload_store, monkeypatch, legacy_title):
     repo, remote, root, add, checks = upload_store
     sample = add("first")
     run = upload._git
@@ -138,6 +199,8 @@ def test_failed_push_retries_without_duplicate_commit(upload_store, monkeypatch)
         upload.upload_references(root, [sample])
     assert all(sample.file(kind).exists() for kind in ("card", "hand", "frame"))
     assert not workflow.scan_review(root)[0][0].uploaded
+    if legacy_title:
+        git(repo, "commit", "--amend", "-m", "data(cards): upload approved references")
     head = git(repo, "rev-parse", "HEAD")
     monkeypatch.setattr(upload, "_git", run)
     assert "已上传" in upload.upload_references(root, [sample])

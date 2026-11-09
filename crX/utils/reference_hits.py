@@ -42,12 +42,12 @@ def _read(path, default):
     return value
 
 
-def _counts(value):
+def _counts(value, maximum=MAX_COUNT):
     if (
         not isinstance(value, dict)
         or len(value) > formal.MAX_ENTRIES * 2
         or any(
-            not isinstance(key, str) or not IDENTIFIER.fullmatch(key) or type(n) is not int or not 0 <= n <= MAX_COUNT
+            not isinstance(key, str) or not IDENTIFIER.fullmatch(key) or type(n) is not int or not 0 <= n <= maximum
             for key, n in value.items()
         )
     ):
@@ -61,10 +61,23 @@ def _epoch(value):
     )
 
 
+def _resets(value):
+    if (
+        not isinstance(value, dict)
+        or len(value) > formal.MAX_ENTRIES * 2
+        or any(
+            not isinstance(key, str) or not IDENTIFIER.fullmatch(key) or not _epoch(marker) or marker == "initial"
+            for key, marker in value.items()
+        )
+    ):
+        raise ValueError("命中清空记录无效")
+    return value
+
+
 def read_shared(path=None):
     value = _read(path or shared_path(), empty_shared())
     if (
-        set(value) != {"version", "epoch", "nodes"}
+        set(value) - {"resets"} != {"version", "epoch", "nodes"}
         or type(value.get("version")) is not int
         or value.get("version") != 1
         or not _epoch(value.get("epoch"))
@@ -76,6 +89,7 @@ def read_shared(path=None):
         if not _epoch(node) or node == "initial":
             raise ValueError("统计节点无效")
         _counts(counts)
+    _resets(value.get("resets", {}))
     return value
 
 
@@ -118,7 +132,17 @@ def _local(path, shared):
         local.update(epoch=shared["epoch"], counts=pending, hidden={}, baseline_hidden={})
     local["cleared"] = False
     for field in ("hidden", "baseline_hidden"):
-        _counts(local.setdefault(field, {}))
+        _counts(local.setdefault(field, {}), MAX_COUNT * 256)
+    previous = _resets(local.get("resets", {}))
+    current = shared.get("resets", {})
+    pending = _resets(local.setdefault("pending_resets", {}))
+    for key in previous.keys() | current.keys():
+        if previous.get(key) != current.get(key):
+            for field in ("counts", "hidden", "baseline_hidden"):
+                local[field].pop(key, None)
+        if current.get(key) == pending.get(key):
+            pending.pop(key, None)
+    local["resets"] = current
     counts = shared["nodes"].get(local["node"], {})
     local["counts"] = {
         key: max(local["counts"].get(key, 0), counts.get(key, 0)) for key in local["counts"].keys() | counts.keys()
@@ -132,10 +156,12 @@ def _merged(shared, local):
         raise ValueError("共享统计已重置，请先更新代码再上传命中数")
     nodes = dict(shared["nodes"])
     counts = nodes.get(local["node"], {})
+    resets = shared.get("resets", {})
     nodes[local["node"]] = {
-        key: max(counts.get(key, 0), local["counts"].get(key, 0)) for key in counts.keys() | local["counts"].keys()
+        key: max(counts.get(key, 0), local["counts"].get(key, 0) if resets.get(key) == local["resets"].get(key) else 0)
+        for key in counts.keys() | local["counts"].keys()
     }
-    return {"version": 1, "epoch": local["epoch"], "nodes": nodes}
+    return {**shared, "nodes": nodes}
 
 
 def snapshot(root):
@@ -147,21 +173,25 @@ def snapshot(root):
         atomic_json(path, local)
         merged = _merged(shared, local)
         published = shared["nodes"].get(local["node"], {})
-        keys = local["counts"].keys() | local["hidden"].keys() | local["baseline_hidden"].keys()
+        keys = local["counts"].keys() | local["pending_resets"].keys()
         changed = {
             key
             for key in keys
-            if local["counts"].get(key, 0) != published.get(key, 0)
-            or local["hidden"].get(key, 0) != local["baseline_hidden"].get(key, 0)
+            if local["counts"].get(key, 0) != published.get(key, 0) or key in local["pending_resets"]
         }
+    result = _displayed(merged, local["hidden"])
+    _runtime_counts = result
+    return result, changed
+
+
+def _displayed(merged, hidden):
     result = {}
     for counts in merged["nodes"].values():
         for key, n in counts.items():
             result[key] = result.get(key, 0) + n
-    for key, n in local["hidden"].items():
+    for key, n in hidden.items():
         result[key] = max(0, result.get(key, 0) - n)
-    _runtime_counts = result
-    return result, changed
+    return result
 
 
 def totals(root):
@@ -179,30 +209,67 @@ def record_hits(root, pending):
         atomic_json(path, local)
 
 
-def clear_local(root, identifiers=None):
-    """Discard selected pending hits and hide this machine's published contribution.
-
-    Cumulative upload counters never fall below shared values. Offsets stay local,
-    so publishing after a clear can only add newly collected hits.
-    """
+def clear_local(root, identifiers=None, *, allow_upload=False):
+    """Clear displayed hits locally and optionally stage a per-reference shared reset."""
     with _locked(root) as path:
         shared = read_shared()
         local = _local(path, shared)
         chosen = set(local["counts"]) if identifiers is None else set(identifiers)
         _counts(dict.fromkeys(chosen, 0))
         published = shared["nodes"].get(local["node"], {})
+        totals = _displayed(_merged(shared, local), local["hidden"])
+        chosen = {key for key in chosen if totals.get(key, 0) > 0}
+        if not chosen:
+            return ""
         for key in chosen:
             local["counts"][key] = published.get(key, 0)
             local["hidden"][key] = published.get(key, 0)
+            if allow_upload:
+                local["hidden"][key] = sum(counts.get(key, 0) for counts in shared["nodes"].values())
+                local["pending_resets"][key] = uuid.uuid4().hex
+        _counts(local["hidden"], MAX_COUNT * 256)
+        _resets(local["pending_resets"])
         atomic_json(path, local)
+    if allow_upload:
+        return f"已在本机清空 {len(chosen)} 个样本的次数。保留勾选并点击「上传修改」可清空对应线上次数"
     return f"已清空 {len(chosen)} 个样本的本机贡献次数；其他机器及线上统计保留，清空结果不会上传"
 
 
-def prepare_upload(root, committed_shared):
+def sync_shared(root, shared, reset_identifiers=()):
+    with _locked(root) as path:
+        local = _local(path, shared)
+        published = shared["nodes"].get(local["node"], {})
+        for key in reset_identifiers:
+            local["counts"][key] = published.get(key, 0)
+            for field in ("hidden", "baseline_hidden", "pending_resets"):
+                local[field].pop(key, None)
+        if read_shared() != shared:
+            atomic_json(shared_path(), shared)
+        atomic_json(path, local)
+
+
+def prepare_upload(root, committed_shared, *, selected_resets=()):
     with _locked(root) as path:
         local = _local(path, read_shared())
+        committed_resets = committed_shared.get("resets", {})
+        resets = {key: local["pending_resets"][key] for key in selected_resets if key in local["pending_resets"]}
+        if any(marker != local["resets"].get(key) and key not in resets for key, marker in committed_resets.items()):
+            raise ValueError("有尚未同步的线上清空提交，请勾选原卡牌重试或先更新本机共享统计")
         merged = _merged(committed_shared, local)
+        if selected_resets:
+            if not resets:
+                raise ValueError("所选卡牌没有待上传的清空记录，请先在本机清空次数")
+            merged = {
+                **committed_shared,
+                "resets": {**committed_resets, **resets},
+                "nodes": {
+                    node: {key: count for key, count in counts.items() if key not in resets}
+                    for node, counts in committed_shared["nodes"].items()
+                },
+            }
         local["upload_snapshot"] = {"token": _token(merged), "hidden": dict(local["hidden"])}
+        if resets:
+            local["upload_snapshot"]["reset_counts"] = {key: local["counts"].get(key, 0) for key in resets}
         atomic_json(path, local)
         return merged
 
@@ -212,8 +279,16 @@ def acknowledge_upload(root, shared):
         local = _local(path, read_shared())
         snapshot = local.get("upload_snapshot", {})
         if isinstance(snapshot, dict) and snapshot.get("token") == _token(shared):
-            local["baseline_hidden"] = dict(_counts(snapshot["hidden"]))
+            local["baseline_hidden"] = dict(_counts(snapshot["hidden"], MAX_COUNT * 256))
             local.pop("upload_snapshot", None)
+            reset_counts = _counts(snapshot.get("reset_counts", {}))
+            for key, count in reset_counts.items():
+                local["counts"][key] = max(0, local["counts"].get(key, 0) - count)
+                local["hidden"].pop(key, None)
+                local["baseline_hidden"].pop(key, None)
+                local["resets"][key] = shared["resets"][key]
+                if local["pending_resets"].get(key) == shared["resets"][key]:
+                    local["pending_resets"].pop(key)
         # Keep increments and local clears made after the uploaded snapshot.
         local.update(epoch=shared["epoch"], cleared=False, shared_token=_token(shared))
         atomic_json(shared_path(), shared)

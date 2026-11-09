@@ -46,7 +46,7 @@ class CatalogReference:
             return "内置正式参考"
         if self.uploaded:
             return "已上传"
-        return "待上传" if any(sample.status == "included" for sample in self.sources) else "正式参考"
+        return "待更新" if any(sample.status == "included" for sample in self.sources) else "正式参考"
 
 
 def _catalog_references():

@@ -488,23 +488,25 @@ class CrXUI(ttk.Window):
         )
 
     def _update_clear_busy(self, _busy=None):
-        self.main_btn.configure(state="disabled" if self._samples_clearing() else "normal")
+        self.main_btn.configure(state="disabled" if self._state == "starting" or self._samples_clearing() else "normal")
 
     def get_button_state(self):
         return self._state
 
     def set_button_state(self, state):
         self._state = state
-        self.card_samples_tab.set_running(state == "running")
-        self.failure_samples_tab.set_running(state == "running")
-        self.battlefield_data_tab.set_running(state == "running")
-        self.dataset_split_tab.set_running(state == "running")
+        busy = state in ("starting", "running")
+        self.card_samples_tab.set_running(busy)
+        self.failure_samples_tab.set_running(busy)
+        self.battlefield_data_tab.set_running(busy)
+        self.dataset_split_tab.set_running(busy)
         self._update_clear_busy()
         self.main_btn.configure(
-            text="停止" if state == "running" else "启动", bootstyle="danger" if state == "running" else "success"
+            text={"starting": "同步卡牌中…", "running": "停止"}.get(state, "启动"),
+            bootstyle="danger" if state == "running" else "success",
         )
         for widget, normal_state in self.config_widgets:
-            widget.configure(state="disabled" if state == "running" else normal_state)
+            widget.configure(state="disabled" if busy else normal_state)
 
     def update_stats(self, stats):
         for key, variable in self.stat_variables.items():

@@ -51,7 +51,7 @@ def test_selected_clear_keeps_other_machines_and_never_resets_online(tmp_path, s
     hits.record_hits(a, {FIRST: 10, SECOND: 2})
     hits.clear_local(a, [FIRST])
     assert hits.totals(a)[0] == {FIRST: 5, SECOND: 6}
-    assert hits.snapshot(a)[1] == {FIRST, SECOND}
+    assert hits.snapshot(a)[1] == {SECOND}
     assert shared.read_bytes() == before
     publish(a)
     assert hits.totals(a)[0] == {FIRST: 5, SECOND: 6}
@@ -75,6 +75,38 @@ def test_clear_before_first_upload_discards_only_selected_unpublished_hits(tmp_p
     assert sum(node.get(FIRST, 0) for node in hits.read_shared()["nodes"].values()) == 0
 
 
+def test_publish_selected_clear_removes_old_counts_without_touching_other_references(tmp_path, shared):
+    a, b = tmp_path / "a", tmp_path / "b"
+    hits.record_hits(a, {FIRST: 3, SECOND: 4})
+    publish(a)
+    hits.record_hits(b, {FIRST: 5, SECOND: 6})
+    before = publish(b)
+    hits.clear_local(a, [FIRST, SECOND], allow_upload=True)
+    assert hits.totals(a)[0] == {FIRST: 0, SECOND: 0}
+    assert hits.read_shared() == before
+    assert publish(a) == before
+
+    reset = hits.prepare_upload(a, before, selected_resets=[FIRST])
+    assert hits.prepare_upload(a, reset, selected_resets=[FIRST]) == reset
+    with pytest.raises(ValueError, match="尚未同步"):
+        hits.prepare_upload(a, reset)
+    hits.record_hits(a, {FIRST: 2})
+    hits.acknowledge_upload(a, reset)
+    assert hits.totals(a)[0] == {FIRST: 2, SECOND: 0}
+    assert hits.totals(b)[0].get(FIRST, 0) == 0
+    hits.record_hits(b, {FIRST: 1})
+    publish(b)
+    publish(a)
+    assert hits.totals(b)[0] == {FIRST: 3, SECOND: 10}
+
+
+def test_clearing_zero_does_not_mark_a_pending_reset(tmp_path, shared):
+    hits.record_hits(tmp_path, {FIRST: 3})
+    assert hits.clear_local(tmp_path, [FIRST, SECOND], allow_upload=True)
+    assert hits.clear_local(tmp_path, [FIRST, SECOND], allow_upload=True) == ""
+    assert hits.snapshot(tmp_path) == ({FIRST: 0}, {FIRST})
+
+
 def test_failed_push_retries_without_uploading_local_clear(tmp_path, shared):
     hits.record_hits(tmp_path, {FIRST: 4})
     publish(tmp_path)
@@ -96,7 +128,7 @@ def test_increments_and_clear_during_upload_remain_changed(tmp_path, shared):
     hits.clear_local(tmp_path, [FIRST])
     hits.record_hits(tmp_path, {SECOND: 1})
     hits.acknowledge_upload(tmp_path, uploading)
-    assert hits.snapshot(tmp_path) == ({FIRST: 0, SECOND: 4}, {FIRST, SECOND})
+    assert hits.snapshot(tmp_path) == ({FIRST: 0, SECOND: 4}, {SECOND})
     publish(tmp_path)
     assert hits.snapshot(tmp_path) == ({FIRST: 0, SECOND: 4}, set())
 

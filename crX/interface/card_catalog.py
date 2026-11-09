@@ -36,14 +36,14 @@ class CardCatalogView(ttk.Frame):
         self._references = {}
         self._sort_count = None
         self._card = None
+        self._checking_cards = False
+        self._checked_cards = set()
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
         # Keep the viewport steady when drag feedback wraps to a different number of lines.
         self.rowconfigure(2, minsize=Font(root=self, font="TkDefaultFont").metrics("linespace") * 3)
         search = ttk.Frame(self)
         search.grid(row=0, column=0, sticky="ew", pady=(0, 6))
-        self.upload_button = ttk.Button(search, text="上传顺序与命中次数", command=lambda: action("upload"))
-        self.upload_button.pack(side="left", padx=(0, 12))
         ttk.Label(search, text="搜索卡名 / 英文 ID").pack(side="left")
         self.query = tk.StringVar()
         ttk.Entry(search, textvariable=self.query, width=24).pack(side="left", padx=6)
@@ -51,7 +51,8 @@ class CardCatalogView(ttk.Frame):
         ttk.Checkbutton(search, text="只看有样本", variable=self.only_samples, command=self.render_cards).pack(
             side="left"
         )
-        ttk.Button(search, text="刷新", command=self.refresh_order).pack(side="right")
+        self.upload_button = ttk.Button(search, text="上传修改", command=lambda: action("upload"))
+        self.upload_button.pack(side="right", padx=(0, 6))
         self.query.trace_add("write", lambda *_: self.render_cards())
         self.panes = tk.PanedWindow(self, orient="horizontal", sashwidth=6, opaqueresize=True, borderwidth=0)
         self.panes.grid(row=1, column=0, sticky="nsew")
@@ -60,8 +61,15 @@ class CardCatalogView(ttk.Frame):
         left.rowconfigure(0, weight=1)
         self.panes.add(left, minsize=180, width=270, stretch="never")
         self.cards = ttk.Treeview(
-            left, columns=("card", "count"), show="headings", selectmode="browse", style="CardSamples.Treeview"
+            left,
+            columns=("checked", "card", "count"),
+            displaycolumns=("card", "count"),
+            show="headings",
+            selectmode="browse",
+            style="CardSamples.Treeview",
         )
+        self.cards.heading("checked", text="全选", command=self._check_all_cards)
+        self.cards.column("checked", width=42, minwidth=42, stretch=False, anchor="center")
         self.cards.heading("card", text="卡名", command=self._sort_names)
         self.cards.column("card", width=150, minwidth=80)
         self.cards.heading("count", text="样本数", command=self._sort_counts)
@@ -72,6 +80,17 @@ class CardCatalogView(ttk.Frame):
 
         self.cards.configure(yscrollcommand=scroll.set)
         self.cards.bind("<<TreeviewSelect>>", self._select_card)
+        self.cards.bind("<Button-1>", self._check_card)
+        self.cards.bind("<space>", self._check_card)
+        card_tools = ttk.Frame(left)
+        card_tools.grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        self.clear_cards_button = ttk.Button(card_tools, text="清空次数", command=self._clear_cards)
+        self.clear_cards_button.pack(side="left")
+        self.reset_cards_button = ttk.Button(card_tools, text="重置为远端", command=self._reset_cards)
+        self.reset_cards_button.pack(side="left", padx=(4, 0))
+        self.cancel_checks_button = ttk.Button(
+            card_tools, text="退出勾选", bootstyle="light-link", command=self._cancel_checks
+        )
         right = ttk.Frame(self.panes)
         right.columnconfigure(0, weight=1)
         right.rowconfigure(2, weight=1)
@@ -121,12 +140,18 @@ class CardCatalogView(ttk.Frame):
         reference_horizontal.grid(row=1, column=0, sticky="ew")
         self.references.configure(xscrollcommand=reference_horizontal.set)
         gallery.grid(row=2, column=0, sticky="nsew", padx=(6, 0))
-        self.message = tk.StringVar(
-            value="按住排序列的 ≡ 上下拖动，第一行是首选；↕ 顺序变化，● 命中变化。清空只影响本机贡献，线上数据保留。"
-        )
+        self.message = tk.StringVar()
+        self._update_message()
         ttk.Label(self, textvariable=self.message, wraplength=680).grid(row=2, column=0, sticky="ew", pady=(6, 0))
         if status is not None:
             ttk.Label(self, textvariable=status, wraplength=680).grid(row=3, column=0, sticky="ew", pady=(4, 0))
+        self.refresh_feedback = ttk.Frame(self)
+        self.refresh_progress = ttk.Progressbar(self.refresh_feedback, length=72, mode="indeterminate")
+        self.refresh_message = tk.StringVar()
+        self.refresh_label = ttk.Label(self.refresh_feedback, textvariable=self.refresh_message, wraplength=660)
+        self.refresh_label.pack(side="left")
+        self._refreshing = False
+        self.set_disabled(False)
 
     def set_data(self, data):
         if self._drag is not None or self._pending_order is not None:
@@ -159,7 +184,7 @@ class CardCatalogView(ttk.Frame):
         self._signature = signature
         if same_order:
             for card in self.cards.get_children():
-                self.cards.item(card, values=(self._card_name(card), len(self.data[card])))
+                self.cards.item(card, values=self._card_values(card))
             self._references = {ref.identifier: ref for ref in self.data.get(self._card, [])}
             self._refresh_reference_rows()
             self.set_disabled(self._disabled)
@@ -168,6 +193,54 @@ class CardCatalogView(ttk.Frame):
 
     def refresh_order(self):
         self._refresh()
+
+    def start_refresh(self, message):
+        self._refreshing = True
+        self._cancel_drag()
+        self.refresh_message.set(message)
+        self.refresh_progress.pack(side="left", before=self.refresh_label, padx=(0, 8))
+        self.refresh_feedback.grid(row=4, column=0, sticky="ew", pady=(4, 0))
+        self.refresh_progress.start()
+        self.set_disabled(self._disabled)
+
+    def finish_refresh(self, message):
+        self._refreshing = False
+        self.refresh_progress.stop()
+        self.refresh_progress.pack_forget()
+        self.refresh_message.set(message)
+        self.set_disabled(self._disabled)
+
+    def describe_changes(self, data):
+        changed = []
+        for card in sorted(self.data.keys() | data.keys(), key=lambda card: (CARD_NAMES_ZH.get(card, card), card)):
+            before = {ref.identifier: ref for ref in self.data.get(card, ())}
+            after = {ref.identifier: ref for ref in data.get(card, ())}
+            common = before.keys() & after.keys()
+            details = []
+            if before.keys() != after.keys():
+                details.append("参考增减")
+            elif tuple(before) != tuple(after) or any(before[key].name != after[key].name for key in common):
+                details.append("参考顺序")
+            if any(before[key].hits != after[key].hits for key in common):
+                details.append("命中次数")
+            if any(before[key].uploaded != after[key].uploaded for key in common):
+                details.append("上传状态")
+            if details:
+                changed.append(f"{CARD_NAMES_ZH.get(card, card)}（{'、'.join(details)}）")
+        if not changed:
+            return "样本库无变化"
+        return f"样本库变更 {len(changed)} 种卡牌：{'、'.join(changed[:3])}{'等' if len(changed) > 3 else ''}"
+
+    def update_hits(self, counts, changed):
+        self.set_data(
+            {
+                card: [
+                    replace(ref, hits=counts.get(ref.identifier, 0), hits_changed=ref.identifier in changed)
+                    for ref in refs
+                ]
+                for card, refs in self.data.items()
+            }
+        )
 
     def _sort_counts(self):
         self._sort_count = not self._sort_count if self._sort_count is not None else True
@@ -201,6 +274,7 @@ class CardCatalogView(ttk.Frame):
             if self._sort_count is not None
             else CARD_NAMES_ZH.get(card, card)
         )
+        self._checked_cards.intersection_update(cards)
         self.cards.delete(*self.cards.get_children())
         for card in cards:
             self.cards.insert(
@@ -208,10 +282,7 @@ class CardCatalogView(ttk.Frame):
                 "end",
                 iid=card,
                 text="",
-                values=(
-                    self._card_name(card),
-                    len(self.data[card]),
-                ),
+                values=self._card_values(card),
             )
         if cards:
             selected = self._card if self._card in cards else cards[0]
@@ -231,8 +302,10 @@ class CardCatalogView(ttk.Frame):
     def _select_card(self, _event=None):
         selection = self.cards.selection()
         if not selection:
+            self.set_disabled(self._disabled)
             return
-        card = selection[0]
+        focused = self.cards.focus()
+        card = focused if focused in selection else selection[0]
         if self._drag is not None and card == self._card:
             return
         if card != self._card:
@@ -259,15 +332,89 @@ class CardCatalogView(ttk.Frame):
 
     def _update_message(self):
         self.message.set(
-            "按住排序列的 ≡ 上下拖动，第一行是首选；↕ 顺序变化，● 命中变化。清空只影响本机贡献，线上数据保留。"
+            "按住排序列的 ≡ 上下拖动，第一行是首选。↕ 顺序变化，● 命中变化。"
+            "勾选卡牌可批量清空本机显示的次数。保留勾选并上传修改可清空线上对应次数。"
+            if self._checking_cards
+            else "按住排序列的 ≡ 上下拖动，第一行是首选。↕ 顺序变化，● 命中变化。清空只影响本机贡献，线上数据保留。"
         )
+
+    def _card_values(self, card):
+        checked = "☑" if card in self._checked_cards else "☐"
+        return checked, self._card_name(card), len(self.data[card])
+
+    def _clear_cards(self):
+        if self._checking_cards:
+            self._action("clear_cards")
+        else:
+            self._begin_checks()
+
+    def _reset_cards(self):
+        if self._checking_cards:
+            self._action("reset_cards")
+        else:
+            self._begin_checks()
+
+    def _begin_checks(self):
+        self._checking_cards = True
+        self.cards.configure(displaycolumns=("checked", "card", "count"))
+        self.cancel_checks_button.pack(side="left")
+        self._update_message()
+        self.set_disabled(self._disabled)
+
+    def _cancel_checks(self):
+        self._checking_cards = False
+        self._checked_cards.clear()
+        self.cards.configure(displaycolumns=("card", "count"))
+        self.cancel_checks_button.pack_forget()
+        self._refresh_checks()
+        self._update_message()
+
+    def _check_card(self, event):
+        if not self._checking_cards or self._disabled:
+            return
+        if event.keysym == "space":
+            card = self.cards.focus()
+        elif self.cards.identify_region(event.x, event.y) == "cell" and self.cards.identify_column(event.x) == "#1":
+            card = self.cards.identify_row(event.y)
+        else:
+            return
+        if card and self.data.get(card):
+            self._checked_cards.symmetric_difference_update((card,))
+            self._refresh_checks()
+        return "break"
+
+    def _check_all_cards(self):
+        if self._disabled:
+            return
+        visible = {card for card in self.cards.get_children() if self.data[card]}
+        self._checked_cards = set() if visible == self._checked_cards else visible
+        self._refresh_checks()
+
+    def _refresh_checks(self):
+        for card in self.cards.get_children():
+            self.cards.item(card, values=self._card_values(card))
+        self.set_disabled(self._disabled)
+
+    def selected_cards(self):
+        return tuple(card for card in self.cards.get_children() if card in self._checked_cards)
+
+    def selected_card_references(self):
+        return tuple(ref.identifier for card in self.selected_cards() for ref in self.data[card])
 
     def set_disabled(self, disabled):
         self._disabled = disabled
         if disabled:
             self._cancel_drag()
-        self.upload_button.configure(state="disabled" if disabled else "normal")
+        checked = self.selected_card_references()
+        self.upload_button.configure(state="disabled" if disabled or self._checking_cards and not checked else "normal")
         self.clear_button.configure(state="disabled" if disabled or not self.references.selection() else "normal")
+        self.clear_cards_button.configure(
+            state="disabled" if disabled or self._checking_cards and not checked else "normal"
+        )
+        self.reset_cards_button.configure(
+            state="disabled" if disabled or self._refreshing or self._checking_cards and not checked else "normal"
+        )
+        self.cancel_checks_button.configure(state="disabled" if disabled else "normal")
 
     def _refresh_reference_rows(self, start=0, stop=None):
         for index, key in enumerate(self.references.get_children()[start:stop], start + 1):
@@ -291,7 +438,13 @@ class CardCatalogView(ttk.Frame):
 
     def _begin_drag(self, event):
         self._cancel_drag()
-        if self._disabled or self._pending_order is not None or event.state & 0x0005 or not self._is_handle(event):
+        if (
+            self._disabled
+            or self._refreshing
+            or self._pending_order is not None
+            or event.state & 0x0005
+            or not self._is_handle(event)
+        ):
             return
         identifier = self.references.identify_row(event.y)
         if self._card is None:
