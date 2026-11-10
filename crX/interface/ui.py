@@ -359,7 +359,7 @@ class CrXUI(ttk.Window):
             log_frame,
             orient="horizontal",
             sashwidth=8,
-            sashrelief="raised",
+            sashrelief="flat",
             borderwidth=0,
             background=self.style.colors.bg,
         )
