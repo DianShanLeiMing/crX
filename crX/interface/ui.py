@@ -355,15 +355,19 @@ class CrXUI(ttk.Window):
         log_frame = ttk.Frame(self.stats_splitter)
         self.stats_splitter.add(log_frame, minsize=80, stretch="always")
         ttk.Separator(log_frame, orient="horizontal").pack(fill="x", pady=(0, 6))
-        logs = ttk.Frame(log_frame)
-        logs.pack(fill="both", expand=True)
-        logs.columnconfigure(0, weight=3)
-        logs.columnconfigure(1, weight=2)
-        logs.rowconfigure(0, weight=1)
-        running_log = ttk.Labelframe(logs, text="运行日志", padding=4)
-        running_log.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
-        recognition = ttk.Labelframe(logs, text="图像识别", padding=4)
-        recognition.grid(row=0, column=1, sticky="nsew", padx=(4, 0))
+        self.log_splitter = tk.PanedWindow(
+            log_frame,
+            orient="horizontal",
+            sashwidth=8,
+            sashrelief="raised",
+            borderwidth=0,
+            background=self.style.colors.bg,
+        )
+        self.log_splitter.pack(fill="both", expand=True)
+        running_log = ttk.Labelframe(self.log_splitter, text="运行日志", padding=4)
+        recognition = ttk.Labelframe(self.log_splitter, text="图像识别", padding=4)
+        self.log_splitter.add(running_log, width=300, minsize=120, stretch="always")
+        self.log_splitter.add(recognition, width=200, minsize=120, stretch="always")
         self.log = self._create_log_text(running_log)
         self.recognition_log = self._create_log_text(recognition)
         self.reset_recognition_log()
@@ -457,6 +461,7 @@ class CrXUI(ttk.Window):
             self.style.theme_use(name)
             colors = self.style.colors
             self.stats_splitter.configure(background=colors.bg)
+            self.log_splitter.configure(background=colors.bg)
             self.gauge.set_colours(colors.success, colors.danger, colors.fg, canvas_bg=colors.bg)
             for log in (self.log, self.recognition_log):
                 log.configure(background=colors.inputbg, foreground=colors.inputfg, insertbackground=colors.fg)
