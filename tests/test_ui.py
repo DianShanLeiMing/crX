@@ -1804,7 +1804,7 @@ def test_upload_publishes_all_references_of_selected_cards_and_blocks_while_runn
         calls.append((root, {sample.key for sample in samples}))
         progress("正在提交选中的正式参考……")
         assert release.wait(timeout=5)
-        return "已上传正式参考"
+        return "新增骑士参考样本\n更新骑士参考顺序"
 
     monkeypatch.setattr("crX.interface.card_review.upload_references", publish)
     assert str(tab.upload_button.cget("state")) == "normal"
@@ -1818,8 +1818,8 @@ def test_upload_publishes_all_references_of_selected_cards_and_blocks_while_runn
         release.set()
     finish(ui, tab)
     assert calls == [(tab.root, {first.key, supplement.key})]
-    assert tab.message_var.get() == "已上传正式参考"
-    assert tab.upload_status_var.get() == "上传完成：已上传正式参考"
+    assert not tab.message_var.get()
+    assert tab.upload_status_var.get() == "上传完成\n新增骑士参考样本\n更新骑士参考顺序"
     assert tab.upload_progress.cget("value") == 100
     tab.select_all_button.invoke()
     assert str(tab.upload_button.cget("state")) == "normal"

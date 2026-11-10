@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from collections import Counter
 from copy import deepcopy
 from functools import lru_cache
 from pathlib import Path
@@ -24,6 +25,7 @@ HITS_FILE = "crX/bot/card_reference_hits.json"
 UPLOAD_FILES = {LIBRARY_FILE, PREFERENCES_FILE, HITS_FILE}
 COMMIT_TITLE = "data(cards): 上传已审核的卡牌参考"
 LEGACY_COMMIT_TITLE = "data(cards): upload approved references"
+DETAIL_PREFIX = "data(cards): "
 MAX_INDEX_BYTES = 32 * 1024 * 1024
 
 
@@ -212,7 +214,13 @@ def _tracking(repo, head, *, update_hits=False):
     for commit in ahead:
         title = _text(repo, "show", "-s", "--format=%s", commit)
         paths = _text(repo, "diff-tree", "--no-commit-id", "--name-only", "-r", commit).splitlines()
-        if title not in (COMMIT_TITLE, LEGACY_COMMIT_TITLE) or not paths or not set(paths).issubset(UPLOAD_FILES):
+        detailed = title.startswith(tuple(DETAIL_PREFIX + verb for verb in ("新增", "更新", "清空")))
+        if (
+            title not in (COMMIT_TITLE, LEGACY_COMMIT_TITLE)
+            and not detailed
+            or not paths
+            or not set(paths).issubset(UPLOAD_FILES)
+        ):
             raise ValueError("当前分支有未推送的其他提交，请先处理这些提交后再上传参考")
         if HITS_FILE in paths and not update_hits:
             raise ValueError("上次命中数提交尚未推送，请回到样本库点击「上传修改」重试")
@@ -305,7 +313,40 @@ def _archive_published(root, identifiers, revision):
     workflow._cleanup_uploaded_images(root, workflow._scan(root), entries)
 
 
-def _commit_entries(repo, head, payloads, directory):
+def _describe_upload(repo, directory, revision, payloads):
+    from crX.utils.card_catalog import _catalog_references
+
+    details = []
+    if LIBRARY_FILE in payloads:
+        known = {entry["id"] for entry in _base_entries(repo, directory, revision)}
+        added = Counter(
+            entry["card_id"] for entry in json.loads(payloads[LIBRARY_FILE])["entries"] if entry["id"] not in known
+        )
+        for card, count in sorted(added.items()):
+            suffix = f"（{count} 份）" if count > 1 else ""
+            details.append(f"新增{formal.CARD_NAMES_ZH[card]}参考样本{suffix}")
+    if PREFERENCES_FILE in payloads:
+        old = _base_document(repo, directory, PREFERENCES_FILE, preferences.read_document, revision)["cards"]
+        new = json.loads(payloads[PREFERENCES_FILE])["cards"]
+        for card in sorted(old.keys() | new.keys()):
+            if old.get(card) != new.get(card):
+                details.append(f"更新{formal.CARD_NAMES_ZH[card]}参考顺序及编号配置")
+    if HITS_FILE in payloads:
+        old = _base_document(repo, directory, HITS_FILE, hits.read_shared, revision)
+        new = json.loads(payloads[HITS_FILE])
+        owners = {ref.identifier: card for card, refs in _catalog_references().items() for ref in refs}
+        before, after = hits._displayed(old, {}), hits._displayed(new, {})
+        old_resets, new_resets = old.get("resets", {}), new.get("resets", {})
+        for key in sorted(before.keys() | after.keys() | new_resets.keys()):
+            name = formal.CARD_NAMES_ZH.get(owners.get(key, ""), "未知卡牌")
+            if key in new_resets and new_resets[key] != old_resets.get(key):
+                details.append(f"清空{name}线上命中次数（参考 {key}）")
+            elif before.get(key, 0) != after.get(key, 0):
+                details.append(f"更新{name}命中次数（参考 {key}，{before.get(key, 0)} → {after.get(key, 0)}）")
+    return details
+
+
+def _commit_entries(repo, head, payloads, directory, details):
     git_dir = Path(_text(repo, "rev-parse", "--absolute-git-dir")).resolve()
     index = git_dir / "index"
     lock = git_dir / "index.lock"
@@ -332,7 +373,13 @@ def _commit_entries(repo, head, payloads, directory):
             _git(repo, "update-index", "--add", "--cacheinfo", f"100644,{blob},{filename}", env=env)
         tree = _text(repo, "write-tree", env=env)
         try:
-            _git(repo, "commit", "-m", COMMIT_TITLE, env=env, timeout=60)
+            title = DETAIL_PREFIX + details[0] if details else COMMIT_TITLE
+            if len(details) > 1:
+                title += f"等 {len(details)} 项变更"
+            message = ["-m", title]
+            if len(details) > 1:
+                message.extend(("-m", "\n".join(details)))
+            _git(repo, "commit", *message, env=env, timeout=60)
         finally:
             # Also reconcile the index if a post-commit hook timed out after success.
             committed = _text(repo, "rev-parse", "HEAD")
@@ -351,11 +398,11 @@ def _commit_entries(repo, head, payloads, directory):
             lock.unlink(missing_ok=True)
 
 
-def _commit_on_upstream(repo, base, payloads, directory):
+def _commit_on_upstream(repo, base, payloads, directory, details):
     checkout = directory / "checkout"
     _git(repo, "worktree", "add", "--detach", "--quiet", str(checkout), base, timeout=30)
     try:
-        return _commit_entries(checkout, base, payloads, directory)
+        return _commit_entries(checkout, base, payloads, directory, details)
     finally:
         _git(repo, "worktree", "remove", "--force", str(checkout), timeout=30)
 
@@ -414,6 +461,7 @@ def upload_references(
         progress("正在检查远端分支……")
         remote, target, pending_push, base = _tracking(repo, head, update_hits=update_hits)
         detached = head != base
+        upstream = _text(repo, "rev-parse", "--verify", "FETCH_HEAD")
         uploaded_stats = None
         with tempfile.TemporaryDirectory(prefix="crx-card-upload-") as name:
             directory = Path(name)
@@ -445,12 +493,13 @@ def upload_references(
                 if uploaded_stats != old_stats:
                     payloads[HITS_FILE] = _payload(uploaded_stats)
             if payloads:
+                details = _describe_upload(repo, directory, base, payloads)
                 _lint(repo, progress)
                 progress("正在提交选中的参考配置……")
                 if head == base:
-                    head = _commit_entries(repo, head, payloads, directory)
+                    head = _commit_entries(repo, head, payloads, directory, details)
                 else:
-                    head = _commit_on_upstream(repo, base, payloads, directory)
+                    head = _commit_on_upstream(repo, base, payloads, directory, details)
             elif not pending_push:
                 progress("正在核对已同步的数据……")
                 if uploaded_stats is not None:
@@ -460,6 +509,12 @@ def upload_references(
                 if selected_resets:
                     return "所选线上清空记录已同步"
                 return "顺序与命中次数已同步，无需重复提交" if metadata_only else "所选正式参考已上传，无需重复提交"
+            if pending_push:
+                published_payloads = {}
+                for filename in UPLOAD_FILES:
+                    if _git(repo, "diff", "--quiet", upstream, head, "--", filename, check=False).returncode == 1:
+                        published_payloads[filename] = _git(repo, "show", f"{head}:{filename}").stdout
+                details = _describe_upload(repo, directory, upstream, published_payloads)
         progress("正在推送正式参考……")
         try:
             _git(repo, "push", remote, f"{head}:{target}", timeout=90)
@@ -477,6 +532,8 @@ def upload_references(
                 _git(repo, "update-ref", _baseline_ref(remote, target), head)
         except (OSError, ValueError) as error:
             raise ValueError("远端已上传，本机归档或图片清理未完成；刷新后可重试，正式参考保留") from error
+        if details:
+            return "\n".join(details)
         if selected_resets:
             return "已清空所选样本的线上命中次数"
         if metadata_only:

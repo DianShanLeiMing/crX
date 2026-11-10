@@ -110,8 +110,8 @@ def test_upload_only_selected_fingerprints_and_keep_unstaged_edits(upload_store)
     (repo / "notes.txt").write_text("local change\n", encoding="utf-8")
     progress = []
     result = upload.upload_references(root, [first], progress=progress.append)
-    assert "已上传 1 份" in result and checks == [True]
-    assert git(remote, "log", "-1", "--format=%s", "main") == "data(cards): 上传已审核的卡牌参考"
+    assert result.splitlines()[0] == f"新增{formal.CARD_NAMES_ZH['knight']}参考样本" and checks == [True]
+    assert git(remote, "log", "-1", "--format=%s", "main").startswith(f"data(cards): {result.splitlines()[0]}")
     assert progress[-2:] == ["正在推送正式参考……", "推送成功，正在更新本机上传记录……"]
     document = json.loads(git(remote, "show", f"main:{upload.LIBRARY_FILE}"))
     assert [entry["id"] for entry in document["entries"]] == [first.review["formal_id"]]
@@ -175,12 +175,12 @@ def test_upload_selected_clear_pushes_only_selected_statistics(upload_store):
     assert git(remote, "show", f"main:{upload.HITS_FILE}") == previous
 
     result = upload.upload_references(root, [], metadata_only=True, update_hits=True, selected_resets=[selected])
-    assert "已清空" in result
+    assert result == f"清空{formal.CARD_NAMES_ZH['knight']}线上命中次数（参考 {selected}）"
     shared = json.loads(git(remote, "show", f"main:{upload.HITS_FILE}"))
     assert set(shared["resets"]) == {selected}
     assert list(shared["nodes"].values()) == [{untouched: 8}]
     assert git(remote, "diff-tree", "--no-commit-id", "--name-only", "-r", "main") == upload.HITS_FILE
-    assert git(remote, "log", "-1", "--format=%s", "main") == upload.COMMIT_TITLE
+    assert git(remote, "log", "-1", "--format=%s", "main") == f"data(cards): {result}"
 
 
 @pytest.mark.parametrize("legacy_title", [False, True])
@@ -203,7 +203,7 @@ def test_failed_push_retries_without_duplicate_commit(upload_store, monkeypatch,
         git(repo, "commit", "--amend", "-m", "data(cards): upload approved references")
     head = git(repo, "rev-parse", "HEAD")
     monkeypatch.setattr(upload, "_git", run)
-    assert "已上传" in upload.upload_references(root, [sample])
+    assert f"新增{formal.CARD_NAMES_ZH['knight']}参考样本" in upload.upload_references(root, [sample])
     assert git(repo, "rev-parse", "HEAD") == head == git(remote, "rev-parse", "main")
     assert checks == [True]
     assert workflow.scan_review(root)[0][0].uploaded

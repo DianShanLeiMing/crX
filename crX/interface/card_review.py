@@ -198,7 +198,9 @@ class CardReviewTab(ttk.Frame):
         self.upload_progress = ttk.Progressbar(self.upload_status, length=100, mode="indeterminate")
         self.upload_progress.pack(side="left", padx=(0, 8))
         self.upload_status_var = tk.StringVar()
-        ttk.Label(self.upload_status, textvariable=self.upload_status_var, wraplength=570).pack(side="left")
+        ttk.Label(self.upload_status, textvariable=self.upload_status_var, wraplength=570, justify="left").pack(
+            side="left"
+        )
         self.body_panes = tk.PanedWindow(
             self,
             orient="vertical",
@@ -995,7 +997,8 @@ class CardReviewTab(ttk.Frame):
                 if kind == "upload":
                     self.upload_progress.stop()
                     self.upload_progress.configure(mode="determinate", value=0 if error else 100)
-                    self.upload_status_var.set(f"上传失败：{error}" if error else f"上传完成：{result}")
+                    self.upload_status_var.set(f"上传失败：{error}" if error else f"上传完成\n{result}")
+                    self.message_var.set("")
                 if kind == "clear_hits" and error is None:
                     result, (counts, changed) = result
                     self.library_view.update_hits(counts, changed)
@@ -1013,10 +1016,10 @@ class CardReviewTab(ttk.Frame):
                         self.library_view.refresh_message.set("远端检查完成，正在刷新本地样本库……")
                     else:
                         self.library_view.finish_refresh(f"重置失败：{error}")
-                elif error is None:
+                elif error is None and kind != "upload":
                     self.message_var.set(result)
                 self.refresh()
-            if error:
+            if error and kind != "upload":
                 self.message_var.set(f"操作失败：{error}")
         self._later(100, self._poll)
 
