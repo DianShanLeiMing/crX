@@ -760,10 +760,12 @@
     "heal_spirit": {
       "preferred": "e0144c4139b5ef88",
       "numbers": {
-        "e0144c4139b5ef88": 0
+        "e0144c4139b5ef88": 0,
+        "616971c25b350345": 1
       },
       "order": [
-        "e0144c4139b5ef88"
+        "e0144c4139b5ef88",
+        "616971c25b350345"
       ]
     },
     "hero_barb_barrel": {
