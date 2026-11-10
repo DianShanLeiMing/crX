@@ -24,10 +24,22 @@ from crX.bot.coords import (
     SHOP_DIALOG_CLOSE_REGION,
     SHOP_FREE_CONFIRM_REGION,
     SHOP_RECOMMENDATIONS_REGION,
+    STARTUP_LOADING_BAR_SAMPLES,
+    STARTUP_LOADING_LOGO_REGION,
     WECHAT_LOGIN_REGION,
 )
 from crX.bot.state_detect import is_bright_collect_all_button, is_bright_red_close_button, is_item_distribution_image
 from crX.detection.image_rec import find_image, pixel_is_equal
+
+
+def is_startup_loading_screen(image) -> bool:
+    """Identify the late loading splash by its progress bar and crown shield."""
+    if image is None or image.shape != (*GAME_SCREEN_SIZE[::-1], 3):
+        return False
+    return (
+        all(pixel_is_equal(image[y, x], color, tol=18) for x, y, color in STARTUP_LOADING_BAR_SAMPLES)
+        and find_image(image, "startup_loading", tolerance=0.94, subcrop=STARTUP_LOADING_LOGO_REGION) is not None
+    )
 
 
 def is_game_login_screen(image) -> bool:

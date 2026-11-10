@@ -40,6 +40,7 @@ from crX.bot.find import (
     find_post_battle_button_in_image,
     find_shop_recommendations,
     is_game_login_screen,
+    is_startup_loading_screen,
 )
 from crX.bot.state_detect import (
     check_if_in_battle,
@@ -177,6 +178,7 @@ def wait_for_clash_main_menu(emulator, logger: Logger, deadspace_click=True, tim
     last_progress = -10
     image = None
     loading = False
+    startup_loading = False
     wait_watch = {}
     while time.monotonic() < deadline:
         image = emulator.screenshot()
@@ -187,11 +189,16 @@ def wait_for_clash_main_menu(emulator, logger: Logger, deadspace_click=True, tim
             remember_failure_frame(logger, image, reason=reason, stage="login_required")
             raise GameLoginRequiredError(reason)
         elapsed = int(time.monotonic() - started)
-        loading = is_clash_main_loading_image(image)
+        startup_loading = is_startup_loading_screen(image)
+        loading = not startup_loading and is_clash_main_loading_image(image)
         if elapsed - last_progress >= 10:
-            stage = "主界面资源加载完成" if loading else "游戏主界面"
+            stage = "游戏启动加载完成" if startup_loading else "主界面资源加载完成" if loading else "游戏主界面"
             logger.change_status(f"正在等待{stage}（已等待 {elapsed}/{wait_timeout:g} 秒）")
             last_progress = elapsed
+        if startup_loading:
+            wait_watch.pop("stage", None)
+            time.sleep(0.5)
+            continue
         if loading:
             _report_navigation_wait(logger, image, "main_loading", wait_watch)
             time.sleep(0.5)
@@ -217,10 +224,13 @@ def wait_for_clash_main_menu(emulator, logger: Logger, deadspace_click=True, tim
             continue
         _report_navigation_wait(logger, image, "startup_unknown", wait_watch)
         time.sleep(1)
-    reason = "主界面资源加载超时" if loading else "等待主界面超时"
-    remember_failure_frame(
-        logger, image, reason=reason, stage="main_loading" if loading else "unknown", timeout_s=wait_timeout
-    )
+    if startup_loading:
+        reason, stage = "游戏启动加载超时", "startup_loading"
+    elif loading:
+        reason, stage = "主界面资源加载超时", "main_loading"
+    else:
+        reason, stage = "等待主界面超时", "unknown"
+    remember_failure_frame(logger, image, reason=reason, stage=stage, timeout_s=wait_timeout)
     logger.change_status(f"{reason}，已保留最后判定画面")
     return False
 

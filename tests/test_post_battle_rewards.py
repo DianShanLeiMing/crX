@@ -19,7 +19,7 @@ from crX.bot.coords import (
     POST_BATTLE_REWARD_TOP_REGION,
     START_FIGHT_BUTTON_COORD,
 )
-from crX.bot.find import find_collect_all_button, find_popup_close
+from crX.bot.find import find_collect_all_button, find_popup_close, is_startup_loading_screen
 from crX.bot.state_detect import (
     detect_post_battle_reward,
     is_clash_main_loading_image,
@@ -1213,6 +1213,37 @@ def test_unknown_wait_is_reported_before_timeout_only_once(clock, entry):
     assert np.array_equal(saved, frame)
     assert details["wait_s"] >= 10
     assert logger.failure_frame is not None
+
+
+@pytest.mark.parametrize("recovers", [True, False])
+def test_startup_loading_waits_without_early_failure_but_keeps_timeout(clock, recovers):
+    frame = image("startup-loading-native-20261110.png")
+    screen = RewardSequence(clock, [(frame, 12 if recovers else None), (image("failure-main-recovered.png"), None)])
+    logger = Logger()
+    reports = []
+    logger.navigation_stall_handler = lambda *args, **kwargs: reports.append(kwargs)
+    assert nav.wait_for_clash_main_menu(screen, logger, timeout=15) is recovers
+    assert not screen.clicks
+    assert not reports
+    if recovers:
+        assert logger.failure_frame is None
+    else:
+        assert clock[0] == 15
+        evidence = logger.failure_frame
+        assert evidence is not None
+        assert evidence["details"]["stage"] == "startup_loading"
+        assert np.array_equal(evidence["image"], frame)
+
+
+@pytest.mark.parametrize("missing", ["logo", "progress_bar"])
+def test_startup_loading_requires_logo_and_progress_bar(missing):
+    frame = image("startup-loading-native-20261110.png")
+    assert is_startup_loading_screen(frame)
+    if missing == "logo":
+        frame[:222] = 0
+    else:
+        frame[1236:] = 0
+    assert not is_startup_loading_screen(frame)
 
 
 def test_early_wait_reporting_failure_does_not_interrupt_navigation(clock):
