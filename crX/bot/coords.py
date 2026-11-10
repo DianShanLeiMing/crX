@@ -20,6 +20,8 @@ BATTLEFIELD_DATA_REGION_LTRB = (0, 120, 720, 1030)
 # Left and right enemy Princess Tower bars in native 1v1 frames (left edge, bottom border).
 ENEMY_PRINCESS_BAR_ANCHORS = ((144, 155), (521, 155))
 ENEMY_PRINCESS_BAR_WIDTH = 79
+# Destroyed tower platforms, below the health bars on native frames.
+ENEMY_PRINCESS_RUINS_REGIONS_LTRB = ((105, 220, 235, 350), (485, 220, 615, 350))
 # Native tower layouts can move the bar vertically while keeping the same lane alignment.
 ENEMY_PRINCESS_BAR_BORDER_Y_RANGE = (130, 205)
 # Offline dataset filtering: visible Princess Tower HP digits, excluding level badges.

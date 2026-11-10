@@ -26,6 +26,7 @@ from crX.bot.coords import (
     ENEMY_PRINCESS_BAR_ANCHORS,
     ENEMY_PRINCESS_BAR_BORDER_Y_RANGE,
     ENEMY_PRINCESS_BAR_WIDTH,
+    ENEMY_PRINCESS_RUINS_REGIONS_LTRB,
     GAME_SCREEN_SIZE,
     ITEM_DISTRIBUTION_COLLECT_ALL_SIZE,
     ITEM_DISTRIBUTION_INTRO_TITLE_REGION,
@@ -295,6 +296,18 @@ def read_enemy_princess_bars(image) -> tuple[tuple[int | None, bool], ...]:
     ):
         return ((None, False), (None, False))
     return tuple(_read_princess_bar(image, x, y) for x, y in ENEMY_PRINCESS_BAR_ANCHORS)
+
+
+def image_has_enemy_princess_ruins(image: numpy.ndarray, side: int) -> bool:
+    return (
+        find_image(
+            image,
+            "princess_tower_ruins",
+            tolerance=0.84,
+            subcrop=ENEMY_PRINCESS_RUINS_REGIONS_LTRB[side],
+        )
+        is not None
+    )
 
 
 def image_has_elixir(image, elixir_count: int) -> bool:

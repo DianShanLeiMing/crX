@@ -1,6 +1,9 @@
+from pathlib import Path
 from types import SimpleNamespace
 
+import cv2
 import numpy as np
+import pytest
 
 from crX.bot import fight, tower_health
 from crX.bot.coords import BATTLE_HAND_BORDER_SAMPLES, ENEMY_PRINCESS_BAR_ANCHORS, ENEMY_PRINCESS_BAR_WIDTH
@@ -64,6 +67,42 @@ def test_occlusion_is_unknown_and_suspicion_requires_low_fill_and_repeated_absen
     assert "右 疑似已毁" in messages[-1]
     monitor.observe(low)
     assert "右 存在" in messages[-1] and "右侧比例更低" in messages[-1]
+
+
+@pytest.mark.parametrize(
+    ("side", "label", "x", "filename"),
+    [
+        (0, "左", 132, "green_left_desktop_preview_20261110.png"),
+        (1, "右", 502, "stone_right_720_native_20261108.png"),
+    ],
+)
+def test_confirms_destroyed_from_repeated_ruins_without_prior_low_health(monkeypatch, side, label, x, filename):
+    messages = []
+    logger = Logger()
+    monkeypatch.setattr(logger, "log", messages.append)
+    clock = iter(range(7))
+    monkeypatch.setattr(tower_health, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+    template_dir = Path(__file__).resolve().parents[1] / "crX/detection/reference_images/princess_tower_ruins"
+    template = cv2.imread(str(template_dir / filename))
+    assert template is not None
+    h, w = template.shape[:2]
+    fills: list[int | None] = [65, 13]
+    fills[side] = None
+    missing = battle_frame(*fills)
+    ruins = missing.copy()
+    ruins[244 : 244 + h, x : x + w] = template
+    monitor = tower_health.TowerHealthMonitor(logger)
+    for image in (ruins, missing, ruins):
+        monitor.observe(image)
+        assert f"{label} 血条未读出" in messages[-1]
+    monitor.observe(ruins)
+    assert f"{label} 已摧毁" in messages[-1]
+    assert "暂无法比较" not in messages[-1]
+    monitor.observe(missing)
+    assert f"{label} 已摧毁" in messages[-1]
+    monitor.observe(battle_frame(65, 13))
+    assert f"{label} 已摧毁" in messages[-1]
+    assert "比例更低" not in messages[-1]
 
 
 def test_elixir_wait_logs_from_its_existing_screenshot(monkeypatch):
