@@ -407,6 +407,31 @@ def _commit_on_upstream(repo, base, payloads, directory, details):
         _git(repo, "worktree", "remove", "--force", str(checkout), timeout=30)
 
 
+def _check_pending_metadata(repo, directory, upstream, head, cards, identifiers):
+    if _git(repo, "diff", "--quiet", upstream, head, "--", LIBRARY_FILE, check=False).returncode:
+        raise ValueError("有尚未推送的参考样本，请先在待更新中完成上传")
+    before = _base_document(repo, directory, PREFERENCES_FILE, preferences.read_document, upstream)["cards"]
+    after = _base_document(repo, directory, PREFERENCES_FILE, preferences.read_document, head)["cards"]
+    outside = any(before.get(card) != after.get(card) for card in before.keys() | after.keys() if card not in cards)
+    old = _base_document(repo, directory, HITS_FILE, hits.read_shared, upstream)
+    new = _base_document(repo, directory, HITS_FILE, hits.read_shared, head)
+    for field in ("nodes", "resets"):
+        if field == "resets":
+            pairs = [(old.get(field, {}), new.get(field, {}))]
+        else:
+            pairs = [
+                (old[field].get(node, {}), new[field].get(node, {})) for node in old[field].keys() | new[field].keys()
+            ]
+        for first, second in pairs:
+            outside |= any(
+                first.get(key, 0) != second.get(key, 0)
+                for key in first.keys() | second.keys()
+                if key not in identifiers
+            )
+    if outside or old["epoch"] != new["epoch"]:
+        raise ValueError("上次未完成的上传包含未勾选卡牌，请勾选这些卡牌后一并重试")
+
+
 def upload_references(
     root,
     selected,
@@ -414,6 +439,7 @@ def upload_references(
     cards=None,
     update_hits=False,
     metadata_only=False,
+    metadata_cards=None,
     selected_resets=(),
     progress=lambda _message: None,
 ):
@@ -428,17 +454,26 @@ def upload_references(
         raise ValueError("顺序与命中次数上传不能包含样本入库操作")
     if selected_resets and not metadata_only:
         raise ValueError("请从样本库上传所选清空记录")
+    if metadata_cards is not None and (
+        not metadata_only or not metadata_cards or not set(metadata_cards).issubset(formal.CARD_NAMES_ZH)
+    ):
+        raise ValueError("请先勾选要上传顺序与次数的卡牌")
     if cards is not None and (
         not cards or len(cards) > formal.MAX_BATCH or not set(cards).issubset(formal.CARD_NAMES_ZH)
     ):
         raise ValueError("请选择有效卡牌，一次最多上传64种")
     with workflow._locked(root):
+        selected_identifiers = None
         if metadata_only:
             from crX.utils.card_catalog import build_catalog
 
             # Freeze labels/order for newly included references before taking the
             # metadata snapshot, just as a catalog refresh does.
-            build_catalog(workflow._scan(root), root=root)
+            catalog = build_catalog(workflow._scan(root), root=root)
+            if metadata_cards is not None:
+                selected_identifiers = {ref.identifier for card in metadata_cards for ref in catalog.get(card, ())}
+                if not selected_identifiers:
+                    raise ValueError("所选卡牌没有可上传的参考")
         samples = workflow._fresh(root, selected) if selected else []
         if (
             not metadata_only
@@ -465,6 +500,8 @@ def upload_references(
         uploaded_stats = None
         with tempfile.TemporaryDirectory(prefix="crx-card-upload-") as name:
             directory = Path(name)
+            if pending_push and metadata_cards is not None:
+                _check_pending_metadata(repo, directory, upstream, base, set(metadata_cards), selected_identifiers)
             before = _base_entries(repo, directory, base)
             merged = {entry["id"]: entry for entry in before}
             merged.update(chosen)
@@ -478,7 +515,13 @@ def upload_references(
             current_preferences = preferences.read_document(preferences.preferences_path())
             old_preferences = _base_document(repo, directory, PREFERENCES_FILE, preferences.read_document, base)
             new_preferences = {"version": 1, "cards": dict(old_preferences["cards"])}
-            preference_cards = current_preferences["cards"] if metadata_only else chosen_cards
+            preference_cards = (
+                metadata_cards
+                if metadata_cards is not None
+                else current_preferences["cards"]
+                if metadata_only
+                else chosen_cards
+            )
             for card in () if selected_resets else preference_cards:
                 if card in current_preferences["cards"]:
                     new_preferences["cards"][card] = current_preferences["cards"][card]
@@ -486,7 +529,9 @@ def upload_references(
                 payloads[PREFERENCES_FILE] = _payload(new_preferences)
             if update_hits:
                 old_stats = _base_document(repo, directory, HITS_FILE, hits.read_shared, base)
-                uploaded_stats = hits.prepare_upload(root, old_stats, selected_resets=selected_resets)
+                uploaded_stats = hits.prepare_upload(
+                    root, old_stats, selected_resets=selected_resets, selected_identifiers=selected_identifiers
+                )
                 validation = directory / "validated-hits.json"
                 validation.write_bytes(_payload(uploaded_stats))
                 hits.read_shared(validation)
@@ -537,5 +582,5 @@ def upload_references(
         if selected_resets:
             return "已清空所选样本的线上命中次数"
         if metadata_only:
-            return "已上传全部样本的顺序与新增命中次数；本地清空结果未上传，来源图片保留"
+            return "所选卡牌的顺序与命中次数已同步" if metadata_cards is not None else "顺序与命中次数已同步"
         return f"已上传 {len(chosen)} 份正式参考及所选配置；其他机器更新代码后生效，来源图片已清理，备注保留"

@@ -426,7 +426,7 @@ class CardCatalogView(ttk.Frame):
         if disabled:
             self._cancel_drag()
         checked = self.selected_card_references()
-        self.upload_button.configure(state="disabled" if disabled else "normal")
+        self.upload_button.configure(state="disabled" if disabled or not checked else "normal")
         self.clear_button.configure(state="disabled" if disabled or not self.references.selection() else "normal")
         self.clear_cards_button.configure(state="disabled" if disabled or not checked else "normal")
         self.reset_cards_button.configure(state="disabled" if disabled or self._refreshing or not checked else "normal")

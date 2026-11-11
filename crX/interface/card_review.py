@@ -843,9 +843,11 @@ class CardReviewTab(ttk.Frame):
                 self._start_action(clear_hits, kind="clear_hits")
                 self.message_var.set("")
         elif operation == "upload":
-            selected = view.selected_card_references()
-            options = {"selected_resets": selected} if selected else {}
-            self._start_upload([], metadata_only=True, update_hits=True, **options)
+            selected = view.selected_cards()
+            if not selected:
+                self.message_var.set("请先在左侧勾选要上传顺序与次数的卡牌。")
+                return
+            self._start_upload([], metadata_only=True, update_hits=True, metadata_cards=selected)
         elif operation == "reset_cards":
             cards = view.selected_cards()
             if not cards or not messagebox.askyesno(

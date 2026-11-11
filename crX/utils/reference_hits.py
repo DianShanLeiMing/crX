@@ -248,26 +248,40 @@ def sync_shared(root, shared, reset_identifiers=()):
         atomic_json(path, local)
 
 
-def prepare_upload(root, committed_shared, *, selected_resets=()):
+def prepare_upload(root, committed_shared, *, selected_resets=(), selected_identifiers=None):
     with _locked(root) as path:
         local = _local(path, read_shared())
         committed_resets = committed_shared.get("resets", {})
-        resets = {key: local["pending_resets"][key] for key in selected_resets if key in local["pending_resets"]}
+        chosen = set(selected_identifiers) if selected_identifiers is not None else None
+        reset_keys = selected_resets if chosen is None else chosen
+        resets = {key: local["pending_resets"][key] for key in reset_keys if key in local["pending_resets"]}
         if any(marker != local["resets"].get(key) and key not in resets for key, marker in committed_resets.items()):
             raise ValueError("有尚未同步的线上清空提交，请勾选原卡牌重试或先更新本机共享统计")
         merged = _merged(committed_shared, local)
-        if selected_resets:
+        if chosen is not None:
+            published = committed_shared["nodes"].get(local["node"], {})
+            own = merged["nodes"][local["node"]]
+            merged["nodes"][local["node"]] = {
+                key: own.get(key, 0) if key in chosen else published.get(key, 0)
+                for key in published.keys() | (own.keys() & chosen)
+            }
+        if selected_resets or resets:
             if not resets:
                 raise ValueError("所选卡牌没有待上传的清空记录，请先在本机清空次数")
+            source = committed_shared if chosen is None else merged
             merged = {
-                **committed_shared,
+                **source,
                 "resets": {**committed_resets, **resets},
                 "nodes": {
                     node: {key: count for key, count in counts.items() if key not in resets}
-                    for node, counts in committed_shared["nodes"].items()
+                    for node, counts in source["nodes"].items()
                 },
             }
-        local["upload_snapshot"] = {"token": _token(merged), "hidden": dict(local["hidden"])}
+        hidden = dict(local["hidden"])
+        if chosen is not None:
+            hidden = dict(local["baseline_hidden"])
+            hidden.update({key: value for key, value in local["hidden"].items() if key in chosen})
+        local["upload_snapshot"] = {"token": _token(merged), "hidden": hidden}
         if resets:
             local["upload_snapshot"]["reset_counts"] = {key: local["counts"].get(key, 0) for key in resets}
         atomic_json(path, local)

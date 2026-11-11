@@ -382,6 +382,47 @@ def test_git_commit_hook_is_respected_and_index_is_preserved(upload_store):
     assert not (repo / ".git" / "index.lock").exists()
 
 
+def test_scoped_metadata_upload_keeps_unselected_order_counts_and_pending_clears(upload_store, monkeypatch):
+    _repo, remote, root, add, _checks = upload_store
+    samples = [add("first"), add("second", 4), add("other", 8, "archers"), add("other-second", 12, "archers")]
+    upload.upload_references(root, samples)
+    catalog = build_catalog(workflow.scan_review(root)[0], root=root)
+    knight = tuple(ref.identifier for ref in catalog["knight"])
+    archers = tuple(ref.identifier for ref in catalog["archers"])
+    hits.record_hits(root, {knight[0]: 5, archers[0]: 7})
+    upload.upload_references(root, [], metadata_only=True, update_hits=True)
+    original_order = json.loads(git(remote, "show", f"main:{upload.PREFERENCES_FILE}"))
+    for card, order in (("knight", knight), ("archers", archers)):
+        reorder_references(root, card, order[::-1], order)
+    hits.clear_local(root, [knight[0], archers[0]], allow_upload=True)
+    hits.record_hits(root, {knight[1]: 3, archers[1]: 9})
+
+    run = upload._git
+
+    def fail_push(repo, *args, **options):
+        if args[0] == "push":
+            raise ValueError("offline")
+        return run(repo, *args, **options)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(upload, "_git", fail_push)
+        with pytest.raises(ValueError, match="推送未完成"):
+            upload.upload_references(root, [], metadata_only=True, update_hits=True, metadata_cards=["knight"])
+        with pytest.raises(ValueError, match="未勾选"):
+            upload.upload_references(root, [], metadata_only=True, update_hits=True, metadata_cards=["archers"])
+    upload.upload_references(root, [], metadata_only=True, update_hits=True, metadata_cards=["knight"])
+    order = json.loads(git(remote, "show", f"main:{upload.PREFERENCES_FILE}"))
+    assert order["cards"]["knight"]["order"] == list(knight[::-1])
+    assert order["cards"]["archers"] == original_order["cards"]["archers"]
+    shared = json.loads(git(remote, "show", f"main:{upload.HITS_FILE}"))
+    totals = hits._displayed(shared, {})
+    assert totals.get(knight[0], 0) == 0 and totals[knight[1]] == 3
+    assert totals[archers[0]] == 7 and totals.get(archers[1], 0) == 0
+    assert hits.snapshot(root)[1] == set(archers)
+    with pytest.raises(ValueError, match="请先勾选"):
+        upload.upload_references(root, [], metadata_only=True, update_hits=True, metadata_cards=[])
+
+
 def test_catalog_metadata_upload_marks_changes_and_keeps_new_samples_local(upload_store):
     repo, remote, root, add, _checks = upload_store
     first, second = add("first"), add("second", 4)

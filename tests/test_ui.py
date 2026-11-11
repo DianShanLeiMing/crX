@@ -2084,7 +2084,7 @@ def test_catalog_clear_and_global_metadata_upload(review_ui, monkeypatch):
     shared_before = hits.shared_path().read_bytes()
     hits.record_hits(tab.root, {key: 1, giant: 2})
     view.query.set("")
-    assert "tree" in view.cards.cget("show")
+    assert "tree" in tuple(map(str, view.cards.cget("show")))
     view._check_all_cards()
     view.cards.focus("giant")
     view.cards.selection_set("giant")
@@ -2114,17 +2114,16 @@ def test_catalog_clear_and_global_metadata_upload(review_ui, monkeypatch):
     monkeypatch.setattr("crX.interface.card_review.upload_references", upload)
     view.upload_button.invoke()
     finish(ui, tab)
-    assert set(calls[0][2]["selected_resets"]) == {key, giant}
+    assert {"knight", "giant"}.issubset(calls[0][2]["metadata_cards"])
     assert tab.upload_status_var.get().startswith("上传完成")
     view._check_all_cards()
     view.query.set("no-such-card")
     ui.update()
     view.upload_button.invoke()
-    finish(ui, tab)
-    assert len(calls) == 2
-    assert calls[1][0] == tab.root and calls[1][1] == []
-    assert calls[1][2]["metadata_only"] and calls[1][2]["update_hits"]
-    assert "selected_resets" not in calls[1][2]
+    assert str(view.upload_button.cget("state")) == "disabled"
+    tab._catalog_action("upload")
+    assert len(calls) == 1
+    assert "请先在左侧勾选" in tab.message_var.get()
 
 
 def test_catalog_drag_persists_order_and_allows_moving_first_choice(review_ui):
