@@ -36,18 +36,8 @@ BATTLE_STAT_LABELS = {
     "completed_fights": "已完成局数",
     "wins": "胜场",
     "losses": "负场",
-    "winrate": "胜率",
-    "current_win_streak": "当前连胜",
-    "best_win_streak": "最高连胜",
-    "classic_1v1_fights": "经典 1v1",
-    "classic_2v2_fights": "经典 2v2",
-    "trophy_road_1v1_fights": "皇室征程",
-    "cards_played": "出牌次数",
-    "card_randomizations": "随机选组次数",
-    "card_cycles": "卡组轮换次数",
-    "shop_offer_collections": "商店免费领取次数",
-    "restarts_after_failure": "故障恢复次数",
     "time_since_start": "运行时长",
+    "restarts_after_failure": "故障恢复次数",
 }
 
 START_JOB_GROUPS = (

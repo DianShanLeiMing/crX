@@ -9,7 +9,6 @@ from tkinter import filedialog, messagebox
 
 import ttkbootstrap as ttk
 from ttkbootstrap.widgets import ToolTip
-from ttkbootstrap.widgets.scrolled import ScrolledFrame
 
 from crX.emulators import EmulatorType, get_available_emulators
 from crX.interface.battlefield_data import BattlefieldDataTab
@@ -338,21 +337,47 @@ class CrXUI(ttk.Window):
             background=self.style.colors.bg,
         )
         self.stats_splitter.pack(fill="both", expand=True)
-        summary = ScrolledFrame(self.stats_splitter, height=460, autohide=True)
-        self.stats_splitter.add(summary.container, minsize=120, stretch="never")
-        self.gauge = DualRingGauge(summary, diameter=100, canvas_bg=self.style.colors.bg)
-        self.gauge.grid(row=0, column=0, rowspan=3, padx=(0, 25), sticky="n")
-        self.stat_variables = {}
+        summary = ttk.Frame(self.stats_splitter, padding=(0, 8))
+        self.stats_splitter.add(summary, height=200, minsize=175, stretch="never")
+        rate_box = ttk.Frame(summary)
+        rate_box.grid(row=0, column=0, rowspan=2, padx=(0, 20), pady=(6, 0), sticky="n")
+        ttk.Label(rate_box, text="胜率").pack(pady=(0, 4))
+        self.gauge = DualRingGauge(rate_box, diameter=100, canvas_bg=self.style.colors.bg)
+        self.gauge.pack()
+        self.stat_variables = {
+            key: tk.StringVar(value="0")
+            for key in (
+                *BATTLE_STAT_LABELS,
+                "winrate",
+                "classic_1v1_fights",
+                "classic_2v2_fights",
+                "trophy_road_1v1_fights",
+                "shop_offer_collections",
+            )
+        }
         for index, (key, title) in enumerate(BATTLE_STAT_LABELS.items()):
-            row, column = divmod(index, 2)
-            box = ttk.Frame(summary, padding=6)
+            row, column = divmod(index, 3)
+            box = ttk.Frame(summary, padding=(8, 6))
             box.grid(row=row, column=column + 1, sticky="ew")
             ttk.Label(box, text=title).pack(anchor="w")
-            variable = tk.StringVar(value="0")
-            self.stat_variables[key] = variable
-            ttk.Label(box, textvariable=variable, font=("Segoe UI", 13, "bold")).pack(anchor="w")
-        summary.columnconfigure(1, weight=1)
-        summary.columnconfigure(2, weight=1)
+            ttk.Label(box, textvariable=self.stat_variables[key], font=("Segoe UI", 16, "bold")).pack(anchor="w")
+        self.shop_stat_box = ttk.Frame(summary, padding=(8, 6))
+        self.shop_stat_box.grid(row=1, column=3, sticky="ew")
+        ttk.Label(self.shop_stat_box, text="商店免费领取次数").pack(anchor="w")
+        ttk.Label(
+            self.shop_stat_box,
+            textvariable=self.stat_variables["shop_offer_collections"],
+            font=("Segoe UI", 16, "bold"),
+        ).pack(anchor="w")
+        self.variables[UIField.SHOP_DAILY_OFFER_USER_TOGGLE].trace_add("write", self._update_shop_stat_visibility)
+        self._update_shop_stat_visibility()
+        self.mode_distribution_var = tk.StringVar()
+        ttk.Label(summary, textvariable=self.mode_distribution_var, padding=(8, 10)).grid(
+            row=2, column=0, columnspan=4, sticky="w"
+        )
+        for column in (1, 2, 3):
+            summary.columnconfigure(column, weight=1, uniform="stats")
+        self.update_stats({})
         log_frame = ttk.Frame(self.stats_splitter)
         self.stats_splitter.add(log_frame, minsize=80, stretch="always")
         ttk.Separator(log_frame, orient="horizontal").pack(fill="x", pady=(0, 6))
@@ -381,6 +406,12 @@ class CrXUI(ttk.Window):
         log.pack(fill="both", expand=True)
         scrollbar.configure(command=log.yview)
         return log
+
+    def _update_shop_stat_visibility(self, *_):
+        if self.variables[UIField.SHOP_DAILY_OFFER_USER_TOGGLE].get():
+            self.shop_stat_box.grid()
+        else:
+            self.shop_stat_box.grid_remove()
 
     def _create_settings(self):
         self.theme_labels = {
@@ -563,10 +594,21 @@ class CrXUI(ttk.Window):
             if key in stats:
                 variable.set(str(stats[key]))
         try:
-            rate = float(str(stats.get("winrate", "0%")).rstrip("%"))
+            rate = float(self.stat_variables["winrate"].get().rstrip("%"))
         except ValueError:
             rate = 0
         self.gauge._draw_dynamic(rate, f"{rate:.1f}%")
+        self.mode_distribution_var.set(
+            "模式分布    "
+            + "  ·  ".join(
+                f"{title} {self.stat_variables[key].get()}"
+                for key, title in (
+                    ("classic_1v1_fights", "经典 1v1"),
+                    ("classic_2v2_fights", "经典 2v2"),
+                    ("trophy_road_1v1_fights", "皇室征程"),
+                )
+            )
+        )
 
     def set_status(self, status):
         self.status_var.set(status)
