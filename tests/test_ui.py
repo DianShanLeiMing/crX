@@ -780,13 +780,58 @@ def test_failure_selection_deletion_filter_scope_and_running_guard(desktop_ui, t
         tab.destroy()
 
 
-def test_failure_deletion_rechecks_running_state_and_recovers_after_io_error(desktop_ui, tmp_path, monkeypatch):
+def test_clear_all_failures_includes_hidden_statuses_and_needs_confirmation(desktop_ui, tmp_path, monkeypatch):
+    from crX.interface.failure_review import FailureReviewTab
+    from crX.utils.failure_samples import save_failure_review, scan_failures
+
+    ui, _root = desktop_ui
+    records = [make_failure(tmp_path) for _ in range(3)]
+    save_failure_review(records[1], "handled", "")
+    save_failure_review(records[2], "ignored", "")
+    tab = FailureReviewTab(ui.notebook, root=tmp_path)
+    prompts = []
+
+    def cancel(title, message, **kwargs):
+        prompts.append(message)
+        return False
+
+    try:
+        _wait_ui(ui, lambda: not tab._scan_busy and len(tab.records) == 3)
+        assert len(tab.tree.get_children()) == 1
+        tab._clear_selection()
+        assert not tab.tree.selection()
+        assert str(tab.clear_all_button.cget("state")) == "normal"
+        monkeypatch.setattr("crX.interface.failure_review.messagebox.askyesno", cancel)
+        tab.clear_all_button.invoke()
+        assert "全部 3 条" in prompts[-1] and "已忽略" in prompts[-1]
+        assert len(scan_failures(tmp_path)[0]) == 3
+        tab.set_running(True)
+        assert str(tab.clear_all_button.cget("state")) == "disabled"
+        tab._delete_selected(clear_all=True)
+        assert len(prompts) == 1
+        tab.set_running(False)
+        monkeypatch.setattr("crX.interface.failure_review.messagebox.askyesno", lambda *args, **kwargs: True)
+        tab.clear_all_button.invoke()
+        assert tab.clearing and str(tab.clear_all_button.cget("state")) == "disabled"
+        _wait_ui(ui, lambda: not tab._busy and not tab._scan_busy and not tab.records)
+        assert scan_failures(tmp_path) == ([], 0)
+        assert not tab.tree.get_children() and tab.selected is None and tab._preview is None
+        assert str(tab.clear_all_button.cget("state")) == "disabled"
+    finally:
+        tab.destroy()
+
+
+@pytest.mark.parametrize("clear_all", [False, True])
+def test_failure_deletion_rechecks_running_state_and_recovers_after_io_error(
+    desktop_ui, tmp_path, monkeypatch, clear_all
+):
     from crX.interface.failure_review import FailureReviewTab
 
     ui, _root = desktop_ui
     record = make_failure(tmp_path)
     busy = []
     tab = FailureReviewTab(ui.notebook, root=tmp_path, clear_busy_callback=busy.append)
+    button = tab.clear_all_button if clear_all else tab.delete_button
 
     def start_during_confirmation(*args, **kwargs):
         tab.set_running(True)
@@ -798,17 +843,17 @@ def test_failure_deletion_rechecks_running_state_and_recovers_after_io_error(des
     try:
         _wait_ui(ui, lambda: not tab._scan_busy and tab.selected is not None)
         monkeypatch.setattr("crX.interface.failure_review.messagebox.askyesno", start_during_confirmation)
-        tab.delete_button.invoke()
+        button.invoke()
         assert not tab._busy and not busy and record["directory"].exists()
         tab.set_running(False)
         monkeypatch.setattr("crX.interface.failure_review.messagebox.askyesno", lambda *args, **kwargs: True)
         monkeypatch.setattr("crX.interface.failure_review.delete_failure_samples", fail_delete)
-        tab.delete_button.invoke()
+        button.invoke()
         _wait_ui(ui, lambda: not tab._busy and not tab._scan_busy)
         assert not tab.clearing and busy == [True, False]
         assert "操作失败" in tab.message_var.get()
         assert record["directory"].exists() and record["key"] in tab.records
-        assert str(tab.delete_button.cget("state")) == "normal"
+        assert str(button.cget("state")) == "normal"
     finally:
         tab.destroy()
 

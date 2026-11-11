@@ -82,6 +82,14 @@ class FailureReviewTab(ttk.Frame):
             state="disabled",
         )
         self.delete_button.pack(side="left")
+        self.clear_all_button = ttk.Button(
+            selection_tools,
+            text="清空全部",
+            command=lambda: self._delete_selected(clear_all=True),
+            bootstyle="danger-outline",
+            state="disabled",
+        )
+        self.clear_all_button.pack(side="left", padx=(8, 0))
         self.review_panes = ttk.Panedwindow(self, orient="vertical")
         self.review_panes.grid(row=2, column=0, rowspan=2, sticky="nsew", pady=(0, 10))
         table = ttk.Frame(self.review_panes)
@@ -309,6 +317,9 @@ class FailureReviewTab(ttk.Frame):
         self.select_all_button.configure(state="normal" if self.tree.get_children() and not self._busy else "disabled")
         self.clear_selection_button.configure(state="normal" if count and not self._busy else "disabled")
         self.delete_button.configure(state="normal" if count and not self._busy and not self._running else "disabled")
+        self.clear_all_button.configure(
+            state="normal" if self.records and not self._busy and not self._running else "disabled"
+        )
 
     def set_running(self, running):
         self._running = running
@@ -329,16 +340,26 @@ class FailureReviewTab(ttk.Frame):
             self.tree.selection_remove(*self.tree.selection())
             self._select()
 
-    def _delete_selected(self):
+    def _delete_selected(self, *, clear_all=False):
         if self._running or self._busy:
             return
-        keys = set(self.tree.selection()).intersection(self.tree.get_children(), self.records)
+        keys = (
+            set(self.records)
+            if clear_all
+            else set(self.tree.selection()).intersection(self.tree.get_children(), self.records)
+        )
         if not keys:
             return
+        prompt = (
+            f"确定清空全部 {len(keys)} 条异常流程？\n"
+            "包括待处理、已处理和已忽略的全部记录及其截图、诊断信息和处理标记。此操作无法撤销。"
+            if clear_all
+            else f"确定删除“{self.filter_var.get()}”列表中选中的 {len(keys)} 条异常流程？\n"
+            "将删除这些记录的截图、诊断信息和处理标记；未选中记录及运行日志保留。此操作无法撤销。"
+        )
         if not messagebox.askyesno(
-            "删除选中异常流程",
-            f"确定删除“{self.filter_var.get()}”列表中选中的 {len(keys)} 条异常流程？\n"
-            "将删除这些记录的截图、诊断信息和处理标记；未选中记录及运行日志保留。此操作无法撤销。",
+            "清空全部异常流程" if clear_all else "删除选中异常流程",
+            prompt,
             parent=self,
             default=messagebox.NO,
         ):
@@ -351,7 +372,7 @@ class FailureReviewTab(ttk.Frame):
         self._set_buttons()
         if self.clear_busy_callback:
             self.clear_busy_callback(True)
-        self.message_var.set(f"正在删除选中的 {len(keys)} 条异常流程……")
+        self.message_var.set(f"正在删除 {len(keys)} 条异常流程……")
         root = self.root
         self._background("delete", lambda: delete_failure_samples(root, keys))
 
