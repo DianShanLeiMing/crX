@@ -151,7 +151,7 @@ class CardReviewTab(ttk.Frame):
         header.grid(row=0, column=0, sticky="ew")
         ttk.Label(header, textvariable=self.summary_var).pack(side="left")
         self.catalog_button = ttk.Button(header, text="样本库", bootstyle="secondary", command=self._toggle_catalog)
-        self.catalog_button.pack(side="right")
+        self.catalog_button.pack(side="right", padx=(0, 6))
         tools = ttk.Frame(self)
         self.review_tools = tools
         tools.grid(row=1, column=0, sticky="ew", pady=4)

@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from tkinter.font import Font
 
 import ttkbootstrap as ttk
+from PIL import Image, ImageDraw, ImageTk
 
 from crX.bot.card_data import CARD_NAMES_ZH
 
@@ -36,14 +37,14 @@ class CardCatalogView(ttk.Frame):
         self._references = {}
         self._sort_count = None
         self._card = None
-        self._checking_cards = False
         self._checked_cards = set()
+        self._check_images = {}
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
         # Keep the viewport steady when drag feedback wraps to a different number of lines.
         self.rowconfigure(2, minsize=Font(root=self, font="TkDefaultFont").metrics("linespace") * 3)
         search = ttk.Frame(self)
-        search.grid(row=0, column=0, sticky="ew", pady=(0, 6))
+        search.grid(row=0, column=0, sticky="ew", pady=(12, 10))
         ttk.Label(search, text="搜索卡名 / 英文 ID").pack(side="left")
         self.query = tk.StringVar()
         ttk.Entry(search, textvariable=self.query, width=24).pack(side="left", padx=6)
@@ -62,17 +63,16 @@ class CardCatalogView(ttk.Frame):
         self.panes.add(left, minsize=180, width=270, stretch="never")
         self.cards = ttk.Treeview(
             left,
-            columns=("checked", "card", "count"),
-            displaycolumns=("card", "count"),
-            show="headings",
+            columns=("card", "count"),
+            show="tree headings",
             selectmode="browse",
-            style="CardSamples.Treeview",
+            style="CatalogCards.CardSamples.Treeview",
         )
-        self.cards.heading("checked", text="☐ 全选", command=self._check_all_cards)
-        check_width = Font(root=self, font="TkDefaultFont").measure("☑ 取消全选") + 20
-        self.cards.column("checked", width=check_width, minwidth=check_width, stretch=False, anchor="center")
+        self.cards.heading("#0", text="全选", command=self._check_all_cards)
+        check_width = Font(root=self, font="TkDefaultFont").measure("全选") + 46
+        self.cards.column("#0", width=check_width, minwidth=check_width, stretch=False, anchor="center")
         self.cards.heading("card", text="卡名", command=self._sort_names)
-        self.cards.column("card", width=150, minwidth=80)
+        self.cards.column("card", width=90, minwidth=80)
         self.cards.heading("count", text="样本数", command=self._sort_counts)
         self.cards.column("count", width=60, minwidth=54, stretch=False)
         self.cards.grid(row=0, column=0, sticky="nsew")
@@ -84,16 +84,13 @@ class CardCatalogView(ttk.Frame):
         self.cards.bind("<Button-1>", self._check_card)
         self.cards.bind("<space>", self._check_card)
         card_tools = ttk.Frame(left)
-        card_tools.grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
-        self.clear_cards_button = ttk.Button(card_tools, text="清空次数", command=self._clear_cards)
-        self.clear_cards_button.pack(side="left")
+        card_tools.grid(row=1, column=0, columnspan=2, sticky="w", pady=(10, 0))
+        self.clear_cards_button = ttk.Button(card_tools, text="清空次数", command=lambda: action("clear_cards"))
+        self.clear_cards_button.grid(row=0, column=0, sticky="w")
         self.reset_cards_button = ttk.Button(
-            card_tools, text="重置为远端", bootstyle="secondary", command=self._reset_cards
+            card_tools, text="重置为远端", bootstyle="secondary", command=lambda: action("reset_cards")
         )
-        self.reset_cards_button.pack(side="left", padx=(4, 0))
-        self.cancel_checks_button = ttk.Button(
-            card_tools, text="退出勾选", bootstyle="secondary", command=self._cancel_checks
-        )
+        self.reset_cards_button.grid(row=0, column=1, sticky="w", padx=(6, 0))
         right = ttk.Frame(self.panes)
         right.columnconfigure(0, weight=1)
         right.rowconfigure(2, weight=1)
@@ -154,7 +151,49 @@ class CardCatalogView(ttk.Frame):
         self.refresh_label = ttk.Label(self.refresh_feedback, textvariable=self.refresh_message, wraplength=660)
         self.refresh_label.pack(side="left")
         self._refreshing = False
-        self.set_disabled(False)
+        self.bind("<<ThemeChanged>>", self._update_check_style, add="+")
+        self._update_check_style()
+
+    def _update_check_style(self, _event=None):
+        style = ttk.Style()
+        size = max(16, Font(root=self, font="TkDefaultFont").metrics("linespace"))
+        style.configure("CatalogCards.CardSamples.Treeview", rowheight=max(34, size + 14))
+        self.cards.configure(style="CatalogCards.CardSamples.Treeview")
+        style.layout(
+            "CatalogCards.CardSamples.Treeview.Item",
+            [
+                (
+                    "Treeitem.padding",
+                    {"sticky": "nsew", "children": [("Treeitem.image", {"sticky": ""})]},
+                )
+            ],
+        )
+        for checked in (False, True, None):
+            for disabled in (False, True):
+                color = style.colors.secondary if disabled else style.colors.primary
+                border = style.colors.border if disabled else style.colors.fg
+                picture = Image.new("RGBA", (size * 3, size * 3))
+                draw = ImageDraw.Draw(picture)
+                draw.rounded_rectangle(
+                    (3, 3, size * 3 - 4, size * 3 - 4),
+                    radius=9,
+                    fill=color if checked is not False else style.colors.inputbg,
+                    outline=color if checked is not False else border,
+                    width=3,
+                )
+                if checked is True:
+                    draw.line(
+                        [(size * 0.7, size * 1.5), (size * 1.3, size * 2.1), (size * 2.3, size * 0.9)],
+                        fill=style.colors.selectfg,
+                        width=5,
+                        joint="curve",
+                    )
+                elif checked is None:
+                    draw.line((size * 0.8, size * 1.5, size * 2.2, size * 1.5), fill=style.colors.selectfg, width=5)
+                self._check_images[checked, disabled] = ImageTk.PhotoImage(
+                    picture.resize((size, size), Image.Resampling.LANCZOS), master=self
+                )
+        self._refresh_checks()
 
     def set_data(self, data):
         if self._drag is not None or self._pending_order is not None:
@@ -336,48 +375,18 @@ class CardCatalogView(ttk.Frame):
     def _update_message(self):
         self.message.set(
             "按住排序列的 ≡ 上下拖动，第一行是首选。↕ 顺序变化，● 命中变化。"
-            "勾选卡牌可批量清空本机显示的次数。保留勾选并上传顺序与次数可清空线上对应次数。"
-            if self._checking_cards
-            else "按住排序列的 ≡ 上下拖动，第一行是首选。↕ 顺序变化，● 命中变化。清空只影响本机贡献，线上数据保留。"
+            "勾选卡牌后可清空次数或重置为远端。清空后线上数据保留，上传所选清空记录后同步线上。"
         )
 
     def _card_values(self, card):
-        checked = "☑" if card in self._checked_cards else "☐"
-        return checked, self._card_name(card), len(self.data[card])
-
-    def _clear_cards(self):
-        if self._checking_cards:
-            self._action("clear_cards")
-        else:
-            self._begin_checks()
-
-    def _reset_cards(self):
-        if self._checking_cards:
-            self._action("reset_cards")
-        else:
-            self._begin_checks()
-
-    def _begin_checks(self):
-        self._checking_cards = True
-        self.cards.configure(displaycolumns=("checked", "card", "count"))
-        self.cancel_checks_button.pack(side="left")
-        self._update_message()
-        self.set_disabled(self._disabled)
-
-    def _cancel_checks(self):
-        self._checking_cards = False
-        self._checked_cards.clear()
-        self.cards.configure(displaycolumns=("card", "count"))
-        self.cancel_checks_button.pack_forget()
-        self._refresh_checks()
-        self._update_message()
+        return self._card_name(card), len(self.data[card])
 
     def _check_card(self, event):
-        if not self._checking_cards or self._disabled:
+        if self._disabled:
             return
         if event.keysym == "space":
             card = self.cards.focus()
-        elif self.cards.identify_region(event.x, event.y) == "cell" and self.cards.identify_column(event.x) == "#1":
+        elif self.cards.identify_region(event.x, event.y) == "tree":
             card = self.cards.identify_row(event.y)
         else:
             return
@@ -408,19 +417,19 @@ class CardCatalogView(ttk.Frame):
         self._disabled = disabled
         visible = {card for card in self.cards.get_children() if self.data[card]}
         all_checked = bool(visible) and visible.issubset(self._checked_cards)
-        self.cards.heading("checked", text="☑ 取消全选" if all_checked else "☐ 全选")
+        header_state = True if all_checked else None if visible & self._checked_cards else False
+        self.cards.heading("#0", text="全选", image=self._check_images[header_state, disabled])
+        for card in self.cards.get_children():
+            self.cards.item(
+                card, image=self._check_images[card in self._checked_cards, disabled or not self.data[card]]
+            )
         if disabled:
             self._cancel_drag()
         checked = self.selected_card_references()
-        self.upload_button.configure(state="disabled" if disabled or self._checking_cards and not checked else "normal")
+        self.upload_button.configure(state="disabled" if disabled else "normal")
         self.clear_button.configure(state="disabled" if disabled or not self.references.selection() else "normal")
-        self.clear_cards_button.configure(
-            state="disabled" if disabled or self._checking_cards and not checked else "normal"
-        )
-        self.reset_cards_button.configure(
-            state="disabled" if disabled or self._refreshing or self._checking_cards and not checked else "normal"
-        )
-        self.cancel_checks_button.configure(state="disabled" if disabled else "normal")
+        self.clear_cards_button.configure(state="disabled" if disabled or not checked else "normal")
+        self.reset_cards_button.configure(state="disabled" if disabled or self._refreshing or not checked else "normal")
 
     def _refresh_reference_rows(self, start=0, stop=None):
         for index, key in enumerate(self.references.get_children()[start:stop], start + 1):
