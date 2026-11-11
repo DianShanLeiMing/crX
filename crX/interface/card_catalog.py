@@ -68,8 +68,9 @@ class CardCatalogView(ttk.Frame):
             selectmode="browse",
             style="CardSamples.Treeview",
         )
-        self.cards.heading("checked", text="全选", command=self._check_all_cards)
-        self.cards.column("checked", width=42, minwidth=42, stretch=False, anchor="center")
+        self.cards.heading("checked", text="☐ 全选", command=self._check_all_cards)
+        check_width = Font(root=self, font="TkDefaultFont").measure("☑ 取消全选") + 20
+        self.cards.column("checked", width=check_width, minwidth=check_width, stretch=False, anchor="center")
         self.cards.heading("card", text="卡名", command=self._sort_names)
         self.cards.column("card", width=150, minwidth=80)
         self.cards.heading("count", text="样本数", command=self._sort_counts)
@@ -403,6 +404,9 @@ class CardCatalogView(ttk.Frame):
 
     def set_disabled(self, disabled):
         self._disabled = disabled
+        visible = {card for card in self.cards.get_children() if self.data[card]}
+        all_checked = bool(visible) and visible.issubset(self._checked_cards)
+        self.cards.heading("checked", text="☑ 取消全选" if all_checked else "☐ 全选")
         if disabled:
             self._cancel_drag()
         checked = self.selected_card_references()
