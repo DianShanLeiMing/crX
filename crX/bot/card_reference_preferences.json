@@ -57,18 +57,18 @@
       ]
     },
     "bandit": {
-      "preferred": "a13a956b60a66864",
+      "preferred": "9c5e1cd9e363ae4b",
       "numbers": {
-        "a13a956b60a66864": 0,
-        "9c5e1cd9e363ae4b": 1,
+        "a13a956b60a66864": 1,
+        "9c5e1cd9e363ae4b": 0,
         "1f8940c382f2332b": 2,
         "576cbf087ee504f6": 3,
         "d3839b6f04e06d4c": 4,
         "b215ae25000fbed6": 5
       },
       "order": [
-        "a13a956b60a66864",
         "9c5e1cd9e363ae4b",
+        "a13a956b60a66864",
         "1f8940c382f2332b",
         "576cbf087ee504f6",
         "d3839b6f04e06d4c",
