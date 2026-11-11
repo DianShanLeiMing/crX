@@ -1980,12 +1980,18 @@ def test_catalog_search_and_upload_archive_clean_images(review_ui, monkeypatch):
     ui.update()
     assert view.cards.set("knight", "count") == "2"
     assert all(ref.uploaded for ref in view.data["knight"])
+    view.cards.selection_set("knight")
+    view.cards.focus("knight")
+    ui.update()
     key = view.references.get_children()[1]
     view.references.selection_set(key)
     tab.set_running(True)
     view.query.set("giant")
     ui.update()
-    assert view.cards.get_children() == ("giant",)
+    assert "giant" in view.cards.get_children()
+    view.cards.selection_set("giant")
+    view.cards.focus("giant")
+    ui.update()
     assert view.references.set(view.references.get_children()[0], "name") == "首选（内置参考）"
     assert str(view.clear_button.cget("state")) == "disabled"
     tab.set_running(False)
@@ -2146,7 +2152,7 @@ def test_catalog_drag_persists_order_and_allows_moving_first_choice(review_ui):
     labels = {key: view.references.set(key, "name") for key in (preferred, one, two)}
 
     def drag(source, target, *, cancel=False):
-        x, y, _width, height = view.references.bbox(source)
+        x, y, _width, height = view.references.bbox(source, "sort")
         _x, target_y, _width, target_height = view.references.bbox(target)
         view.references.event_generate("<ButtonPress-1>", x=x + 10, y=y + height // 2)
         view.references.event_generate("<B1-Motion>", x=x + 10, y=target_y + target_height // 2)

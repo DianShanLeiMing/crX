@@ -439,7 +439,7 @@ def test_catalog_metadata_upload_marks_changes_and_keeps_new_samples_local(uploa
     changed = build_catalog(workflow.scan_review(root)[0], root=root)["knight"]
     assert sum(ref.order_changed for ref in changed) == 2
     assert sum(ref.hits_changed for ref in changed) == 1
-    assert changed[0].preferred and "↕" in changed[0].markers
+    assert changed[0].preferred and changed[0].markers == " new"
     new = add("not-published", 8)
     library = git(remote, "show", f"main:{upload.LIBRARY_FILE}")
     upload.upload_references(root, [], metadata_only=True, update_hits=True)

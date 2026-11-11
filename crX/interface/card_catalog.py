@@ -7,7 +7,7 @@ from dataclasses import dataclass, replace
 from tkinter.font import Font
 
 import ttkbootstrap as ttk
-from PIL import Image, ImageDraw, ImageTk
+from PIL import Image, ImageDraw, ImageFont, ImageTk
 
 from crX.bot.card_data import CARD_NAMES_ZH
 
@@ -39,6 +39,8 @@ class CardCatalogView(ttk.Frame):
         self._card = None
         self._checked_cards = set()
         self._check_images = {}
+        self._card_images = {}
+        self._new_image = ""
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
         # Keep the viewport steady when drag feedback wraps to a different number of lines.
@@ -105,12 +107,13 @@ class CardCatalogView(ttk.Frame):
         self.references = ttk.Treeview(
             gallery,
             columns=("sort", "name", "identifier", "hits"),
-            show="headings",
+            show="tree headings",
             height=4,
             selectmode="extended",
             style="CardReferences.Treeview",
         )
         self.references.heading("sort", text="排序")
+        self.references.column("#0", width=38, minwidth=38, stretch=False, anchor="center")
         self.references.column("sort", width=58, minwidth=58, stretch=False, anchor="center")
         self.references.heading("name", text="参考")
         self.references.column("name", width=120, minwidth=60)
@@ -164,6 +167,21 @@ class CardCatalogView(ttk.Frame):
                 )
             ],
         )
+        style.configure("CatalogReferences.CardReferences.Treeview", rowheight=max(34, size + 14))
+        self.references.configure(style="CatalogReferences.CardReferences.Treeview")
+        style.layout(
+            "CatalogReferences.CardReferences.Treeview.Item",
+            style.layout("CatalogCards.CardSamples.Treeview.Item"),
+        )
+        font = ImageFont.load_default(size=size * 2)
+        badge_width = int(font.getlength("new")) + 24
+        badge = Image.new("RGBA", (badge_width, size * 3))
+        draw_badge = ImageDraw.Draw(badge)
+        draw_badge.rounded_rectangle((0, 3, badge_width - 1, size * 3 - 4), radius=9, fill="#fbbf24")
+        draw_badge.text((12, size * 1.5), "new", font=font, fill="#1f2937", anchor="lm")
+        self._new_image = ImageTk.PhotoImage(
+            badge.resize((badge_width // 3, size), Image.Resampling.LANCZOS), master=self
+        )
         for checked in (False, True, None):
             for disabled in (False, True):
                 color = style.colors.secondary if disabled else style.colors.primary
@@ -189,7 +207,16 @@ class CardCatalogView(ttk.Frame):
                 self._check_images[checked, disabled] = ImageTk.PhotoImage(
                     picture.resize((size, size), Image.Resampling.LANCZOS), master=self
                 )
+                for changed in (False, True):
+                    combined = Image.new("RGBA", (size * 3 + 12 + badge_width, size * 3))
+                    combined.alpha_composite(picture)
+                    if changed:
+                        combined.alpha_composite(badge, (size * 3 + 12, 0))
+                    self._card_images[checked, disabled, changed] = ImageTk.PhotoImage(
+                        combined.resize((combined.width // 3, size), Image.Resampling.LANCZOS), master=self
+                    )
         self._refresh_checks()
+        self._refresh_reference_rows()
 
     def set_data(self, data):
         if self._drag is not None or self._pending_order is not None:
@@ -290,12 +317,7 @@ class CardCatalogView(ttk.Frame):
         self.render_cards()
 
     def _card_name(self, card):
-        refs = self.data[card]
-        return (
-            CARD_NAMES_ZH.get(card, card)
-            + (" ↕" if any(ref.order_changed for ref in refs) else "")
-            + (" ●" if any(ref.hits_changed for ref in refs) else "")
-        )
+        return CARD_NAMES_ZH.get(card, card)
 
     def render_cards(self):
         self._cancel_drag()
@@ -360,7 +382,11 @@ class CardCatalogView(ttk.Frame):
         for index, ref in enumerate(refs, 1):
             self._references[ref.identifier] = ref
             self.references.insert(
-                "", "end", iid=ref.identifier, values=(f"≡ {index}", ref.display_name, ref.identifier, ref.hits)
+                "",
+                "end",
+                iid=ref.identifier,
+                values=(f"≡ {index}", ref.name, ref.identifier, ref.hits),
+                image=self._new_image if ref.order_changed or ref.hits_changed else "",
             )
         if refs:
             selected = tuple(key for key in previous if key in self._references) or (refs[0].identifier,)
@@ -374,7 +400,7 @@ class CardCatalogView(ttk.Frame):
 
     def _update_message(self):
         self.message.set(
-            "按住排序列的 ≡ 上下拖动，第一行是首选。↕ 顺序变化，● 命中变化。"
+            "按住排序列的 ≡ 上下拖动，第一行是首选。琥珀色 new 标签表示顺序或命中次数有变化。"
             "勾选卡牌后可清空次数或重置为远端。清空后线上数据保留，上传所选清空记录后同步线上。"
         )
 
@@ -420,8 +446,9 @@ class CardCatalogView(ttk.Frame):
         header_state = True if all_checked else None if visible & self._checked_cards else False
         self.cards.heading("#0", text="全选", image=self._check_images[header_state, disabled])
         for card in self.cards.get_children():
+            changed = any(ref.order_changed or ref.hits_changed for ref in self.data[card])
             self.cards.item(
-                card, image=self._check_images[card in self._checked_cards, disabled or not self.data[card]]
+                card, image=self._card_images[card in self._checked_cards, disabled or not self.data[card], changed]
             )
         if disabled:
             self._cancel_drag()
@@ -434,7 +461,11 @@ class CardCatalogView(ttk.Frame):
     def _refresh_reference_rows(self, start=0, stop=None):
         for index, key in enumerate(self.references.get_children()[start:stop], start + 1):
             ref = self._references[key]
-            self.references.item(key, values=(f"≡ {index}", ref.display_name, key, ref.hits))
+            self.references.item(
+                key,
+                values=(f"≡ {index}", ref.name, key, ref.hits),
+                image=self._new_image if ref.order_changed or ref.hits_changed else "",
+            )
 
     def _is_handle(self, event):
         return (

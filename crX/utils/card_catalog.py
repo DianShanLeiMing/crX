@@ -30,7 +30,7 @@ class CatalogReference:
 
     @property
     def markers(self):
-        return (" ↕" if self.order_changed else "") + (" ●" if self.hits_changed else "")
+        return " new" if self.order_changed or self.hits_changed else ""
 
     @property
     def display_name(self):
