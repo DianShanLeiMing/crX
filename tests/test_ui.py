@@ -2052,6 +2052,40 @@ def test_catalog_reset_requires_confirmation_and_uses_checked_cards(review_ui, m
     assert view.refresh_message.get().startswith("已重置")
 
 
+def test_catalog_recent_sort_waits_for_battle_end_and_preserves_selection(desktop_ui):
+    from dataclasses import replace
+
+    from crX.interface.card_catalog import CardCatalogView
+    from crX.utils.card_catalog import CatalogReference
+
+    ui, _root = desktop_ui
+    view = CardCatalogView(ui, refresh=lambda: None)
+    try:
+        data = {
+            "knight": [CatalogReference("1" * 16, "knight", last_used=100)],
+            "arrows": [CatalogReference("2" * 16, "arrows", last_used=200)],
+            "xbow": [CatalogReference("3" * 16, "xbow")],
+        }
+        view.set_data(data)
+        assert view.cards.get_children() == ("arrows", "knight", "xbow")
+        view._checked_cards.add("arrows")
+        view.set_running(True)
+        changed = {**data, "knight": [replace(data["knight"][0], hits_changed=True)]}
+        view.set_data(changed)
+        assert view.cards.get_children()[0] == "arrows"
+        completed = {**changed, "knight": [replace(changed["knight"][0], last_used=300)]}
+        view.set_data(completed)
+        assert view.cards.get_children()[0] == "knight"
+        assert view.selected_cards() == ("arrows",)
+        view.set_running(False)
+        view.set_data({**data, "knight": [replace(data["knight"][0], last_used=300)]})
+        assert view.cards.get_children()[0] == "knight"
+        view._sort_names()
+        assert view.cards.get_children()[0] == "xbow"
+    finally:
+        view.destroy()
+
+
 def test_catalog_clear_and_global_metadata_upload(review_ui, monkeypatch):
     from crX.utils import reference_hits as hits
 

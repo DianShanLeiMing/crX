@@ -49,6 +49,18 @@ def test_missing_images_keep_references_and_never_invent_a_thumbnail(tmp_path, r
     assert destination.read_bytes() == before
 
 
+def test_interrupted_battle_usage_is_available_after_catalog_reopen(tmp_path, review_store):
+    add, _destination = review_store
+    sample = add("recent")
+    workflow.confirm_samples(tmp_path, [sample], "knight")
+    identifier = records(tmp_path)[sample.key].review["formal_id"]
+    hits.record_usage(tmp_path, {identifier: 123456}, finished=False)
+    running = catalog.build_catalog([], root=tmp_path, completed_usage_only=True)
+    reopened = catalog.build_catalog([], root=tmp_path)
+    assert next(ref for ref in running["knight"] if ref.identifier == identifier).last_used == 0
+    assert next(ref for ref in reopened["knight"] if ref.identifier == identifier).last_used == 123456
+
+
 def test_first_choice_swap_preserves_source_and_counts(tmp_path, review_store, monkeypatch):
     add, _destination = review_store
     first, second = add("first"), add("second", channel=4)

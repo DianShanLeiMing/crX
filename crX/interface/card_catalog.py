@@ -36,6 +36,8 @@ class CardCatalogView(ttk.Frame):
         self._signature = None
         self._references = {}
         self._sort_count = None
+        self._sort_by_recent = True
+        self._running = False
         self._card = None
         self._checked_cards = set()
         self._check_images = {}
@@ -224,6 +226,9 @@ class CardCatalogView(ttk.Frame):
         same_order = tuple((card, tuple(ref.identifier for ref in refs)) for card, refs in data.items()) == tuple(
             (card, tuple(ref.identifier for ref in refs)) for card, refs in self.data.items()
         )
+        usage_changed = {ref.identifier: ref.last_used for refs in data.values() for ref in refs} != {
+            ref.identifier: ref.last_used for refs in self.data.values() for ref in refs
+        }
         signature = tuple(
             (
                 card,
@@ -235,6 +240,7 @@ class CardCatalogView(ttk.Frame):
                         ref.hits,
                         ref.order_changed,
                         ref.hits_changed,
+                        ref.last_used,
                         tuple(sample.key for sample in ref.sources),
                     )
                     for ref in refs
@@ -250,7 +256,8 @@ class CardCatalogView(ttk.Frame):
         if same_order:
             for card in self.cards.get_children():
                 self.cards.item(card, values=self._card_values(card))
-            self._prioritize_changed_cards()
+            if not self._running or usage_changed:
+                self._prioritize_changed_cards()
             self._references = {ref.identifier: ref for ref in self.data.get(self._card, [])}
             self._refresh_reference_rows()
             self.set_disabled(self._disabled)
@@ -314,7 +321,13 @@ class CardCatalogView(ttk.Frame):
 
     def _sort_names(self):
         self._sort_count = None
+        self._sort_by_recent = False
         self.render_cards()
+
+    def set_running(self, running):
+        self._running = running
+        if not running:
+            self._prioritize_changed_cards()
 
     def _card_name(self, card):
         return CARD_NAMES_ZH.get(card, card)
@@ -352,7 +365,10 @@ class CardCatalogView(ttk.Frame):
                 CARD_NAMES_ZH.get(card, card),
             )
             if self._sort_count is not None
-            else CARD_NAMES_ZH.get(card, card),
+            else (
+                -max((ref.last_used for ref in self.data[card]), default=0) if self._sort_by_recent else 0,
+                CARD_NAMES_ZH.get(card, card),
+            ),
         )
         cards.sort(key=lambda card: not any(ref.order_changed or ref.hits_changed for ref in self.data[card]))
         for index, card in enumerate(cards):

@@ -758,14 +758,15 @@ class CardReviewTab(ttk.Frame):
                 if self.clear_busy_callback:
                     self.clear_busy_callback(True)
             root = self.root
-            self._background("scan", lambda: self._scan_contents(root, history, maintenance), self._revision)
+            running = self._running
+            self._background("scan", lambda: self._scan_contents(root, history, maintenance, running), self._revision)
 
     @staticmethod
-    def _scan_contents(root, history, cleanup=False):
+    def _scan_contents(root, history, cleanup=False, running=False):
         samples, errors, groups = scan_review(
             root, refresh_library=True, reassess_history=history, cleanup_uploaded=cleanup
         )
-        return samples, errors, groups, build_catalog(samples, root=root)
+        return samples, errors, groups, build_catalog(samples, root=root, completed_usage_only=running)
 
     def _open_folder(self):
         root = str(self.root)
@@ -787,6 +788,7 @@ class CardReviewTab(ttk.Frame):
 
     def set_running(self, running):
         self._running = running
+        self.library_view.set_running(running)
         self._set_action_state()
 
     def _selected_clear_keys(self):

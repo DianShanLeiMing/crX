@@ -68,6 +68,7 @@ class CardSampleCollector:
         self._match_lock = threading.Lock()
         self._match_pending: dict[str, dict[str, int]] = {}
         self._hit_pending: dict[str, int] = {}
+        self._usage_pending: dict[str, int] = {}
         self._hit_episodes: dict[int, str] = {}
         self._hand_episodes: dict[int, tuple[str, bool]] = {}
         self._assisted_in_fight: set[str] = set()
@@ -109,6 +110,7 @@ class CardSampleCollector:
             with self._match_lock:
                 if identifier in self._hit_pending or len(self._hit_pending) < 256:
                     self._hit_pending[identifier] = self._hit_pending.get(identifier, 0) + 1
+                    self._usage_pending[identifier] = time.time_ns() // 1_000_000
                     self._hit_episodes[slot] = card
         elif card != "UNKNOWN" and self._hit_episodes.get(slot) != card:
             # A different accepted card ends the preceding appearance even if it
@@ -149,9 +151,9 @@ class CardSampleCollector:
                 self._assisted_in_fight.add(identifier)
                 self._hand_episodes[slot] = (card, True)
 
-    def _flush_match_stats(self):
+    def _flush_match_stats(self, *, finished=False):
         from crX.utils.card_library import merge_match_stats
-        from crX.utils.reference_hits import record_hits, totals
+        from crX.utils.reference_hits import record_hits, record_usage, totals
 
         with self._match_lock:
             pending, self._match_pending = self._match_pending, {}
@@ -164,6 +166,10 @@ class CardSampleCollector:
                     for key, value in hits.items():
                         self._hit_pending[key] = self._hit_pending.get(key, 0) + value
                 raise
+        with self._match_lock:
+            usage = dict(self._usage_pending)
+        if usage:
+            record_usage(self.root, usage, finished=finished)
         if pending:
             merge_match_stats(self.root, pending)
         totals(self.root)
@@ -245,7 +251,7 @@ class CardSampleCollector:
             finally:
                 self._queue.task_done()
         try:
-            self._flush_match_stats()
+            self._flush_match_stats(finished=True)
         except (OSError, ValueError, TypeError):
             LOG.warning("运行匹配统计未能保存，继续对战", exc_info=True)
         if self._records:

@@ -27,6 +27,7 @@ class CatalogReference:
     cleared: bool = False
     order_changed: bool = False
     hits_changed: bool = False
+    last_used: int = 0
 
     @property
     def markers(self):
@@ -60,7 +61,7 @@ def _catalog_references():
     return {card: list(refs.values()) for card, refs in cards.items()}
 
 
-def build_catalog(samples, *, root=None):
+def build_catalog(samples, *, root=None, completed_usage_only=False):
     cards = {card: {ref.identifier: ref for ref in refs} for card, refs in _catalog_references().items()}
     for sample in samples:
         reference = cards.get(sample.card_id, {}).get(sample.review.get("formal_id"))
@@ -76,9 +77,11 @@ def build_catalog(samples, *, root=None):
             reference.uploaded |= reference.identifier in published or not formal.source_checkout()
     cards = {card: list(references.values()) for card, references in cards.items()}
     hits, changed_hits = reference_hits.snapshot(root) if root is not None else ({}, set())
+    usage = reference_hits.recent_usage(root, completed_only=completed_usage_only) if root is not None else {}
     for references in cards.values():
         for reference in references:
             reference.hits = hits.get(reference.identifier, 0)
+            reference.last_used = usage.get(reference.identifier, 0)
     preferences = reference_preferences.register_references(cards)["cards"]
     from crX.utils.card_upload import published_preferences
 

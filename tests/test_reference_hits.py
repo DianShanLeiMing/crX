@@ -164,6 +164,32 @@ def test_invalid_counts_are_rejected(tmp_path, shared, value):
         hits.totals(tmp_path)
 
 
+def test_recent_usage_is_published_at_battle_end_and_stays_local(tmp_path, shared, monkeypatch):
+    now = [1000]
+    monkeypatch.setattr("crX.bot.card_samples.time.time_ns", lambda: now[0] * 1_000_000)
+    collector = CardSampleCollector("1v1", tmp_path)
+    try:
+        collector.observe_library_match(
+            {"card_id": "knight", "reference_id": FIRST, "candidates": [{"distance": 20}]}, 0
+        )
+        now[0] = 2000
+        collector.observe_library_match(
+            {"card_id": "giant", "reference_id": SECOND, "candidates": [{"distance": 20}]}, 0
+        )
+        collector._flush_match_stats()
+        assert hits.recent_usage(tmp_path) == {FIRST: 1000, SECOND: 2000}
+        assert hits.recent_usage(tmp_path, completed_only=True) == {}
+    finally:
+        assert collector.close()
+    assert hits.recent_usage(tmp_path) == {FIRST: 1000, SECOND: 2000}
+    assert hits.recent_usage(tmp_path, completed_only=True) == {FIRST: 1000, SECOND: 2000}
+    hits.record_usage(tmp_path, {FIRST: 500})
+    assert hits.recent_usage(tmp_path)[FIRST] == 1000
+    assert set(publish(tmp_path)) == {"version", "epoch", "nodes"}
+    hits.clear_local(tmp_path, [FIRST], allow_upload=True)
+    assert hits.recent_usage(tmp_path) == {FIRST: 1000, SECOND: 2000}
+
+
 def test_legacy_local_reset_cannot_reset_online_statistics(tmp_path, shared):
     hits.record_hits(tmp_path, {FIRST: 4})
     publish(tmp_path)

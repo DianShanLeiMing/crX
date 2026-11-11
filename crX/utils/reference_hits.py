@@ -126,6 +126,8 @@ def _local(path, shared):
     ):
         raise ValueError("本地命中统计格式无效")
     _counts(local.get("counts"))
+    _counts(local.setdefault("last_used", {}))
+    _counts(local.setdefault("completed_last_used", dict(local["last_used"])))
     # Migrate the former whole-library reset into local-only display offsets.
     if local["epoch"] != shared["epoch"]:
         pending = local["counts"] if local["cleared"] else {}
@@ -197,6 +199,29 @@ def _displayed(merged, hidden):
 def totals(root):
     counts, _changed = snapshot(root)
     return counts, False
+
+
+def recent_usage(root, *, completed_only=False):
+    with _locked(root) as path:
+        local = _read(path, {})
+        usage = local.get("last_used", {})
+        if completed_only:
+            usage = local.get("completed_last_used", usage)
+        return dict(_counts(usage))
+
+
+def record_usage(root, timestamps, *, finished=True):
+    """Persist usage during battle and publish completed usage for stable UI sorting."""
+    _counts(timestamps)
+    with _locked(root) as path:
+        local = _local(path, read_shared())
+        for key, timestamp in timestamps.items():
+            local["last_used"][key] = max(local["last_used"].get(key, 0), timestamp)
+            if finished:
+                local["completed_last_used"][key] = max(local["completed_last_used"].get(key, 0), timestamp)
+        _counts(local["last_used"])
+        _counts(local["completed_last_used"])
+        atomic_json(path, local)
 
 
 def record_hits(root, pending):
