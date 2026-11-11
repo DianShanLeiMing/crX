@@ -54,8 +54,18 @@ class FailureReviewTab(ttk.Frame):
         self.bind("<Destroy>", self._destroyed, add="+")
         self.columnconfigure(0, weight=1)
         self.rowconfigure(2, weight=1)
+        summary = ttk.Frame(self)
+        summary.grid(row=0, column=0, sticky="w")
         self.summary_var = tk.StringVar(value="正在读取异常流程……")
-        ttk.Label(self, textvariable=self.summary_var).grid(row=0, column=0, sticky="w")
+        ttk.Label(summary, textvariable=self.summary_var).pack(side="left")
+        self.clear_all_button = ttk.Button(
+            summary,
+            text="清空记录",
+            command=lambda: self._delete_selected(clear_all=True),
+            bootstyle="danger-outline",
+            state="disabled",
+        )
+        self.clear_all_button.pack(side="left", padx=(12, 0))
         toolbar = ttk.Frame(self)
         toolbar.grid(row=1, column=0, sticky="ew", pady=8)
         filters = ttk.Frame(toolbar)
@@ -82,14 +92,6 @@ class FailureReviewTab(ttk.Frame):
             state="disabled",
         )
         self.delete_button.pack(side="left")
-        self.clear_all_button = ttk.Button(
-            selection_tools,
-            text="清空全部",
-            command=lambda: self._delete_selected(clear_all=True),
-            bootstyle="danger-outline",
-            state="disabled",
-        )
-        self.clear_all_button.pack(side="left", padx=(8, 0))
         self.review_panes = ttk.Panedwindow(self, orient="vertical")
         self.review_panes.grid(row=2, column=0, rowspan=2, sticky="nsew", pady=(0, 10))
         table = ttk.Frame(self.review_panes)
@@ -351,14 +353,14 @@ class FailureReviewTab(ttk.Frame):
         if not keys:
             return
         prompt = (
-            f"确定清空全部 {len(keys)} 条异常流程？\n"
+            f"确定清空全部 {len(keys)} 条异常流程历史记录？\n"
             "包括待处理、已处理和已忽略的全部记录及其截图、诊断信息和处理标记。此操作无法撤销。"
             if clear_all
             else f"确定删除“{self.filter_var.get()}”列表中选中的 {len(keys)} 条异常流程？\n"
             "将删除这些记录的截图、诊断信息和处理标记；未选中记录及运行日志保留。此操作无法撤销。"
         )
         if not messagebox.askyesno(
-            "清空全部异常流程" if clear_all else "删除选中异常流程",
+            "清空记录" if clear_all else "删除选中异常流程",
             prompt,
             parent=self,
             default=messagebox.NO,
