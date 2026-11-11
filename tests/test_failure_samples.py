@@ -38,6 +38,9 @@ def test_login_screen_requires_both_provider_buttons(login_frame, missing_region
 def test_login_screen_stops_worker_and_preserves_exact_frame(tmp_path, monkeypatch, login_frame, stage):
     logger = Logger()
     events = []
+    elapsed = [0.0]
+    monkeypatch.setattr(nav.time, "monotonic", lambda: elapsed[0])
+    monkeypatch.setattr(nav.time, "sleep", lambda seconds: elapsed.__setitem__(0, elapsed[0] + seconds))
 
     class Device:
         def __init__(self, logger, **kwargs):
@@ -69,7 +72,7 @@ def test_login_screen_stops_worker_and_preserves_exact_frame(tmp_path, monkeypat
     process.shutdown_event = Signal()
     if stage == "start":
         assert process._setup_emulator({"emulator": EmulatorType.ADB}, logger) is None
-        assert events == ["restart", "capture"]
+        assert events == ["restart"] + ["capture"] * 240
     else:
         state_tree = worker.state_tree
 
@@ -78,9 +81,10 @@ def test_login_screen_stops_worker_and_preserves_exact_frame(tmp_path, monkeypat
 
         monkeypatch.setattr(worker, "state_tree", fail_first_step)
         assert not process._run_bot_loop(Device(logger), {}, logger)
-        assert events == ["capture", "wait", "restart", "capture"]
+        assert events == ["capture", "wait", "restart"] + ["capture"] * 240
         assert logger.stats["restarts_after_failure"] == 1
 
+    assert elapsed[0] == 120
     records, errors = failures.scan_failures(tmp_path)
     assert errors == 0
     assert len(records) == (1 if stage == "start" else 2)

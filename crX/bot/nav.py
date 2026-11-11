@@ -179,16 +179,23 @@ def wait_for_clash_main_menu(emulator, logger: Logger, deadspace_click=True, tim
     image = None
     loading = False
     startup_loading = False
+    login_required = False
     wait_watch = {}
     while time.monotonic() < deadline:
         image = emulator.screenshot()
         if is_clash_main_menu_image(image):
             return True
-        if is_game_login_screen(image):
-            reason = "检测到皇室战争登录页，请在设备中手动登录后重新开始任务"
-            remember_failure_frame(logger, image, reason=reason, stage="login_required")
-            raise GameLoginRequiredError(reason)
+        login_required = is_game_login_screen(image)
         elapsed = int(time.monotonic() - started)
+        if login_required:
+            if elapsed - last_progress >= 10:
+                logger.change_status(
+                    f"正在等待游戏登录，请在设备中手动登录，完成后自动继续（已等待 {elapsed}/{wait_timeout:g} 秒）"
+                )
+                last_progress = elapsed
+            wait_watch.pop("stage", None)
+            time.sleep(0.5)
+            continue
         startup_loading = is_startup_loading_screen(image)
         loading = not startup_loading and is_clash_main_loading_image(image)
         if elapsed - last_progress >= 10:
@@ -224,6 +231,10 @@ def wait_for_clash_main_menu(emulator, logger: Logger, deadspace_click=True, tim
             continue
         _report_navigation_wait(logger, image, "startup_unknown", wait_watch)
         time.sleep(1)
+    if login_required:
+        reason = "等待游戏登录超时，请在设备中手动登录后重新开始任务"
+        remember_failure_frame(logger, image, reason=reason, stage="login_required", timeout_s=wait_timeout)
+        raise GameLoginRequiredError(reason)
     if startup_loading:
         reason, stage = "游戏启动加载超时", "startup_loading"
     elif loading:

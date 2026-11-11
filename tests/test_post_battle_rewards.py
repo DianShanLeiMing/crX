@@ -1246,6 +1246,35 @@ def test_startup_loading_requires_logo_and_progress_bar(missing):
     assert not is_startup_loading_screen(frame)
 
 
+@pytest.mark.parametrize("entry", ["start", "restart"])
+def test_login_finishing_during_startup_continues_to_claim_and_main(clock, entry):
+    screen = RewardSequence(
+        clock,
+        [
+            (image("failure-login-native-20261109.png"), 12),
+            (image("item-distribution-coins-720-native.png"), None),
+            (image("failure-main-recovered.png"), None),
+        ],
+    )
+    logger = Logger()
+    reports = []
+    logger.navigation_stall_handler = lambda *args, **kwargs: reports.append(kwargs)
+
+    class Device:
+        def restart(self):
+            return nav.wait_for_clash_main_menu(screen, logger, timeout=30)
+
+    if entry == "start":
+        assert Device().restart()
+    else:
+        assert states.state_tree(Device(), logger, "restart", {}, states.RuntimeContext()) == "shop_daily"
+    assert 12 <= clock[0] < 30
+    assert screen.clicks == [(1, 360, 1164)]
+    assert logger.failure_frame is None
+    assert not logger.errored
+    assert not reports
+
+
 def test_early_wait_reporting_failure_does_not_interrupt_navigation(clock):
     def fail(*_args, **_kwargs):
         raise OSError("disk unavailable")
