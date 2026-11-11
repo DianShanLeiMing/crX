@@ -223,7 +223,7 @@ def _tracking(repo, head, *, update_hits=False):
         ):
             raise ValueError("当前分支有未推送的其他提交，请先处理这些提交后再上传参考")
         if HITS_FILE in paths and not update_hits:
-            raise ValueError("上次命中数提交尚未推送，请回到样本库点击「上传修改」重试")
+            raise ValueError("上次命中数提交尚未推送，请回到样本库点击「上传顺序与次数」重试")
     return remote, target, bool(ahead), head
 
 

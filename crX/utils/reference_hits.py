@@ -231,7 +231,7 @@ def clear_local(root, identifiers=None, *, allow_upload=False):
         _resets(local["pending_resets"])
         atomic_json(path, local)
     if allow_upload:
-        return f"已在本机清空 {len(chosen)} 个样本的次数。保留勾选并点击「上传修改」可清空对应线上次数"
+        return f"已在本机清空 {len(chosen)} 个样本的次数。保留勾选并点击「上传顺序与次数」可清空对应线上次数"
     return f"已清空 {len(chosen)} 个样本的本机贡献次数；其他机器及线上统计保留，清空结果不会上传"
 
 

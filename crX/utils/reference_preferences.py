@@ -212,4 +212,4 @@ def set_reference_order(card, ordered, expected, references):
         value["order"] = list(ordered)
         document["cards"][card] = value
         atomic_json(path, document)
-    return "已保存参考顺序。第一行是首选，点击「上传修改」后其他电脑生效"
+    return "已保存参考顺序。第一行是首选，点击「上传顺序与次数」后其他电脑生效"

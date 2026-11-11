@@ -51,7 +51,7 @@ class CardCatalogView(ttk.Frame):
         ttk.Checkbutton(search, text="只看有样本", variable=self.only_samples, command=self.render_cards).pack(
             side="left"
         )
-        self.upload_button = ttk.Button(search, text="上传修改", command=lambda: action("upload"))
+        self.upload_button = ttk.Button(search, text="上传顺序与次数", command=lambda: action("upload"))
         self.upload_button.pack(side="right", padx=(0, 6))
         self.query.trace_add("write", lambda *_: self.render_cards())
         self.panes = tk.PanedWindow(self, orient="horizontal", sashwidth=6, opaqueresize=True, borderwidth=0)
@@ -334,7 +334,7 @@ class CardCatalogView(ttk.Frame):
     def _update_message(self):
         self.message.set(
             "按住排序列的 ≡ 上下拖动，第一行是首选。↕ 顺序变化，● 命中变化。"
-            "勾选卡牌可批量清空本机显示的次数。保留勾选并上传修改可清空线上对应次数。"
+            "勾选卡牌可批量清空本机显示的次数。保留勾选并上传顺序与次数可清空线上对应次数。"
             if self._checking_cards
             else "按住排序列的 ≡ 上下拖动，第一行是首选。↕ 顺序变化，● 命中变化。清空只影响本机贡献，线上数据保留。"
         )
