@@ -17,6 +17,7 @@ class TowerHealthMonitor:
         self.last_fill: list[int | None] = [None, None]
         self.missing = [0, 0]
         self.ruins_seen = [0, 0]
+        self.last_ruins = [float("-inf"), float("-inf")]
         self.destroyed = [False, False]
 
     def observe(self, image) -> None:
@@ -27,7 +28,6 @@ class TowerHealthMonitor:
         self.last_sample = now
         if elapsed > 2.5:
             self.missing = [0, 0]
-            self.ruins_seen = [0, 0]
         if not image_is_in_battle(image):
             self.missing = [0, 0]
             self.ruins_seen = [0, 0]
@@ -37,11 +37,14 @@ class TowerHealthMonitor:
         descriptions = []
         for index, (fill, track_seen) in enumerate(bars):
             if not self.destroyed[index]:
+                # Card deployment and brief occlusion interrupt observation during a battle.
+                # Keep visual evidence for a bounded window, but discard it if the bar returns.
+                if fill is not None or now - self.last_ruins[index] > 15:
+                    self.ruins_seen[index] = 0
                 if fill is None and image_has_enemy_princess_ruins(image, index):
+                    self.last_ruins[index] = now
                     self.ruins_seen[index] += 1
                     self.destroyed[index] = self.ruins_seen[index] >= 2
-                else:
-                    self.ruins_seen[index] = 0
             if self.destroyed[index]:
                 descriptions.append("已摧毁")
                 continue

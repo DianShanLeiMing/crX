@@ -74,6 +74,8 @@ def test_occlusion_is_unknown_and_suspicion_requires_low_fill_and_repeated_absen
     [
         (0, "左", 132, "green_left_desktop_preview_20261110.png"),
         (1, "右", 502, "stone_right_720_native_20261108.png"),
+        (0, "左", 125, "stone_right_720_native_20261108_mirrored.png"),
+        (1, "右", 510, "green_left_desktop_preview_20261110_mirrored.png"),
     ],
 )
 def test_confirms_destroyed_from_repeated_ruins_without_prior_low_health(monkeypatch, side, label, x, filename):
@@ -92,9 +94,9 @@ def test_confirms_destroyed_from_repeated_ruins_without_prior_low_health(monkeyp
     ruins = missing.copy()
     ruins[244 : 244 + h, x : x + w] = template
     monitor = tower_health.TowerHealthMonitor(logger)
-    for image in (ruins, missing, ruins):
+    for image in (ruins, battle_frame(65, 13), ruins):
         monitor.observe(image)
-        assert f"{label} 血条未读出" in messages[-1]
+        assert f"{label} 已摧毁" not in messages[-1]
     monitor.observe(ruins)
     assert f"{label} 已摧毁" in messages[-1]
     assert "暂无法比较" not in messages[-1]
@@ -122,3 +124,36 @@ def test_elixir_wait_logs_from_its_existing_screenshot(monkeypatch):
     assert fight.wait_for_elixir(SimpleNamespace(screenshot=screenshot), logger, 4, tower_monitor=monitor) is True
     assert len(calls) == 1
     assert messages == ["敌方公主塔 | 左 存在 99%（78px） | 右 存在 59%（47px） | 右侧比例更低"]
+
+
+@pytest.mark.parametrize("times", [(0, 3, 6), (0, 6, 14)])
+def test_ruins_confirmation_survives_capture_gaps_and_occlusion(monkeypatch, times):
+    messages = []
+    logger = Logger()
+    monkeypatch.setattr(logger, "log", messages.append)
+    clock = iter(times)
+    monkeypatch.setattr(tower_health, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+    matches = iter((True, False, True))
+    monkeypatch.setattr(tower_health, "image_has_enemy_princess_ruins", lambda *_: next(matches))
+    monitor = tower_health.TowerHealthMonitor(logger)
+    for _ in times:
+        monitor.observe(battle_frame(None, 60))
+    assert "左 已摧毁" in messages[-1]
+
+
+@pytest.mark.parametrize("interruption", ["expired", "bar_returns", "not_in_battle"])
+def test_ruins_evidence_expires_or_resets_on_contradicting_frames(monkeypatch, interruption):
+    messages = []
+    logger = Logger()
+    monkeypatch.setattr(logger, "log", messages.append)
+    clock = iter((0, 20, 40) if interruption == "expired" else (0, 3, 6))
+    monkeypatch.setattr(tower_health, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+    monkeypatch.setattr(tower_health, "image_has_enemy_princess_ruins", lambda *_: True)
+    monitor = tower_health.TowerHealthMonitor(logger)
+    monitor.observe(battle_frame(None, 60))
+    middle = battle_frame(60, 60) if interruption == "bar_returns" else battle_frame(None, 60)
+    if interruption == "not_in_battle":
+        middle[:] = 0
+    monitor.observe(middle)
+    monitor.observe(battle_frame(None, 60))
+    assert "已摧毁" not in messages[-1]
