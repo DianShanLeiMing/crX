@@ -77,7 +77,7 @@ class FailureReviewTab(ttk.Frame):
         combo.pack(side="left")
         combo.bind("<<ComboboxSelected>>", lambda _: self._render())
         ttk.Button(filters, text="刷新", command=self.refresh).pack(side="left", padx=8)
-        ttk.Button(filters, text="打开样本目录", command=self._open_folder).pack(side="left")
+        ttk.Button(filters, text="打开异常目录", command=self._open_folder).pack(side="left")
         selection_tools = ttk.Frame(toolbar)
         selection_tools.pack(fill="x", pady=(4, 0))
         self.select_all_button = ttk.Button(selection_tools, text="全选当前列表", command=self._select_all)
