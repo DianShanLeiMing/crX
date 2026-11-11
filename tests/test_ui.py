@@ -1946,9 +1946,7 @@ def test_catalog_search_and_upload_archive_clean_images(review_ui, monkeypatch):
     assert not view.references.get_children()
     assert "0 份正式参考" in view.title.get()
     view.query.set("")
-    view.only_samples.set(True)
-    view.render_cards()
-    assert all(int(view.cards.set(card, "count")) > 0 for card in view.cards.get_children())
+    assert view.cards.set("archers", "count") == "0"
     view._sort_counts()
     assert view.cards.get_children()[0] == "knight"
     view._sort_counts()

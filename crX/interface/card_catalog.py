@@ -48,10 +48,6 @@ class CardCatalogView(ttk.Frame):
         ttk.Label(search, text="搜索卡名 / 英文 ID").pack(side="left")
         self.query = tk.StringVar()
         ttk.Entry(search, textvariable=self.query, width=24).pack(side="left", padx=6)
-        self.only_samples = tk.BooleanVar(value=False)
-        ttk.Checkbutton(search, text="只看有样本", variable=self.only_samples, command=self.render_cards).pack(
-            side="left"
-        )
         self.upload_button = ttk.Button(search, text="上传顺序与次数", command=lambda: action("upload"))
         self.upload_button.pack(side="right", padx=(0, 6))
         self.query.trace_add("write", lambda *_: self.render_cards())
@@ -303,11 +299,7 @@ class CardCatalogView(ttk.Frame):
     def render_cards(self):
         self._cancel_drag()
         query = "".join(self.query.get().casefold().split())
-        cards = [
-            card
-            for card, refs in self.data.items()
-            if (not self.only_samples.get() or refs) and query in f"{CARD_NAMES_ZH.get(card, card)}{card}".casefold()
-        ]
+        cards = [card for card in self.data if query in f"{CARD_NAMES_ZH.get(card, card)}{card}".casefold()]
         cards.sort(
             key=lambda card: (
                 -len(self.data[card]) if self._sort_count else len(self.data[card]),
