@@ -223,6 +223,7 @@ class CardCatalogView(ttk.Frame):
         if same_order:
             for card in self.cards.get_children():
                 self.cards.item(card, values=self._card_values(card))
+            self._prioritize_changed_cards()
             self._references = {ref.identifier: ref for ref in self.data.get(self._card, [])}
             self._refresh_reference_rows()
             self.set_disabled(self._disabled)
@@ -300,14 +301,6 @@ class CardCatalogView(ttk.Frame):
         self._cancel_drag()
         query = "".join(self.query.get().casefold().split())
         cards = [card for card in self.data if query in f"{CARD_NAMES_ZH.get(card, card)}{card}".casefold()]
-        cards.sort(
-            key=lambda card: (
-                -len(self.data[card]) if self._sort_count else len(self.data[card]),
-                CARD_NAMES_ZH.get(card, card),
-            )
-            if self._sort_count is not None
-            else CARD_NAMES_ZH.get(card, card)
-        )
         self._checked_cards.intersection_update(cards)
         self.cards.delete(*self.cards.get_children())
         for card in cards:
@@ -318,8 +311,9 @@ class CardCatalogView(ttk.Frame):
                 text="",
                 values=self._card_values(card),
             )
+        self._prioritize_changed_cards()
         if cards:
-            selected = self._card if self._card in cards else cards[0]
+            selected = self._card if self._card in cards else self.cards.get_children()[0]
             self.cards.selection_set(selected)
             self.cards.focus(selected)
             self._select_card()
@@ -327,6 +321,20 @@ class CardCatalogView(ttk.Frame):
             self._card = None
             self._clear_references("没有匹配的卡牌")
             self.set_disabled(self._disabled)
+
+    def _prioritize_changed_cards(self):
+        cards = sorted(
+            self.cards.get_children(),
+            key=lambda card: (
+                -len(self.data[card]) if self._sort_count else len(self.data[card]),
+                CARD_NAMES_ZH.get(card, card),
+            )
+            if self._sort_count is not None
+            else CARD_NAMES_ZH.get(card, card),
+        )
+        cards.sort(key=lambda card: not any(ref.order_changed or ref.hits_changed for ref in self.data[card]))
+        for index, card in enumerate(cards):
+            self.cards.move(card, "", index)
 
     def _clear_references(self, text):
         self._references = {}
