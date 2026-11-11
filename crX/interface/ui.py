@@ -99,6 +99,7 @@ class CrXUI(ttk.Window):
         self._create_devices()
         self._create_stats()
         self._create_settings()
+        self._apply_button_styles()
         self.status_var = tk.StringVar(value="待机")
         ttk.Label(self, textvariable=self.status_var, padding=(16, 8), wraplength=800).pack(
             side="bottom", fill="x", before=self.notebook
@@ -419,9 +420,7 @@ class CrXUI(ttk.Window):
             text="打开录制目录",
             command=lambda: self.open_recordings_callback() if self.open_recordings_callback else None,
         ).pack(side="left", padx=(0, 8))
-        self.clear_button = ttk.Button(
-            row, text="清理录制文件", bootstyle="danger-outline", command=self._clear_recordings
-        )
+        self.clear_button = ttk.Button(row, text="清理录制文件", bootstyle="danger", command=self._clear_recordings)
         self.clear_button.pack(side="left", padx=(0, 8))
         self.config_widgets.append((self.clear_button, "normal"))
         ttk.Button(
@@ -459,12 +458,42 @@ class CrXUI(ttk.Window):
         if name in self.style.theme_names():
             self.theme_label_var.set(self.theme_labels[name])
             self.style.theme_use(name)
+            self._apply_button_styles()
             colors = self.style.colors
             self.stats_splitter.configure(background=colors.bg)
             self.log_splitter.configure(background=colors.bg)
             self.gauge.set_colours(colors.success, colors.danger, colors.fg, canvas_bg=colors.bg)
             for log in (self.log, self.recognition_log):
                 log.configure(background=colors.inputbg, foreground=colors.inputfg, insertbackground=colors.fg)
+
+    def _apply_button_styles(self):
+        for name in ("TButton", "primary.TButton", "secondary.TButton", "success.TButton", "danger.TButton"):
+            self.style.configure(name, padding=(12, 6), focusthickness=0, relief="flat")
+            self.style.layout(
+                name,
+                [
+                    (
+                        "Button.border",
+                        {
+                            "sticky": "nsew",
+                            "children": [
+                                (
+                                    "Button.padding",
+                                    {"sticky": "nsew", "children": [("Button.label", {"sticky": "nsew"})]},
+                                )
+                            ],
+                        },
+                    )
+                ],
+            )
+            self.style.map(
+                name,
+                bordercolor=[
+                    ("disabled", self.style.lookup(name, "background", ("disabled",))),
+                    ("focus", self.style.colors.fg),
+                    ("!disabled", self.style.lookup(name, "background")),
+                ],
+            )
 
     def _notify(self, *_):
         if not self._suspend and self.config_callback:

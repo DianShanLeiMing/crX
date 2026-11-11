@@ -22,9 +22,6 @@ class CardReferenceRows(ttk.Frame):
 
     def _update_theme(self, _event=None):
         style = ttk.Style()
-        style_name = "ReferenceAction.secondary.Outline.TButton"
-        style.configure(style_name, foreground="#ffffff")
-        style.map(style_name, foreground=[("disabled", "#ffffff"), ("active", "#ffffff"), ("!disabled", "#ffffff")])
         background = style.lookup("CardSamples.Treeview", "background", state=("selected",)) or style.colors.selectbg
         foreground = style.lookup("CardSamples.Treeview", "foreground", state=("selected",)) or style.colors.selectfg
         style.configure("SelectedReference.TFrame", background=background)
@@ -75,7 +72,7 @@ class CardReferenceRows(ttk.Frame):
                     actions,
                     text=title,
                     command=lambda key=identifier, cb=callback: cb(key),
-                    style="ReferenceAction.secondary.Outline.TButton",
+                    bootstyle="danger",
                 )
                 button.pack(side="left", padx=(0, 4))
                 buttons[action] = button

@@ -150,9 +150,7 @@ class CardReviewTab(ttk.Frame):
         header = ttk.Frame(self)
         header.grid(row=0, column=0, sticky="ew")
         ttk.Label(header, textvariable=self.summary_var).pack(side="left")
-        self.catalog_button = ttk.Button(
-            header, text="样本库", bootstyle="link", padding=(6, 0), command=self._toggle_catalog
-        )
+        self.catalog_button = ttk.Button(header, text="样本库", bootstyle="secondary", command=self._toggle_catalog)
         self.catalog_button.pack(side="right")
         tools = ttk.Frame(self)
         self.review_tools = tools
@@ -191,7 +189,7 @@ class CardReviewTab(ttk.Frame):
         self.upload_button = ttk.Button(selection_tools, text="上传", command=self._upload, state="disabled")
         self.upload_button.pack(side="left")
         self.clear_button = ttk.Button(
-            selection_tools, text="删除样本", bootstyle="danger-outline", command=self._clear_samples, state="disabled"
+            selection_tools, text="删除样本", bootstyle="danger", command=self._clear_samples, state="disabled"
         )
         self.clear_button.pack(side="left", padx=(24, 0))
         self.upload_status = ttk.Frame(self)

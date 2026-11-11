@@ -80,9 +80,7 @@ class DatasetSplitTab(ttk.Frame):
         self.load_button.grid(row=0, column=1, padx=6, pady=4)
         self.export_button = self._button(actions, "导出训练／验证集", self._export)
         self.export_button.grid(row=0, column=2, padx=6, pady=4)
-        self.stop_button = ttk.Button(
-            actions, text="停止", command=self.stop, state="disabled", bootstyle="danger-outline"
-        )
+        self.stop_button = ttk.Button(actions, text="停止", command=self.stop, state="disabled", bootstyle="danger")
         self.stop_button.grid(row=0, column=3, padx=6, pady=4)
         self.open_output_button = self._button(actions, "打开导出目录", self._open_output)
         self.open_output_button.grid(row=1, column=0, padx=(0, 6), pady=4)

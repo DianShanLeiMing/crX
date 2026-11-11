@@ -100,9 +100,7 @@ class BattlefieldDataTab(ttk.Frame):
         self.capture_button = self._button(actions, "开始连续采集", self._capture)
         self.capture_button.grid(row=0, column=0, padx=(0, 6), pady=3)
         self._button(actions, "截取一张", lambda: self._capture(single=True)).grid(row=0, column=1, padx=6, pady=3)
-        self.stop_button = ttk.Button(
-            actions, text="停止", command=self.stop, state="disabled", bootstyle="danger-outline"
-        )
+        self.stop_button = ttk.Button(actions, text="停止", command=self.stop, state="disabled", bootstyle="danger")
         self.stop_button.grid(row=0, column=2, padx=6, pady=3)
         self.open_session_button = self._button(actions, "打开已有批次", self._open_session)
         self.open_session_button.grid(row=0, column=3, padx=6, pady=3)

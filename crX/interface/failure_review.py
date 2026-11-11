@@ -55,17 +55,17 @@ class FailureReviewTab(ttk.Frame):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(2, weight=1)
         summary = ttk.Frame(self)
-        summary.grid(row=0, column=0, sticky="w")
+        summary.grid(row=0, column=0, sticky="ew")
         self.summary_var = tk.StringVar(value="正在读取异常流程……")
         ttk.Label(summary, textvariable=self.summary_var).pack(side="left")
         self.clear_all_button = ttk.Button(
             summary,
             text="清空记录",
             command=lambda: self._delete_selected(clear_all=True),
-            bootstyle="danger-outline",
+            bootstyle="danger",
             state="disabled",
         )
-        self.clear_all_button.pack(side="left", padx=(12, 0))
+        self.clear_all_button.pack(side="right", padx=(12, 0))
         toolbar = ttk.Frame(self)
         toolbar.grid(row=1, column=0, sticky="ew", pady=8)
         filters = ttk.Frame(toolbar)
@@ -88,7 +88,7 @@ class FailureReviewTab(ttk.Frame):
             selection_tools,
             text="删除选中",
             command=self._delete_selected,
-            bootstyle="danger-outline",
+            bootstyle="danger",
             state="disabled",
         )
         self.delete_button.pack(side="left")

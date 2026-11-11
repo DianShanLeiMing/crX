@@ -87,10 +87,12 @@ class CardCatalogView(ttk.Frame):
         card_tools.grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
         self.clear_cards_button = ttk.Button(card_tools, text="清空次数", command=self._clear_cards)
         self.clear_cards_button.pack(side="left")
-        self.reset_cards_button = ttk.Button(card_tools, text="重置为远端", command=self._reset_cards)
+        self.reset_cards_button = ttk.Button(
+            card_tools, text="重置为远端", bootstyle="secondary", command=self._reset_cards
+        )
         self.reset_cards_button.pack(side="left", padx=(4, 0))
         self.cancel_checks_button = ttk.Button(
-            card_tools, text="退出勾选", bootstyle="light-link", command=self._cancel_checks
+            card_tools, text="退出勾选", bootstyle="secondary", command=self._cancel_checks
         )
         right = ttk.Frame(self.panes)
         right.columnconfigure(0, weight=1)
@@ -101,7 +103,7 @@ class CardCatalogView(ttk.Frame):
         tools = ttk.Frame(right)
         tools.grid(row=1, column=0, sticky="ew", padx=6, pady=(0, 4))
         self.clear_button = ttk.Button(
-            tools, text="清空所选样本本机命中次数", bootstyle="secondary-outline", command=lambda: action("clear")
+            tools, text="清空所选样本本机命中次数", bootstyle="secondary", command=lambda: action("clear")
         )
         self.clear_button.pack(side="left")
         gallery = ttk.Frame(right)
