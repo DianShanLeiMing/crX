@@ -46,12 +46,11 @@ STAGE_ACTIONS = {
 COLUMN_SPECS = {
     "group": ("相似分组", 100),
     "card": ("卡名 / 候选提示", 180),
-    "reason": ("采样原因", 110),
     "status": ("处理结果", 80),
     "references": ("正式参考", 100),
 }
 FILTER_COLUMNS = {
-    "待确认": ("group", "card", "reason", "status"),
+    "待确认": ("group", "card", "status"),
     "待更新": ("card", "references", "status"),
 }
 THUMBNAIL_CACHE_SIZE = 128
@@ -1106,7 +1105,6 @@ class CardReviewTab(ttk.Frame):
             row = {
                 "group": self.group_labels.get(self.sample_groups[sample.key], ""),
                 "card": card,
-                "reason": REASON_LABELS.get(sample.record.get("reason"), "识别异常"),
                 "status": sample_progress(sample)[0],
                 "references": "",
             }
