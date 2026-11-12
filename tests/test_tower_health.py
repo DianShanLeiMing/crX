@@ -76,6 +76,8 @@ def test_occlusion_is_unknown_and_suspicion_requires_low_fill_and_repeated_absen
         (1, "右", 502, "stone_right_720_native_20261108.png"),
         (0, "左", 125, "stone_right_720_native_20261108_mirrored.png"),
         (1, "右", 510, "green_left_desktop_preview_20261110_mirrored.png"),
+        (0, "左", 118, "pink_pig_left_720_native_20261112.png"),
+        (0, "左", 118, "stone_rubble_left_720_native_20261112.png"),
     ],
 )
 def test_confirms_destroyed_from_repeated_ruins_without_prior_low_health(monkeypatch, side, label, x, filename):
@@ -157,3 +159,47 @@ def test_ruins_evidence_expires_or_resets_on_contradicting_frames(monkeypatch, i
     monitor.observe(middle)
     monitor.observe(battle_frame(None, 60))
     assert "已摧毁" not in messages[-1]
+
+
+@pytest.mark.parametrize("side", [0, 1])
+def test_sustained_loss_after_low_health_confirms_destroyed_without_ruins(monkeypatch, side):
+    messages = []
+    logger = Logger()
+    monkeypatch.setattr(logger, "log", messages.append)
+    clock = iter((0, 2, 5, 8, 11, 14, 16))
+    monkeypatch.setattr(tower_health, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+    monitor = tower_health.TowerHealthMonitor(logger)
+    low = battle_frame(10, 79) if side == 0 else battle_frame(79, 10)
+    missing = battle_frame(None, 79) if side == 0 else battle_frame(79, None)
+    label = ("左", "右")[side]
+    monitor.observe(low)
+    for _ in range(4):
+        monitor.observe(missing)
+        assert "已摧毁" not in messages[-1]
+    monitor.observe(missing)
+    assert f"{label} 已摧毁" in messages[-1]
+    assert "暂无法比较" not in messages[-1]
+    monitor.observe(low)
+    assert f"{label} 存在" in messages[-1]
+
+
+@pytest.mark.parametrize("interruption", ["track", "both_missing", "gap", "high_health"])
+def test_sustained_loss_requires_recent_consistent_battle_observations(monkeypatch, interruption):
+    messages = []
+    logger = Logger()
+    monkeypatch.setattr(logger, "log", messages.append)
+    clock = iter((0, 2, 5, 15, 18, 21) if interruption == "gap" else (0, 2, 5, 8, 11, 14))
+    monkeypatch.setattr(tower_health, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+    monitor = tower_health.TowerHealthMonitor(logger)
+    missing = battle_frame(None, 79)
+    middle = {"track": battle_frame(0, 79), "both_missing": battle_frame(None, None)}.get(interruption, missing)
+    for image in (
+        battle_frame(40 if interruption == "high_health" else 10, 79),
+        missing,
+        missing,
+        middle,
+        missing,
+        missing,
+    ):
+        monitor.observe(image)
+        assert "已摧毁" not in messages[-1]
