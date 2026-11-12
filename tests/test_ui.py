@@ -137,7 +137,7 @@ def test_battlefield_capture_preview_recrop_and_running_guard(desktop_ui, tmp_pa
         assert len(original_session.metadata["frames"]) == 1
         assert tab._transform is not None
         assert tab.open_session_button.cget("text") == "打开已有批次"
-        assert not hasattr(tab, "more_menu")
+        assert tab.more_menu.entrycget(0, "label") == "清理已删除图片（整个采集目录）"
         assert original_session.metadata["crop_ltrb"] == [0, 0, 360, 640]
         assert original_session.metadata["image_mode"] == "full_frame"
         assert not (original_session.directory / "arena").exists()

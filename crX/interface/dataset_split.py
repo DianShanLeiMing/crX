@@ -46,7 +46,7 @@ class DatasetSplitTab(ttk.Frame):
 
         ttk.Label(
             self,
-            text="先在截图页整理完整图片到 images，再用标注工具生成同名 YOLO 标签。\n平铺图片保留场次文件名前缀，程序按整场划分；至少需要两场独立对局。",
+            text="选择外部标注结果 → 载入检查 → 导出训练 / 验证集；至少需要两场独立对局。",
             wraplength=680,
         ).grid(row=0, column=0, sticky="w", pady=(0, 8))
         paths = ttk.Frame(self)
@@ -79,6 +79,7 @@ class DatasetSplitTab(ttk.Frame):
         self.load_button = self._button(actions, "载入并检查", self._load)
         self.load_button.grid(row=0, column=1, padx=6, pady=4)
         self.export_button = self._button(actions, "导出训练／验证集", self._export)
+        self.export_button.configure(bootstyle="primary")
         self.export_button.grid(row=0, column=2, padx=6, pady=4)
         self.stop_button = ttk.Button(actions, text="停止", command=self.stop, state="disabled", bootstyle="danger")
         self.stop_button.grid(row=0, column=3, padx=6, pady=4)
@@ -116,7 +117,7 @@ class DatasetSplitTab(ttk.Frame):
         self._poll_id = self.after(100, self._poll)
 
     def _button(self, parent, text, command):
-        button = ttk.Button(parent, text=text, command=command)
+        button = ttk.Button(parent, text=text, command=command, bootstyle="secondary")
         self._controls.append((button, "normal"))
         return button
 

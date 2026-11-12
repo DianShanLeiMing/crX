@@ -53,13 +53,15 @@ class BattlefieldDataTab(ttk.Frame):
         self._preview_job = False
         self._results = Queue()
         self._stop = threading.Event()
-        self._controls: list[tuple[ttk.Entry | ttk.Spinbox | ttk.Button | ttk.Combobox | ttk.Checkbutton, str]] = []
+        self._controls: list[
+            tuple[ttk.Entry | ttk.Spinbox | ttk.Button | ttk.Menubutton | ttk.Combobox | ttk.Checkbutton, str]
+        ] = []
         self.columnconfigure(0, weight=1)
         self.rowconfigure(5, weight=1)
 
         ttk.Label(
             self,
-            text="每批只采集一场，直接使用完整 720×1280 截图标注和训练，不裁剪。手牌与圣水继续由现有规则识别。",
+            text="1 采集 / 打开批次 → 2 筛选图片 → 3 导出后标注（完整 720×1280 原图）",
             wraplength=720,
         ).grid(row=0, column=0, sticky="w", pady=(0, 8))
         folder_row = ttk.Frame(self)
@@ -73,14 +75,15 @@ class BattlefieldDataTab(ttk.Frame):
         self._button(folder_row, "打开", self._browse_root).grid(row=0, column=2, padx=6)
 
         dedup = ttk.Frame(self)
-        dedup.grid(row=9, column=0, sticky="ew", pady=(8, 0))
+        dedup.grid(row=8, column=0, sticky="ew", pady=(8, 0))
         self._button(dedup, "筛选图片", self._analyze_all).pack(side="left")
         self.review_button = self._button(dedup, "查看筛选结果", self._review_duplicates)
         self.review_button.pack(side="left", padx=6)
         self.export_selected_button = self._button(dedup, "导出图片", self._export_selected)
+        self.export_selected_button.configure(bootstyle="primary")
         self.export_selected_button.pack(side="left")
         self.dedup_status = tk.StringVar(value="先打开采集总目录，再筛选图片；原始图片保留。")
-        ttk.Label(self, textvariable=self.dedup_status, wraplength=720).grid(row=8, column=0, sticky="ew", pady=4)
+        ttk.Label(self, textvariable=self.dedup_status, wraplength=720).grid(row=9, column=0, sticky="ew", pady=4)
 
         sampling = ttk.Frame(self)
         sampling.grid(row=3, column=0, sticky="ew")
@@ -98,15 +101,19 @@ class BattlefieldDataTab(ttk.Frame):
         actions = ttk.Frame(self)
         actions.grid(row=4, column=0, sticky="ew", pady=8)
         self.capture_button = self._button(actions, "开始连续采集", self._capture)
+        self.capture_button.configure(bootstyle="primary")
         self.capture_button.grid(row=0, column=0, padx=(0, 6), pady=3)
         self._button(actions, "截取一张", lambda: self._capture(single=True)).grid(row=0, column=1, padx=6, pady=3)
         self.stop_button = ttk.Button(actions, text="停止", command=self.stop, state="disabled", bootstyle="danger")
         self.stop_button.grid(row=0, column=2, padx=6, pady=3)
         self.open_session_button = self._button(actions, "打开已有批次", self._open_session)
         self.open_session_button.grid(row=0, column=3, padx=6, pady=3)
-        self._button(actions, "清理已删除图片（整个采集目录）", self._purge_deleted).grid(
-            row=0, column=4, padx=6, pady=3
-        )
+        actions.columnconfigure(4, weight=1)
+        self.more_menu = tk.Menu(self, tearoff=False)
+        self.more_menu.add_command(label="清理已删除图片（整个采集目录）", command=self._purge_deleted)
+        self.more_button = ttk.Menubutton(actions, text="更多", menu=self.more_menu, bootstyle="secondary")
+        self.more_button.grid(row=0, column=4, sticky="e", padx=(6, 0), pady=3)
+        self._controls.append((self.more_button, "normal"))
         self.batch_row = ttk.Frame(actions)
         self.batch_row.grid(row=1, column=0, columnspan=5, sticky="ew", pady=4)
         self.batch_row.columnconfigure(1, weight=1)
@@ -123,26 +130,27 @@ class BattlefieldDataTab(ttk.Frame):
         previews.grid(row=5, column=0, sticky="nsew")
         previews.columnconfigure(0, weight=1)
         previews.rowconfigure(0, weight=1)
-        self.raw_canvas = tk.Canvas(previews, background="#202428", highlightthickness=0, width=270, height=300)
+        self.raw_canvas = tk.Canvas(previews, highlightthickness=0, width=270, height=300)
         self.raw_canvas.grid(row=0, column=0, sticky="nsew")
         self.raw_canvas.bind("<Configure>", lambda _event: self._draw())
+        self.bind("<<ThemeChanged>>", lambda _event: self._draw(), add="+")
 
         footer = ttk.Frame(self)
         footer.grid(row=6, column=0, sticky="ew", pady=(6, 0))
         self._button(footer, "上一张", lambda: self._navigate(-1)).pack(side="left")
         self._button(footer, "下一张", lambda: self._navigate(1)).pack(side="left", padx=6)
-        self._button(footer, "删除当前张", self._delete_current).pack(side="left", padx=6)
+        delete_button = self._button(footer, "删除当前张", self._delete_current)
+        delete_button.configure(bootstyle="danger")
+        delete_button.pack(side="right")
         self.position_var = tk.StringVar(value="尚未采集")
         ttk.Label(footer, textvariable=self.position_var).pack(side="left", padx=6)
-        self.message_var = tk.StringVar(
-            value="采集按对局分批保存。打开采集目录 → 筛选图片 → 查看筛选结果 → 导出图片到 images。"
-        )
+        self.message_var = tk.StringVar(value="每批只采集一场；先连接设备，或打开已有批次。")
         ttk.Label(self, textvariable=self.message_var, wraplength=720).grid(row=7, column=0, sticky="ew", pady=(6, 0))
         self._update_controls()
         self._poll_id = self.after(100, self._poll)
 
     def _button(self, parent, text, command):
-        widget = ttk.Button(parent, text=text, command=command)
+        widget = ttk.Button(parent, text=text, command=command, bootstyle="secondary")
         self._controls.append((widget, "normal"))
         return widget
 
@@ -536,8 +544,18 @@ class BattlefieldDataTab(ttk.Frame):
     def _draw(self):
         self._photos.clear()
         self.raw_canvas.delete("all")
+        colors = ttk.Style().colors
+        self.raw_canvas.configure(background=colors.inputbg)
         self._transform = None
         if self.frame_image is None:
+            self.raw_canvas.create_text(
+                max(1, self.raw_canvas.winfo_width()) // 2,
+                max(1, self.raw_canvas.winfo_height()) // 2,
+                text="还没有图片\n连接设备后截取一张，或打开已有批次。",
+                width=max(1, self.raw_canvas.winfo_width() - 32),
+                fill=colors.inputfg,
+                justify="center",
+            )
             return
         image = Image.fromarray(cv2.cvtColor(self.frame_image, cv2.COLOR_BGR2RGB))
         self._transform = self._draw_image(self.raw_canvas, image)

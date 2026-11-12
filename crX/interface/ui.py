@@ -269,7 +269,7 @@ class CrXUI(ttk.Window):
         entry.pack(side="left", fill="x", expand=True)
         self.config_widgets.append((entry, "normal"))
         if browse:
-            button = ttk.Button(row, text="浏览", command=browse)
+            button = ttk.Button(row, text="浏览", command=browse, bootstyle="secondary")
             button.pack(side="left", padx=(8, 0))
             self.config_widgets.append((button, "normal"))
         return row
@@ -340,7 +340,10 @@ class CrXUI(ttk.Window):
             ("恢复默认分辨率", "reset"),
         ):
             button = ttk.Button(
-                row, text=title, command=lambda a=action: self.device_callback(a) if self.device_callback else None
+                row,
+                text=title,
+                command=lambda a=action: self.device_callback(a) if self.device_callback else None,
+                bootstyle="primary" if action == "connect" else "secondary",
             )
             button.pack(side="left", padx=(0, 8))
             self.config_widgets.append((button, "normal"))
@@ -507,13 +510,17 @@ class CrXUI(ttk.Window):
         ttk.Button(
             row,
             text="打开录制目录",
+            bootstyle="secondary",
             command=lambda: self.open_recordings_callback() if self.open_recordings_callback else None,
         ).pack(side="left", padx=(0, 8))
         self.clear_button = ttk.Button(row, text="清理录制文件", bootstyle="danger", command=self._clear_recordings)
         self.clear_button.pack(side="left", padx=(0, 8))
         self.config_widgets.append((self.clear_button, "normal"))
         ttk.Button(
-            row, text="打开日志目录", command=lambda: self.open_logs_callback() if self.open_logs_callback else None
+            row,
+            text="打开日志目录",
+            command=lambda: self.open_logs_callback() if self.open_logs_callback else None,
+            bootstyle="secondary",
         ).pack(side="left")
         ttk.Label(
             self.settings_tab,
