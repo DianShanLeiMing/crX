@@ -1,11 +1,23 @@
 import os
 from concurrent.futures import Future, ThreadPoolExecutor
+from functools import lru_cache
 from os.path import abspath, dirname, join
 
 import cv2
 import numpy as np
 
 from crX.utils.image_handler import open_from_path
+
+_MATCH_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="ImageRecognition")
+
+
+@lru_cache(maxsize=128)
+def _reference_gray(path: str, modified_ns: int, size: int) -> np.ndarray:
+    """Cache native templates; file metadata invalidates replaced references."""
+    gray = cv2.cvtColor(open_from_path(path), cv2.COLOR_BGR2GRAY)
+    gray.setflags(write=False)
+    return gray
+
 
 # =============================================================================
 # IMAGE RECOGNITION FUNCTIONS
@@ -81,23 +93,14 @@ def find_references(
     if not filenames:
         return [], []
 
-    reference_images = [open_from_path(join(reference_folder, name)) for name in filenames]
-
-    with ThreadPoolExecutor(
-        max_workers=min(8, len(reference_images)),
-        thread_name_prefix="ImageRecognition",
-    ) as executor:
-        futures: list[Future[list[int] | None]] = [
-            executor.submit(
-                compare_images,
-                image,
-                template,
-                tolerance,
-            )
-            for template in reference_images
-        ]
-        results = [future.result() for future in futures]
-        return results, filenames
+    image_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    futures: list[Future[list[int] | None]] = []
+    for name in filenames:
+        path = join(reference_folder, name)
+        metadata = os.stat(path)
+        template = _reference_gray(path, metadata.st_mtime_ns, metadata.st_size)
+        futures.append(_MATCH_POOL.submit(_compare_gray_images, image_gray, template, tolerance))
+    return [future.result() for future in futures], filenames
 
 
 def compare_images(
@@ -117,7 +120,10 @@ def compare_images(
     """
     img_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
+    return _compare_gray_images(img_gray, template_gray, threshold)
 
+
+def _compare_gray_images(img_gray: np.ndarray, template_gray: np.ndarray, threshold: float) -> list[int] | None:
     # Check if template is larger than image
     if template_gray.shape[0] > img_gray.shape[0] or template_gray.shape[1] > img_gray.shape[1]:
         return None
