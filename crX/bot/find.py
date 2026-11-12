@@ -33,7 +33,7 @@ from crX.detection.image_rec import find_image, pixel_is_equal
 
 
 def is_startup_loading_screen(image) -> bool:
-    """Identify the late loading splash by its progress bar and crown shield."""
+    """Identify the loading splash by its filled bar section and crown shield."""
     if image is None or image.shape != (*GAME_SCREEN_SIZE[::-1], 3):
         return False
     return (
