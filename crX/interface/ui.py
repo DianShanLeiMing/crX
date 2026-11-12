@@ -41,6 +41,8 @@ class CrXUI(ttk.Window):
         self._state = "idle"
         self._storage_busy = False
         self._storage_results = Queue(maxsize=1)
+        self._recordings_clearing = False
+        self._recording_clear_results = Queue(maxsize=1)
         self._suspend = True
         self.config_callback = None
         self.device_callback = None
@@ -561,7 +563,8 @@ class CrXUI(ttk.Window):
 
     def _samples_clearing(self):
         return (
-            self.card_samples_tab.clearing
+            self._recordings_clearing
+            or self.card_samples_tab.clearing
             or self.card_samples_tab.formalizing
             or self.failure_samples_tab.clearing
             or self.battlefield_data_tab.busy
@@ -576,7 +579,7 @@ class CrXUI(ttk.Window):
 
     def set_button_state(self, state):
         self._state = state
-        busy = state in ("starting", "running")
+        busy = state in ("starting", "running") or self._recordings_clearing
         self.card_samples_tab.set_running(busy)
         self.failure_samples_tab.set_running(busy)
         self.battlefield_data_tab.set_running(busy)
@@ -634,6 +637,9 @@ class CrXUI(ttk.Window):
         self._append_log_line(self.recognition_log, f"{timestamp} [{source}] {message}")
 
     def _schedule_storage_update(self):
+        if self._recordings_clearing:
+            self.after(30000, self._schedule_storage_update)
+            return
         custom = self.variables[UIField.RECORDING_FOLDER_PATH].get()
         valid, message = validate_recordings_path(custom)
         self.storage_var.set(message)
@@ -658,18 +664,39 @@ class CrXUI(ttk.Window):
         try:
             custom, text = self._storage_results.get_nowait()
             self._storage_busy = False
-            if custom == self.variables[UIField.RECORDING_FOLDER_PATH].get():
+            if not self._recordings_clearing and custom == self.variables[UIField.RECORDING_FOLDER_PATH].get():
                 self.storage_var.set(text)
+        except Empty:
+            pass
+        try:
+            text = self._recording_clear_results.get_nowait()
+            self._recordings_clearing = False
+            self.storage_var.set(text)
+            self.set_button_state(self._state)
         except Empty:
             pass
         self.after(200, self._poll_storage)
 
     def _clear_recordings(self):
+        if self._state != "idle" or self._recordings_clearing:
+            return
         custom = self.variables[UIField.RECORDING_FOLDER_PATH].get()
-        if messagebox.askyesno(
+        if not messagebox.askyesno(
             "清理录制文件",
             f"确认删除以下目录中的 crX 录制包和归档文件？\n{get_recordings_dir(custom_path=custom)}",
             parent=self,
         ):
-            removed, freed = clear_recordings(custom_path=custom)
-            self.storage_var.set(f"已删除 {removed} 个录制包，释放 {freed / 1024**3:.2f} GiB")
+            return
+        self._recordings_clearing = True
+        self.set_button_state(self._state)
+        self.storage_var.set("正在清理录制文件……")
+
+        def clear():
+            try:
+                removed, freed = clear_recordings(custom_path=custom)
+                text = f"已删除 {removed} 个录制包，释放 {freed / 1024**3:.2f} GiB"
+            except OSError as error:
+                text = f"录制清理未完成：{error}"
+            self._recording_clear_results.put(text)
+
+        threading.Thread(target=clear, name="recording-clear", daemon=True).start()

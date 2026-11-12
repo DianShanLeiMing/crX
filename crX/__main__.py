@@ -100,6 +100,9 @@ class BotApplication:
     def _on_start(self):
         if self._closing or self._starting or self.process is not None:
             return
+        if self.ui._recordings_clearing:
+            self.ui.set_status("请等待录制文件清理完成")
+            return
         if self.ui.card_samples_tab.formalizing:
             self.ui.after(100, self._on_start)
             return

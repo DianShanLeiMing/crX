@@ -543,6 +543,7 @@ def test_start_waits_for_card_sync_and_uses_local_data_on_failure(monkeypatch, t
 
     application = app.BotApplication.__new__(app.BotApplication)
     application.ui = Mock()
+    application.ui._recordings_clearing = False
     application.ui.card_samples_tab.root = tmp_path
     application.ui.card_samples_tab.formalizing = False
     application.ui.battlefield_data_tab.busy = False
@@ -568,6 +569,74 @@ def test_start_waits_for_card_sync_and_uses_local_data_on_failure(monkeypatch, t
     application._poll()
     sync.assert_called_once_with(tmp_path)
     launch.assert_called_once_with({"test": True}, "卡牌同步未完成，使用本机已有数据：远端不可用")
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_recording_clear_runs_in_background_and_restores_controls(desktop_ui, monkeypatch, fails):
+    import threading
+
+    from crX.interface import ui as ui_module
+
+    ui, _root = desktop_ui
+    _wait_ui(ui, lambda: not ui._samples_clearing())
+    entered, release = threading.Event(), threading.Event()
+    threads = []
+    confirmations = []
+
+    def clear(*, custom_path):
+        threads.append(threading.get_ident())
+        entered.set()
+        if not release.wait(5):
+            raise OSError("测试等待超时")
+        if fails:
+            raise OSError("文件正在使用")
+        return 2, 1024**3
+
+    monkeypatch.setattr(ui_module, "clear_recordings", clear)
+    monkeypatch.setattr(ui_module.messagebox, "askyesno", lambda *a, **kw: confirmations.append(True) or True)
+    try:
+        ui.set_button_state("running")
+        ui._clear_recordings()
+        assert not confirmations
+        ui.set_button_state("idle")
+        ui._clear_recordings()
+        assert ui._recordings_clearing
+        assert str(ui.main_btn.cget("state")) == "disabled"
+        assert str(ui.clear_button.cget("state")) == "disabled"
+        assert not ui.can_start()
+        ui._clear_recordings()
+        assert len(confirmations) == 1
+        heartbeat = []
+        ui.after(0, lambda: heartbeat.append(True))
+        _wait_ui(ui, lambda: heartbeat and entered.is_set())
+        assert len(threads) == 1 and threads[0] != threading.get_ident()
+        release.set()
+        _wait_ui(ui, lambda: not ui._recordings_clearing)
+        expected = "录制清理未完成：文件正在使用" if fails else "已删除 2 个录制包，释放 1.00 GiB"
+        assert ui.storage_var.get() == expected
+        assert str(ui.main_btn.cget("state")) == "normal"
+        assert str(ui.clear_button.cget("state")) == "normal"
+    finally:
+        release.set()
+        _wait_ui(ui, lambda: not ui._recordings_clearing)
+        ui.set_button_state("idle")
+
+
+def test_start_waits_for_recording_clear(desktop_ui):
+    from crX.__main__ import BotApplication
+
+    ui, _root = desktop_ui
+    application = BotApplication.__new__(BotApplication)
+    application.ui = ui
+    application._closing = application._starting = False
+    application.process = None
+    ui._recordings_clearing = True
+    try:
+        application._on_start()
+        assert ui.status_var.get() == "请等待录制文件清理完成"
+        assert application.process is None
+    finally:
+        ui._recordings_clearing = False
 
 
 def test_new_worker_resets_previous_session_stats(desktop_ui, monkeypatch):
