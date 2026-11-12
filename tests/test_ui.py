@@ -699,6 +699,72 @@ def test_recognition_samples_reach_the_right_log_without_replacing_worker_stats(
     assert ui.recognition_log.get("1.0", "end").strip() == "[YOLO] 等待模型接入"
 
 
+def test_settings_changes_are_coalesced_and_can_be_flushed(desktop_ui, monkeypatch):
+    from unittest.mock import Mock
+
+    from crX import __main__ as app
+
+    ui, _root = desktop_ui
+    application = app.BotApplication.__new__(app.BotApplication)
+    application.ui = ui
+    save = Mock()
+    monkeypatch.setattr(app.USER_SETTINGS_CACHE, "cache_data", save)
+    for count in (1, 12, 123):
+        application._on_config_change({UIField.MAX_FIGHTS: count})
+    save.assert_not_called()
+    _wait_ui(ui, lambda: save.called)
+    save.assert_called_once_with({UIField.MAX_FIGHTS: 123})
+    application._on_config_change({UIField.MAX_FIGHTS: 5})
+    application._save_settings()
+    assert save.call_count == 2
+    assert save.call_args.args == ({UIField.MAX_FIGHTS: 5},)
+    assert application._settings_after is None
+
+
+def test_poll_preserves_feedback_until_the_runtime_status_changes(desktop_ui):
+    from queue import Queue
+
+    from crX.__main__ import BotApplication
+    from crX.utils.logger import Logger
+
+    ui, _root = desktop_ui
+    application = BotApplication.__new__(BotApplication)
+    application.ui = ui
+    application.logger = Logger(timed=False)
+    application.last_stats = {}
+    application.process = application.stats_queue = None
+    application.device_results = Queue()
+    application._closing = False
+    try:
+        application._poll()
+        ui.set_status("执行局数必须是整数")
+        application._poll()
+        assert ui.status_var.get() == "执行局数必须是整数"
+        application.logger.change_status("正在连接设备")
+        application._poll()
+        assert ui.status_var.get() == "正在连接设备"
+    finally:
+        application._closing = True
+
+
+def test_unchanged_stats_do_not_rewrite_widgets_or_redraw_the_gauge(desktop_ui):
+    ui, _root = desktop_ui
+    stats = {"wins": 5, "winrate": "50%", "time_since_start": "00:00:01"}
+    ui.update_stats(stats)
+    changes = []
+    traces = {key: ui.stat_variables[key].trace_add("write", lambda *_, k=key: changes.append(k)) for key in stats}
+    arc = ui.gauge._arc_fg
+    try:
+        ui.update_stats(stats)
+        assert changes == []
+        ui.update_stats(stats | {"time_since_start": "00:00:02"})
+        assert changes == ["time_since_start"]
+        assert ui.gauge._arc_fg == arc
+    finally:
+        for key, token in traces.items():
+            ui.stat_variables[key].trace_remove("write", token)
+
+
 def test_deck_checkbox_order_priority_and_json_roundtrip(desktop_ui, tmp_path, monkeypatch):
     from crX.__main__ import BotApplication, make_job_dictionary
     from crX.utils import caching
@@ -720,6 +786,7 @@ def test_deck_checkbox_order_priority_and_json_roundtrip(desktop_ui, tmp_path, m
         assert ui.get_all_values()[UIField.SELECTED_DECKS] == [4, 7, 2]
         ui.variables[UIField.RANDOM_DECKS_USER_TOGGLE].set(True)
         ui.variables[UIField.CYCLE_DECKS_USER_TOGGLE].set(True)
+        _wait_ui(ui, lambda: getattr(application, "_pending_settings", None) is None)
         persisted = caching.USER_SETTINGS_CACHE.load_data()
         assert persisted[UIField.RANDOM_DECKS_USER_TOGGLE] is True
         assert persisted[UIField.CYCLE_DECKS_USER_TOGGLE] is True

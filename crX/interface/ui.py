@@ -379,7 +379,7 @@ class CrXUI(ttk.Window):
         )
         for column in (1, 2, 3):
             summary.columnconfigure(column, weight=1, uniform="stats")
-        self.update_stats({})
+        self.update_stats({"winrate": "0%", "time_since_start": "00:00:00"})
         log_frame = ttk.Frame(self.stats_splitter)
         self.stats_splitter.add(log_frame, minsize=80, stretch="always")
         ttk.Separator(log_frame, orient="horizontal").pack(fill="x", pady=(0, 6))
@@ -593,25 +593,29 @@ class CrXUI(ttk.Window):
             widget.configure(state="disabled" if busy else normal_state)
 
     def update_stats(self, stats):
+        changed = False
         for key, variable in self.stat_variables.items():
-            if key in stats:
+            if key in stats and variable.get() != str(stats[key]):
                 variable.set(str(stats[key]))
+                changed = True
+        if not changed:
+            return
         try:
             rate = float(self.stat_variables["winrate"].get().rstrip("%"))
         except ValueError:
             rate = 0
-        self.gauge._draw_dynamic(rate, f"{rate:.1f}%")
-        self.mode_distribution_var.set(
-            "模式分布    "
-            + "  ·  ".join(
-                f"{title} {self.stat_variables[key].get()}"
-                for key, title in (
-                    ("classic_1v1_fights", "经典 1v1"),
-                    ("classic_2v2_fights", "经典 2v2"),
-                    ("trophy_road_1v1_fights", "皇室征程"),
-                )
+        if self.gauge._value != rate:
+            self.gauge._draw_dynamic(rate, f"{rate:.1f}%")
+        distribution = "模式分布    " + "  ·  ".join(
+            f"{title} {self.stat_variables[key].get()}"
+            for key, title in (
+                ("classic_1v1_fights", "经典 1v1"),
+                ("classic_2v2_fights", "经典 2v2"),
+                ("trophy_road_1v1_fights", "皇室征程"),
             )
         )
+        if self.mode_distribution_var.get() != distribution:
+            self.mode_distribution_var.set(distribution)
 
     def set_status(self, status):
         self.status_var.set(status)

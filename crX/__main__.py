@@ -174,6 +174,21 @@ class BotApplication:
         self.ui.set_button_state("idle")
 
     def _on_config_change(self, values):
+        self._pending_settings = values.copy()
+        pending = getattr(self, "_settings_after", None)
+        if pending is not None:
+            self.ui.after_cancel(pending)
+        self._settings_after = self.ui.after(300, self._save_settings)
+
+    def _save_settings(self):
+        pending = getattr(self, "_settings_after", None)
+        if pending is not None:
+            self.ui.after_cancel(pending)
+            self._settings_after = None
+        values = getattr(self, "_pending_settings", None)
+        if values is None:
+            return
+        self._pending_settings = None
         try:
             USER_SETTINGS_CACHE.cache_data(values)
         except OSError as error:
@@ -283,7 +298,9 @@ class BotApplication:
         if self.process is not None:
             stats["time_since_start"] = self.logger.calc_time_since_start()
         self.ui.update_stats(stats)
-        self.ui.set_status(self.logger.current_status)
+        if self.logger.current_status != getattr(self, "_last_polled_status", None):
+            self._last_polled_status = self.logger.current_status
+            self.ui.set_status(self.logger.current_status)
         try:
             kind, result = self.device_results.get_nowait()
             if kind == "card_sync":
@@ -313,6 +330,7 @@ class BotApplication:
 
     def _on_close(self):
         self._closing = True
+        self._save_settings()
         self.ui.battlefield_data_tab.stop()
         self.ui.dataset_split_tab.stop()
         stop_worker_process(self.process, self.shutdown_event)
