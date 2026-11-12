@@ -138,9 +138,9 @@ class BotApplication:
         self.ui.set_status(status)
         self.stats_queue = mp.Queue(maxsize=100)
         self.shutdown_event = mp.Event()
-        self.last_stats = {}
         self.logger = Logger()
         self.logger.change_status(status)
+        self.last_stats = self.logger.get_stats()
         self.process = WorkerProcess(jobs, self.stats_queue, self.shutdown_event, log_name)
         try:
             self.process.start()
@@ -151,6 +151,7 @@ class BotApplication:
             self.ui.set_button_state("idle")
             return
         self.ui.set_button_state("running")
+        self.ui.update_stats(self.last_stats)
         self.ui.reset_recognition_log()
         self.ui.notebook.select(self.ui.stats_tab)
 

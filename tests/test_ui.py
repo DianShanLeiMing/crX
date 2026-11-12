@@ -570,6 +570,39 @@ def test_start_waits_for_card_sync_and_uses_local_data_on_failure(monkeypatch, t
     launch.assert_called_once_with({"test": True}, "卡牌同步未完成，使用本机已有数据：远端不可用")
 
 
+def test_new_worker_resets_previous_session_stats(desktop_ui, monkeypatch):
+    from unittest.mock import Mock
+
+    from crX import __main__ as app
+
+    ui, _root = desktop_ui
+    ui.update_stats({key: "50%" if key == "winrate" else 9 for key in ui.stat_variables})
+    application = app.BotApplication.__new__(app.BotApplication)
+    application.ui = ui
+    worker = Mock()
+    monkeypatch.setattr(app, "WorkerProcess", Mock(return_value=worker))
+    monkeypatch.setattr(app.mp, "Queue", Mock())
+    monkeypatch.setattr(app.mp, "Event", Mock())
+
+    try:
+        application._launch_worker({}, "使用本机卡牌数据")
+        worker.start.assert_called_once()
+        assert application.last_stats["wins"] == 0
+        assert ui.stat_variables["time_since_start"].get() == "00:00:00"
+        assert ui.stat_variables["winrate"].get() == "0%"
+        assert all(
+            variable.get() == "0"
+            for key, variable in ui.stat_variables.items()
+            if key not in {"time_since_start", "winrate"}
+        )
+        ui.update_stats({"completed_fights": 1})
+        ui.set_button_state("idle")
+        assert ui.stat_variables["completed_fights"].get() == "1"
+        assert ui.stat_variables["wins"].get() == "0"
+    finally:
+        ui.set_button_state("idle")
+
+
 def test_recognition_samples_reach_the_right_log_without_replacing_worker_stats(desktop_ui):
     from queue import Queue
 
