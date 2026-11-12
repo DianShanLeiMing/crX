@@ -92,7 +92,12 @@ class BotApplication:
         self.ui.after(300, lambda: self._device_action("refresh"))
 
     def _on_main_button(self):
-        if self.process and self.process.is_alive():
+        if self._starting:
+            self._sync_cancel.set()
+            self.ui.set_button_state("cancelling")
+            self.logger.change_status("已取消启动，正在结束卡牌同步……")
+            self.ui.set_status(self.logger.current_status)
+        elif self.process and self.process.is_alive():
             self._on_stop()
         else:
             self._on_start()
@@ -121,15 +126,20 @@ class BotApplication:
             no_jobs_popup()
             return
         USER_SETTINGS_CACHE.cache_data(jobs)
+        if not jobs.get(UIField.SYNC_CARDS_ON_START, True):
+            self._launch_worker(jobs, "使用本机卡牌数据（已跳过远端同步）")
+            return
         root = self.ui.card_samples_tab.root
         self._starting = True
+        self._sync_cancel = threading.Event()
+        cancel_event = self._sync_cancel
         self.ui.set_button_state("starting")
         self.logger.change_status("正在同步远端卡牌数据……")
         self.ui.set_status(self.logger.current_status)
 
         def sync():
             try:
-                status = update_from_remote(root)
+                status = update_from_remote(root, cancel_event=cancel_event)
             except Exception as error:
                 status = f"卡牌同步未完成，使用本机已有数据：{error}"
             self.device_results.put(("card_sync", (jobs, status)))
@@ -304,7 +314,12 @@ class BotApplication:
         try:
             kind, result = self.device_results.get_nowait()
             if kind == "card_sync":
-                self._launch_worker(*result)
+                if self._sync_cancel.is_set():
+                    self._starting = False
+                    self.logger.change_status("已取消启动")
+                    self.ui.set_button_state("idle")
+                else:
+                    self._launch_worker(*result)
             elif kind == "instances":
                 self._device_busy = False
                 indices = [item["index"] for item in result]
@@ -330,6 +345,9 @@ class BotApplication:
 
     def _on_close(self):
         self._closing = True
+        cancel_event = getattr(self, "_sync_cancel", None)
+        if cancel_event is not None:
+            cancel_event.set()
         self._save_settings()
         self.ui.battlefield_data_tab.stop()
         self.ui.dataset_split_tab.stop()

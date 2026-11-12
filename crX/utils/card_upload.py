@@ -12,6 +12,10 @@ from collections import Counter
 from copy import deepcopy
 from functools import lru_cache
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from threading import Event
 
 from crX.utils import card_workflow as workflow
 from crX.utils import formal_library as formal
@@ -129,8 +133,10 @@ def _baseline_ref(remote, target):
     return f"refs/crx/card-data/{scope}"
 
 
-def update_from_remote(root, *, reset_cards=()):
+def update_from_remote(root, *, reset_cards=(), cancel_event: Event | None = None):
     """Fetch and apply only card data, without changing the checked-out branch."""
+    if cancel_event is not None and cancel_event.is_set():
+        return "卡牌同步已取消"
     repo = _project_root()
     if not formal.source_checkout() or formal.formal_path().resolve() != repo / LIBRARY_FILE:
         if reset_cards:
@@ -148,6 +154,8 @@ def update_from_remote(root, *, reset_cards=()):
     ):
         remote, target = _upstream_target(repo)
         _git(repo, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", remote, target, timeout=20)
+        if cancel_event is not None and cancel_event.is_set():
+            return "卡牌同步已取消"
         revision = _text(repo, "rev-parse", "--verify", "FETCH_HEAD")
         baseline_ref = _baseline_ref(remote, target)
         common = _text(repo, "merge-base", "HEAD", revision)
@@ -190,6 +198,8 @@ def update_from_remote(root, *, reset_cards=()):
             path = directory / filename
             path.write_bytes(_payload(document))
             reader(path)
+        if cancel_event is not None and cancel_event.is_set():
+            return "卡牌同步已取消"
         if result != local_entries:
             workflow._commit(root, local_entries, result, [])
         if order_document != local_order:

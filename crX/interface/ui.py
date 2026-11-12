@@ -432,6 +432,12 @@ class CrXUI(ttk.Window):
         self.theme_combo.pack(anchor="w", pady=(6, 20))
         self.theme_combo.bind("<<ComboboxSelected>>", lambda event: self._select_theme())
         self.config_widgets.append((self.theme_combo, "readonly"))
+        self._checkbox(
+            self.settings_tab,
+            UIField.SYNC_CARDS_ON_START,
+            "启动前同步卡牌数据",
+            "关闭后直接使用本机已有参考库启动；同步中可点击顶部按钮取消启动。",
+        )
         self._checkbox(self.settings_tab, UIField.RECORD_FIGHTS_TOGGLE, "录制 1v1／皇室征程训练数据")
         ttk.Label(
             self.settings_tab,
@@ -572,22 +578,24 @@ class CrXUI(ttk.Window):
         )
 
     def _update_clear_busy(self, _busy=None):
-        self.main_btn.configure(state="disabled" if self._state == "starting" or self._samples_clearing() else "normal")
+        self.main_btn.configure(
+            state="disabled" if self._state == "cancelling" or self._samples_clearing() else "normal"
+        )
 
     def get_button_state(self):
         return self._state
 
     def set_button_state(self, state):
         self._state = state
-        busy = state in ("starting", "running") or self._recordings_clearing
+        busy = state in ("starting", "cancelling", "running") or self._recordings_clearing
         self.card_samples_tab.set_running(busy)
         self.failure_samples_tab.set_running(busy)
         self.battlefield_data_tab.set_running(busy)
         self.dataset_split_tab.set_running(busy)
         self._update_clear_busy()
         self.main_btn.configure(
-            text={"starting": "同步卡牌中…", "running": "停止"}.get(state, "启动"),
-            bootstyle="danger" if state == "running" else "success",
+            text={"starting": "取消启动", "cancelling": "正在取消…", "running": "停止"}.get(state, "启动"),
+            bootstyle="danger" if state in ("starting", "running") else "success",
         )
         for widget, normal_state in self.config_widgets:
             widget.configure(state="disabled" if busy else normal_state)

@@ -93,6 +93,7 @@ DEFAULTS.update(
         UIField.ADB_PATH.value: "",
         UIField.ADB_SERIAL.value: "",
         UIField.THEME_NAME.value: "darkly",
+        UIField.SYNC_CARDS_ON_START.value: True,
         UIField.RECORD_FIGHTS_TOGGLE.value: False,
         UIField.RECORDING_FOLDER_PATH.value: "",
         UIField.MAX_FIGHTS.value: 0,

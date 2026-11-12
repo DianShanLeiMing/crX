@@ -19,6 +19,7 @@ class UIField(StrEnum):
     RECORD_FIGHTS_TOGGLE = "record_fights_toggle"
     RECORDING_FOLDER_PATH = "recording_folder_path"
     THEME_NAME = "theme_name"
+    SYNC_CARDS_ON_START = "sync_cards_on_start"
     EMULATOR = "emulator"
     ADB_PATH = "adb_path"
     ADB_SERIAL = "adb_serial"

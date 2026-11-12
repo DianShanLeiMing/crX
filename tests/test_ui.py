@@ -535,7 +535,8 @@ def test_dataset_invalid_input_guidance_and_running_state_block_export(desktop_u
         tab.classes_var.set(original[1])
 
 
-def test_start_waits_for_card_sync_and_uses_local_data_on_failure(monkeypatch, tmp_path):
+@pytest.mark.parametrize("start_mode", ["sync", "local", "cancel"])
+def test_start_waits_for_card_sync_and_uses_local_data_on_failure(monkeypatch, tmp_path, start_mode):
     from queue import Queue
     from unittest.mock import Mock
 
@@ -555,20 +556,33 @@ def test_start_waits_for_card_sync_and_uses_local_data_on_failure(monkeypatch, t
     application.last_stats = {}
     launch = Mock()
     application._launch_worker = launch
-    monkeypatch.setattr(app, "make_job_dictionary", lambda _values: {"test": True})
+    jobs = {"test": True, UIField.SYNC_CARDS_ON_START: start_mode != "local"}
+    monkeypatch.setattr(app, "make_job_dictionary", lambda _values: jobs)
     monkeypatch.setattr(app, "has_start_ready_job", lambda _jobs: True)
     monkeypatch.setattr(app.USER_SETTINGS_CACHE, "cache_data", Mock())
     sync = Mock(side_effect=ValueError("远端不可用"))
     monkeypatch.setattr(app, "update_from_remote", sync)
 
     application._on_start()
+    if start_mode == "local":
+        sync.assert_not_called()
+        launch.assert_called_once_with(jobs, "使用本机卡牌数据（已跳过远端同步）")
+        return
     application.ui.set_button_state.assert_called_once_with("starting")
     launch.assert_not_called()
+    if start_mode == "cancel":
+        application._on_main_button()
+        assert application._sync_cancel.is_set()
     result = application.device_results.get(timeout=5)
     application.device_results.put(result)
     application._poll()
-    sync.assert_called_once_with(tmp_path)
-    launch.assert_called_once_with({"test": True}, "卡牌同步未完成，使用本机已有数据：远端不可用")
+    sync.assert_called_once_with(tmp_path, cancel_event=application._sync_cancel)
+    if start_mode == "cancel":
+        launch.assert_not_called()
+        assert not application._starting
+        application.ui.set_button_state.assert_called_with("idle")
+    else:
+        launch.assert_called_once_with(jobs, "卡牌同步未完成，使用本机已有数据：远端不可用")
 
 
 @pytest.mark.parametrize("fails", [False, True])

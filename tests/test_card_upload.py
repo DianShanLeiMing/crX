@@ -66,6 +66,34 @@ def upload_store(tmp_path, monkeypatch):
     return repo, remote, root, add, checks
 
 
+def test_cancelled_sync_does_not_apply_remote_data(tmp_path, monkeypatch):
+    from threading import Event
+    from unittest.mock import Mock
+
+    cancelled = Event()
+    destination = tmp_path / upload.LIBRARY_FILE
+    destination.parent.mkdir(parents=True)
+    atomic_json(destination, {"version": 1, "entries": []})
+    original = destination.read_bytes()
+    monkeypatch.setattr(upload, "_project_root", lambda: tmp_path)
+    monkeypatch.setattr(formal, "formal_path", lambda: destination)
+    monkeypatch.setattr(formal, "source_checkout", lambda: True)
+    monkeypatch.setattr(upload.preferences, "preferences_path", lambda: tmp_path / "preferences.json")
+    monkeypatch.setattr(upload, "_upstream_target", lambda _repo: ("origin", "refs/heads/main"))
+    fetch = Mock(side_effect=lambda *a, **kw: cancelled.set())
+    monkeypatch.setattr(upload, "_git", fetch)
+    commit = Mock()
+    monkeypatch.setattr(workflow, "_commit", commit)
+
+    assert upload.update_from_remote(tmp_path / "samples", cancel_event=cancelled) == "卡牌同步已取消"
+    assert fetch.call_args.args[1] == "fetch"
+    commit.assert_not_called()
+    assert destination.read_bytes() == original
+    fetch.reset_mock()
+    assert upload.update_from_remote(tmp_path / "samples", cancel_event=cancelled) == "卡牌同步已取消"
+    fetch.assert_not_called()
+
+
 def test_card_data_sync_keeps_code_and_local_hits_until_selected_reset(upload_store, tmp_path):
     repo, remote, root, add, _checks = upload_store
     sample = add("first")
