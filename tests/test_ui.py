@@ -5,6 +5,7 @@ import os
 import sys
 import time
 import tkinter as tk
+from tkinter import ttk
 
 import pytest
 
@@ -54,7 +55,13 @@ def test_tabs_settings_themes_and_running_state(desktop_ui):
             "设置",
         ]
         assert [ui.run_tabs.tab(tab, "text") for tab in ui.run_tabs.tabs()] == ["任务配置", "运行统计"]
-        assert [ui.data_tabs.tab(tab, "text") for tab in ui.data_tabs.tabs()] == ["卡牌样本", "异常流程", "YOLO 数据"]
+        assert [ui.data_tabs.tab(tab, "text") for tab in ui.data_tabs.tabs()] == [
+            "卡牌样本",
+            "样本库",
+            "异常流程",
+            "YOLO 数据",
+        ]
+        assert ui.card_samples_tab.library_view.master is ui.samples_library_tab
         assert ui.get_all_values()[UIField.MAX_FIGHTS] == "0"
         ui.set_all_values({UIField.MAX_FIGHTS: 5})
         assert ui.max_fights_spinbox.get() == "5"
@@ -1325,8 +1332,11 @@ def review_ui(desktop_ui, tmp_path, monkeypatch):
     monkeypatch.setattr(local, "sample_fingerprint", lambda sample: values[sample.key])
     window = tk.Toplevel(ui)
     window.geometry("850x740")
-    tab = CardReviewTab(window, root=tmp_path)
-    tab.pack(fill="both", expand=True)
+    pages = ttk.Notebook(window)
+    pages.pack(fill="both", expand=True)
+    tab = CardReviewTab(pages, root=tmp_path)
+    pages.add(tab, text="卡牌样本")
+    pages.add(tab.library_tab, text="样本库")
     errors = []
     original_handler = ui.report_callback_exception
     ui.report_callback_exception = lambda *args: errors.append(args)
@@ -2118,11 +2128,12 @@ def test_catalog_search_and_upload_archive_clean_images(review_ui, monkeypatch):
         tab.card_var.set("knight")
         tab.stage_buttons["confirm"].invoke()
         finish(ui, tab)
-    tab.catalog_button.invoke()
+    tab.master.select(tab.library_tab)
     ui.update()
-    assert tab.filter_var.get() == "样本库"
+    assert tab.master.select() == str(tab.library_tab)
+    assert tab.filter_var.get() == "待确认"
     assert not tab.review_tools.winfo_ismapped()
-    assert tab.catalog_button.cget("text") == "返回样本管理"
+    assert not hasattr(tab, "catalog_button")
     view = tab.library_view
     assert len(view.cards.get_children()) >= len(CARD_NAMES_ZH)
     assert not tab.body_panes.winfo_ismapped() and not tab.selection_tools.winfo_ismapped()
@@ -2158,7 +2169,7 @@ def test_catalog_search_and_upload_archive_clean_images(review_ui, monkeypatch):
     view._sort_counts()
     assert view.cards.get_children()[-1] == "knight"
     before = destination.read_bytes()
-    tab.catalog_button.invoke()
+    tab.master.select(tab)
     ui.update()
     assert tab.filter_var.get() == "待确认"
     assert tab.review_tools.winfo_ismapped()
@@ -2179,9 +2190,9 @@ def test_catalog_search_and_upload_archive_clean_images(review_ui, monkeypatch):
     assert all(tab.samples[sample.key].uploaded for sample in (first, second))
     assert destination.read_bytes() == before
     assert all(not sample.file(kind).exists() for sample in (first, second) for kind in ("card", "hand", "frame"))
-    tab.catalog_button.invoke()
+    tab.master.select(tab.library_tab)
     ui.update()
-    assert tab.filter_var.get() == "样本库"
+    assert tab.master.select() == str(tab.library_tab)
     view.query.set("knight")
     ui.update()
     assert view.cards.set("knight", "count") == "2"
@@ -2203,11 +2214,10 @@ def test_catalog_search_and_upload_archive_clean_images(review_ui, monkeypatch):
     tab.set_running(False)
     tab.refresh()
     _wait_ui(ui, lambda: not tab._scan_busy)
-    assert tab.filter_var.get() == "样本库" and not tab.review_tools.winfo_ismapped()
-    tab.catalog_button.invoke()
+    assert tab.master.select() == str(tab.library_tab) and not tab.review_tools.winfo_ismapped()
+    tab.master.select(tab)
     ui.update()
     assert tab.filter_var.get() == "待更新" and tab.body_panes.winfo_ismapped()
-    assert tab.catalog_button.cget("text") == "样本库"
 
 
 def test_legacy_trial_is_visible_pending_and_can_be_approved(review_ui):
@@ -2234,7 +2244,7 @@ def test_catalog_reset_requires_confirmation_and_uses_checked_cards(review_ui, m
     tab.card_var.set("knight")
     tab.stage_buttons["confirm"].invoke()
     finish(ui, tab)
-    tab.catalog_button.invoke()
+    tab.master.select(tab.library_tab)
     _wait_ui(ui, lambda: not tab._scan_busy)
     view = tab.library_view
     view.query.set("knight")
@@ -2301,7 +2311,7 @@ def test_catalog_clear_and_global_metadata_upload(review_ui, monkeypatch):
     tab.card_var.set("knight")
     tab.stage_buttons["confirm"].invoke()
     finish(ui, tab)
-    tab.catalog_button.invoke()
+    tab.master.select(tab.library_tab)
     _wait_ui(ui, lambda: not tab._scan_busy)
     view = tab.library_view
     view.query.set("knight")
@@ -2319,7 +2329,7 @@ def test_catalog_clear_and_global_metadata_upload(review_ui, monkeypatch):
     assert view.references.set(key, "hits") == "0"
     assert "线上数据保留" in view.message.get()
     assert not hasattr(view, "preferred_button") and not hasattr(view, "hits_check")
-    assert "命中变化" in tab.summary_var.get()
+    assert "命中变化" in tab.library_summary_var.get()
 
     giant = view.data["giant"][0].identifier
     unselected = "a" * 16
@@ -2381,7 +2391,7 @@ def test_catalog_drag_persists_order_and_allows_moving_first_choice(review_ui):
         tab.card_var.set("knight")
         tab.stage_buttons["confirm"].invoke()
         finish(ui, tab)
-    tab.catalog_button.invoke()
+    tab.master.select(tab.library_tab)
     _wait_ui(ui, lambda: not tab._scan_busy)
     view = tab.library_view
     view.query.set("knight")
@@ -2563,7 +2573,7 @@ def test_catalog_drop_remains_visible_until_background_save_completes(review_ui,
         tab.card_var.set("knight")
         tab.stage_buttons["confirm"].invoke()
         finish(ui, tab)
-    tab.catalog_button.invoke()
+    tab.master.select(tab.library_tab)
     _wait_ui(ui, lambda: not tab._scan_busy)
     view = tab.library_view
     view.query.set("knight")

@@ -95,11 +95,13 @@ class CrXUI(ttk.Window):
             count_callback=self._update_sample_count,
             clear_busy_callback=self._update_clear_busy,
         )
+        self.samples_library_tab = self.card_samples_tab.library_tab
         self.failure_samples_tab = FailureReviewTab(
             self.data_tabs, count_callback=self._update_failure_count, clear_busy_callback=self._update_clear_busy
         )
         for tab, title in (
             (self.card_samples_tab, "卡牌样本"),
+            (self.samples_library_tab, "样本库"),
             (self.failure_samples_tab, "异常流程"),
             (self.yolo_data_tabs, "YOLO 数据"),
         ):

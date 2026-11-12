@@ -42,7 +42,6 @@ MODE_LABELS = {"practice": "练习", "1v1": "1v1", "2v2": "2v2"}
 STAGE_ACTIONS = {
     "待确认": ("confirm",),
     "待更新": ("rename", "remove"),
-    "样本库": (),
 }
 COLUMN_SPECS = {
     "group": ("相似分组", 100),
@@ -150,8 +149,6 @@ class CardReviewTab(ttk.Frame):
         header = ttk.Frame(self)
         header.grid(row=0, column=0, sticky="ew")
         ttk.Label(header, textvariable=self.summary_var).pack(side="left")
-        self.catalog_button = ttk.Button(header, text="样本库", bootstyle="secondary", command=self._toggle_catalog)
-        self.catalog_button.pack(side="right", padx=(0, 6))
         tools = ttk.Frame(self)
         self.review_tools = tools
         tools.grid(row=1, column=0, sticky="ew", pady=4)
@@ -420,13 +417,28 @@ class CardReviewTab(ttk.Frame):
         self._later(30, self._fit_controls)
         self._later(100, self._poll)
         self._later(5000, self._auto_refresh)
+        self.library_tab = ttk.Frame(parent, padding=12)
+        self.library_tab.columnconfigure(0, weight=1)
+        self.library_tab.rowconfigure(1, weight=1)
+        library_header = ttk.Frame(self.library_tab)
+        library_header.grid(row=0, column=0, sticky="ew")
+        self.library_summary_var = tk.StringVar(value="正在读取样本库……")
+        ttk.Label(library_header, textvariable=self.library_summary_var).pack(side="left")
         self.library_view = CardCatalogView(
-            self,
+            self.library_tab,
             refresh=self.refresh,
             action=self._catalog_action,
             reorder=self._reorder_catalog,
             status=self.message_var,
         )
+        self.library_view.grid(row=1, column=0, sticky="nsew")
+        ttk.Button(library_header, text="刷新", bootstyle="secondary", command=self.library_view.refresh_order).pack(
+            side="right"
+        )
+        ttk.Label(self.library_tab, textvariable=self.upload_status_var, wraplength=640).grid(
+            row=2, column=0, sticky="ew", pady=(4, 0)
+        )
+        self.library_tab.bind("<Map>", lambda _event: self.library_view.refresh_order())
         self._later(0, self.refresh)
 
     def _update_review_theme(self, _event=None):
@@ -729,6 +741,7 @@ class CardReviewTab(ttk.Frame):
             for identifier in self._after_ids:
                 self.after_cancel(identifier)
             self._after_ids.clear()
+            self.library_tab.destroy()
 
     def _background(self, kind, operation, token=None):
         results = self._results
@@ -777,14 +790,6 @@ class CardReviewTab(ttk.Frame):
         self.filter_var.set(tuple(REVIEW_TABS)[index])
         self._selection_cleared = False
         self._render_list()
-
-    def _toggle_catalog(self):
-        if self.filter_var.get() == "样本库":
-            self._switch_tab()
-        else:
-            self.library_view.refresh_order()
-            self.filter_var.set("样本库")
-            self._render_list()
 
     def set_running(self, running):
         self._running = running
@@ -932,6 +937,7 @@ class CardReviewTab(ttk.Frame):
                         changes = self.library_view.describe_changes(catalog)
                         self.library_view.finish_refresh(f"{feedback} · {changes}")
                     self.library_view.set_data(catalog)
+                    self.library_summary_var.set(self.library_view.summary)
                     self._update_groups(groups)
                     counts = Counter(sample.review.get("work_result", "pending") for sample in samples)
                     included_cards = len(
@@ -1004,8 +1010,7 @@ class CardReviewTab(ttk.Frame):
                 if kind == "clear_hits" and error is None:
                     result, (counts, changed) = result
                     self.library_view.update_hits(counts, changed)
-                    if self.filter_var.get() == "样本库":
-                        self.summary_var.set(self.library_view.summary)
+                    self.library_summary_var.set(self.library_view.summary)
                 if error:
                     self._history_pending = True
                 self._action_busy = self.formalizing = self.clearing = False
@@ -1052,20 +1057,8 @@ class CardReviewTab(ttk.Frame):
         return columns
 
     def _render_list(self):
-        if self.filter_var.get() == "样本库":
-            self.body_panes.grid_remove()
-            self.review_tools.grid_remove()
-            self.summary_var.set(self.library_view.summary)
-            self.catalog_button.configure(text="返回样本管理")
-            self.filters_panel.pack_forget()
-            self.selection_tools.pack_forget()
-            self.library_view.grid(row=2, column=0, sticky="nsew")
-            self._set_action_state()
-            return
-        self.library_view.grid_remove()
         self.review_tools.grid()
         self.summary_var.set(getattr(self, "_review_summary", "正在读取卡牌样本……"))
-        self.catalog_button.configure(text="样本库")
         self.filters_panel.pack(fill="x")
         self.selection_tools.pack(fill="x", pady=(4, 0))
         self.body_panes.grid()
@@ -1538,13 +1531,10 @@ class CardReviewTab(ttk.Frame):
             {
                 "待确认": "核对卡名与版本后确认并入库；无需保留的样本可选中后删除。正式库已覆盖时无需新增，冲突保留待确认。任务停止后可操作。",
                 "待更新": "在下方选择具体参考更正或移出；上传共享上方选中卡牌的全部正式参考。上传成功后清理来源图片，备注保留。",
-                "样本库": "查询全部卡牌的正式参考数量、名称和编号。",
             }[stage]
         )
 
     def _action_samples(self):
-        if self.filter_var.get() == "样本库":
-            return []
         if self.filter_var.get() == "待更新":
             if len(self.tree.selection()) != 1:
                 return []
