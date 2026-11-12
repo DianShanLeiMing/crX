@@ -524,11 +524,6 @@ class CrXUI(ttk.Window):
             command=lambda: self.open_logs_callback() if self.open_logs_callback else None,
             bootstyle="secondary",
         ).pack(side="left")
-        ttk.Label(
-            self.settings_tab,
-            text="crX 基于 py-clash-bot 精简开发，原工程与素材的许可和署名保留在 LICENSE 与 NOTICE.md 中。",
-            wraplength=700,
-        ).pack(anchor="w", pady=20)
 
     def _browse(self, key, directory=False):
         title = {
