@@ -48,14 +48,13 @@ def test_tabs_settings_themes_and_running_state(desktop_ui):
     try:
         ui.update()
         assert [ui.notebook.tab(tab, "text") for tab in ui.notebook.tabs()] == [
-            "任务",
+            "运行",
             "设备",
-            "统计",
-            "卡牌样本",
-            "异常流程",
-            "YOLO 数据",
+            "数据中心",
             "设置",
         ]
+        assert [ui.run_tabs.tab(tab, "text") for tab in ui.run_tabs.tabs()] == ["任务配置", "运行统计"]
+        assert [ui.data_tabs.tab(tab, "text") for tab in ui.data_tabs.tabs()] == ["卡牌样本", "异常流程", "YOLO 数据"]
         assert ui.get_all_values()[UIField.MAX_FIGHTS] == "0"
         ui.set_all_values({UIField.MAX_FIGHTS: 5})
         assert ui.max_fights_spinbox.get() == "5"
@@ -713,6 +712,30 @@ def test_recognition_samples_reach_the_right_log_without_replacing_worker_stats(
     assert ui.recognition_log.get("1.0", "end").strip() == "[YOLO] 等待模型接入"
 
 
+def test_deck_strategy_choices_are_exclusive_and_preserve_legacy_priority(desktop_ui):
+    ui, _root = desktop_ui
+    original = ui.get_all_values()
+    try:
+        ui.set_all_values({UIField.RANDOM_DECKS_USER_TOGGLE: True, UIField.CYCLE_DECKS_USER_TOGGLE: True})
+        assert ui.deck_strategy_var.get() == "cycle"
+        assert ui.deck_selection_frame.winfo_manager() == "pack"
+        for mode in ("random", "cycle", "current"):
+            ui.deck_strategy_var.set(mode)
+            ui._select_deck_strategy()
+            values = ui.get_all_values()
+            assert values[UIField.RANDOM_DECKS_USER_TOGGLE] is (mode == "random")
+            assert values[UIField.CYCLE_DECKS_USER_TOGGLE] is (mode == "cycle")
+        assert ui.deck_selection_frame.winfo_manager() == ""
+        ui.set_all_values({UIField.MAX_FIGHTS: 5})
+        ui.set_button_state("running")
+        ui.update_stats({"completed_fights": 2, "current_state": "fight"})
+        assert "已完成 2 / 5" in ui.run_summary_var.get()
+        assert "对战中" in ui.run_summary_var.get()
+    finally:
+        ui.set_button_state("idle")
+        ui.set_all_values(original)
+
+
 def test_settings_changes_are_coalesced_and_can_be_flushed(desktop_ui, monkeypatch):
     from unittest.mock import Mock
 
@@ -842,7 +865,7 @@ def test_failure_review_status_and_running_state(desktop_ui):
     tab = ui.failure_samples_tab
     tab.refresh()
     _wait_ui(ui, lambda: tab.selected is not None and tab._preview is not None)
-    assert ui.notebook.tab(tab, "text") == "异常流程 (1)"
+    assert ui.data_tabs.tab(tab, "text") == "异常流程 (1)"
     assert "unknown" in tab.info_var.get()
     assert "validation-session.txt" in tab.info_var.get()
     assert str(tab.zoom_button.cget("state")) == "normal"
@@ -862,12 +885,12 @@ def test_failure_review_status_and_running_state(desktop_ui):
         assert str(tab.buttons[0].cget("state")) == "normal"
         tab.buttons[0].invoke()
         _wait_ui(ui, lambda: not tab._busy and not tab._scan_busy and tab.selected is None)
-        assert ui.notebook.tab(tab, "text") == "异常流程"
+        assert ui.data_tabs.tab(tab, "text") == "异常流程"
         tab.filter_var.set("已处理")
         tab._render()
         tab.buttons[2].invoke()
         _wait_ui(ui, lambda: not tab._busy and not tab._scan_busy)
-        assert ui.notebook.tab(tab, "text") == "异常流程 (1)"
+        assert ui.data_tabs.tab(tab, "text") == "异常流程 (1)"
     finally:
         ui.set_button_state("idle")
 

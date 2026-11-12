@@ -121,6 +121,7 @@ class Logger:
         wins, losses = self.stats["wins"], self.stats["losses"]
         return self.stats | {
             "current_status": self.current_status,
+            "current_state": self.current_state,
             "winrate": f"{100 * wins / (wins + losses):.1f}%" if wins + losses else "0%",
             "time_since_start": self.calc_time_since_start(),
         }

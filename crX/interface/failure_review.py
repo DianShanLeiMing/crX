@@ -125,7 +125,7 @@ class FailureReviewTab(ttk.Frame):
         info = ScrolledFrame(self.details, padding=8, height=240)
         self.details.add(picture, text="失败截图")
         self.details.add(info.container, text="失败信息与日志位置")
-        self.image_label = ttk.Label(picture, text="暂无待处理异常", anchor="center")
+        self.image_label = ttk.Label(picture, text="暂无待处理异常；运行中遇到失败时会自动留样。", anchor="center")
         self.image_label.pack(fill="both", expand=True)
         self.image_label.bind("<Configure>", lambda _: self._draw_preview())
         self.image_label.bind("<Double-Button-1>", lambda _: self._zoom())
@@ -275,7 +275,10 @@ class FailureReviewTab(ttk.Frame):
             self._version += 1
             self._preview = self._photo = None
             self.image_label.configure(
-                image="", text="选择记录查看截图" if self.tree.get_children() else "暂无此类异常流程"
+                image="",
+                text="选择记录查看截图"
+                if self.tree.get_children()
+                else "暂无此类异常流程\n运行中遇到失败时会自动留样，也可切换筛选条件。",
             )
             self.info_var.set("")
             self._set_buttons()

@@ -1173,7 +1173,7 @@ class CardReviewTab(ttk.Frame):
             self._images.clear()
             self._frame_preview = None
             self.detail_var.set("发现未知牌后会自动出现在这里；可切换筛选查看已处理样本。")
-            self.description_var.set("暂无此类样本。")
+            self.description_var.set("暂无此类样本。运行对战可自动采集；已确认的卡牌可在「待更新」中查看。")
             self.card_var.set("")
             self.note_var.set("")
             self.reference_image.configure(image="", text="暂无参考对照")

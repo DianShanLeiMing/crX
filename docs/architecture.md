@@ -2,7 +2,7 @@
 
 ```text
 crX/__main__.py             GUI lifecycle, settings validation, worker/device task dispatch
-  interface/                Jobs / Device / Stats / Settings tabs
+  interface/                Run (jobs/stats) / Device / Data center / Settings tabs
   bot/worker.py             Separate process, bounded recovery, stop helper
     bot/states.py           Serial job state machine + RuntimeContext
       shop_daily_state.py   Hourly daily free-offer check

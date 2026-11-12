@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import tkinter as tk
+import tkinter.font as tkfont
 from queue import Empty, Queue
 from tkinter import filedialog, messagebox
 
@@ -36,8 +37,13 @@ class CrXUI(ttk.Window):
     def __init__(self):
         super().__init__(themename="darkly")
         self.title(f"crX {__version__}")
-        self.geometry("850x760")
+        self.geometry("920x780")
         self.minsize(760, 700)
+        self.font_family = tkfont.nametofont("TkDefaultFont").actual("family")
+        if "Microsoft YaHei UI" in tkfont.families(self):
+            self.font_family = "Microsoft YaHei UI"
+        for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont"):
+            tkfont.nametofont(name).configure(family=self.font_family, size=10)
         self._state = "idle"
         self._storage_busy = False
         self._storage_results = Queue(maxsize=1)
@@ -63,36 +69,45 @@ class CrXUI(ttk.Window):
         self.variables[UIField.DISABLE_WIN_TRACK_TOGGLE].set(not DEFAULTS[UIField.DISABLE_WIN_TRACK_TOGGLE])
         header = ttk.Frame(self, padding=(16, 12))
         header.pack(fill="x")
-        ttk.Label(header, text="crX", font=("Segoe UI", 22, "bold")).pack(side="left")
-        ttk.Label(header, text="皇室战争 · MuMu / ADB").pack(side="left", padx=18)
+        ttk.Label(header, text="crX", font=(self.font_family, 22, "bold")).pack(side="left")
         self.main_btn = ttk.Button(header, text="启动", width=14, bootstyle="success")
         self.main_btn.pack(side="right")
+        self.run_summary_var = tk.StringVar()
+        self._current_step = "start"
+        ttk.Label(header, textvariable=self.run_summary_var, justify="left", wraplength=460).pack(side="left", padx=24)
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True, padx=16, pady=(0, 10))
-        self.jobs_tab = ttk.Frame(self.notebook, padding=16)
+        self.run_tabs = ttk.Notebook(self.notebook)
+        self.data_tabs = ttk.Notebook(self.notebook)
+        self.jobs_tab = ttk.Frame(self.run_tabs, padding=16)
         self.device_tab = ttk.Frame(self.notebook, padding=16)
-        self.stats_tab = ttk.Frame(self.notebook, padding=16)
+        self.stats_tab = ttk.Frame(self.run_tabs, padding=16)
         self.settings_tab = ttk.Frame(self.notebook, padding=16)
-        self.yolo_data_tabs = ttk.Notebook(self.notebook)
+        self.run_tabs.add(self.jobs_tab, text="任务配置")
+        self.run_tabs.add(self.stats_tab, text="运行统计")
+        self.yolo_data_tabs = ttk.Notebook(self.data_tabs)
         self.battlefield_data_tab = BattlefieldDataTab(self.yolo_data_tabs, busy_callback=self._update_clear_busy)
         self.dataset_split_tab = DatasetSplitTab(self.yolo_data_tabs, busy_callback=self._update_clear_busy)
         self.yolo_data_tabs.add(self.battlefield_data_tab, text="截图采集")
         self.yolo_data_tabs.add(self.dataset_split_tab, text="标注与划分")
         self.card_samples_tab = CardReviewTab(
-            self.notebook,
+            self.data_tabs,
             count_callback=self._update_sample_count,
             clear_busy_callback=self._update_clear_busy,
         )
         self.failure_samples_tab = FailureReviewTab(
-            self.notebook, count_callback=self._update_failure_count, clear_busy_callback=self._update_clear_busy
+            self.data_tabs, count_callback=self._update_failure_count, clear_busy_callback=self._update_clear_busy
         )
         for tab, title in (
-            (self.jobs_tab, "任务"),
-            (self.device_tab, "设备"),
-            (self.stats_tab, "统计"),
             (self.card_samples_tab, "卡牌样本"),
             (self.failure_samples_tab, "异常流程"),
             (self.yolo_data_tabs, "YOLO 数据"),
+        ):
+            self.data_tabs.add(tab, text=title)
+        for tab, title in (
+            (self.run_tabs, "运行"),
+            (self.device_tab, "设备"),
+            (self.data_tabs, "数据中心"),
             (self.settings_tab, "设置"),
         ):
             self.notebook.add(tab, text=title)
@@ -108,16 +123,17 @@ class CrXUI(ttk.Window):
         self._suspend = False
         for variable in self.variables.values():
             variable.trace_add("write", self._notify)
+        self._update_run_summary()
         self._schedule_storage_update()
         self.after(200, self._poll_storage)
 
     def _update_sample_count(self, count):
         title = f"卡牌样本 ({count})" if count else "卡牌样本"
-        self.notebook.tab(self.card_samples_tab, text=title)
+        self.data_tabs.tab(self.card_samples_tab, text=title)
 
     def _update_failure_count(self, count):
         title = f"异常流程 ({count})" if count else "异常流程"
-        self.notebook.tab(self.failure_samples_tab, text=title)
+        self.data_tabs.tab(self.failure_samples_tab, text=title)
 
     def _checkbox(self, parent, key, title, tooltip=""):
         widget = ttk.Checkbutton(parent, text=title, variable=self.variables[key])
@@ -129,30 +145,24 @@ class CrXUI(ttk.Window):
 
     def _create_jobs(self):
         for column in range(2):
-            self.jobs_tab.columnconfigure(column, weight=1)
-        groups = {
-            "Battles": ttk.Labelframe(self.jobs_tab, text="对战任务", padding=14),
-            "Options": ttk.Labelframe(self.jobs_tab, text="卡组与选项", padding=14),
-        }
-        for column, frame in enumerate(groups.values()):
-            frame.grid(row=0, column=column, sticky="nsew", padx=5)
-        for job in JOBS:
-            frame = (
-                groups["Battles"]
-                if job.key
-                in {
-                    UIField.CLASSIC_1V1_USER_TOGGLE,
-                    UIField.CLASSIC_2V2_USER_TOGGLE,
-                    UIField.TROPHY_ROAD_USER_TOGGLE,
-                    UIField.SHOP_DAILY_OFFER_USER_TOGGLE,
-                }
-                else groups["Options"]
-            )
-            self._checkbox(frame, job.key, job.title, job.tooltip)
-            if job.key == UIField.CYCLE_DECKS_USER_TOGGLE:
-                self._create_deck_selection(frame)
-        control = ttk.Labelframe(self.jobs_tab, text="运行控制", padding=12)
-        control.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=(16, 0))
+            self.jobs_tab.columnconfigure(column, weight=1, uniform="jobs")
+        left = ttk.Frame(self.jobs_tab)
+        right = ttk.Frame(self.jobs_tab)
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        right.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+        battles = ttk.Labelframe(left, text="对战模式", padding=12)
+        battles.pack(fill="x")
+        jobs = {job.key: job for job in JOBS}
+        for key in (
+            UIField.CLASSIC_1V1_USER_TOGGLE,
+            UIField.CLASSIC_2V2_USER_TOGGLE,
+            UIField.TROPHY_ROAD_USER_TOGGLE,
+        ):
+            job = jobs[key]
+            self._checkbox(battles, key, job.title, job.tooltip)
+        ttk.Label(battles, text="多种模式按上述顺序轮换。", style="Hint.TLabel").pack(anchor="w", pady=(4, 0))
+        control = ttk.Labelframe(left, text="运行控制", padding=12)
+        control.pack(fill="x", pady=12)
         limit_row = ttk.Frame(control)
         limit_row.pack(fill="x")
         ttk.Label(limit_row, text="执行局数").pack(side="left")
@@ -166,22 +176,62 @@ class CrXUI(ttk.Window):
         )
         self.max_fights_spinbox.pack(side="left", padx=12)
         self.config_widgets.append((self.max_fights_spinbox, "normal"))
-        ttk.Label(limit_row, text="0 表示不限；各模式合计，商店不计入", wraplength=430).pack(side="left")
+        ttk.Label(control, text="0 表示不限；各对战模式合计。", style="Hint.TLabel").pack(anchor="w", pady=(6, 0))
         self.stop_after_rewards_checkbox = self._checkbox(
             control,
             UIField.STOP_AFTER_REWARDS,
             "奖励领完后停止",
             "在主界面连续确认对战上方的空皇冠栏后停止；执行局数上限仍有效。仅商店任务不受影响。",
         )
-        ttk.Label(
-            self.jobs_tab,
-            text="可启用一种或多种对战模式，程序将依次轮换。\n商店每日免费领取可单独运行，每小时检查一次。",
-            wraplength=700,
-        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=16)
+        shop = ttk.Labelframe(left, text="每日任务", padding=12)
+        shop.pack(fill="x")
+        job = jobs[UIField.SHOP_DAILY_OFFER_USER_TOGGLE]
+        self._checkbox(shop, job.key, job.title, job.tooltip)
+        ttk.Label(shop, text="可单独运行，每小时检查一次。\n不计入执行局数。", style="Hint.TLabel").pack(anchor="w")
+        deck = ttk.Labelframe(right, text="卡组策略", padding=12)
+        deck.pack(fill="x")
+        self.deck_strategy_var = tk.StringVar(value="current")
+        for mode, title in (("current", "使用游戏当前卡组"), ("random", "随机选择卡组"), ("cycle", "按顺序轮换卡组")):
+            radio = ttk.Radiobutton(
+                deck, text=title, value=mode, variable=self.deck_strategy_var, command=self._select_deck_strategy
+            )
+            radio.pack(anchor="w", pady=5)
+            self.config_widgets.append((radio, "normal"))
+        self._create_deck_selection(deck)
+        self._update_deck_strategy()
+        options = ttk.Labelframe(right, text="对战选项", padding=12)
+        options.pack(fill="x", pady=12)
+        for key in (UIField.RANDOM_PLAYS_USER_TOGGLE, UIField.USE_EMOTES, UIField.DISABLE_WIN_TRACK_TOGGLE):
+            job = jobs[key]
+            self._checkbox(options, key, job.title, job.tooltip)
+
+    def _select_deck_strategy(self):
+        mode = self.deck_strategy_var.get()
+        self._suspend = True
+        try:
+            self.variables[UIField.RANDOM_DECKS_USER_TOGGLE].set(mode == "random")
+            self.variables[UIField.CYCLE_DECKS_USER_TOGGLE].set(mode == "cycle")
+        finally:
+            self._suspend = False
+        self._notify()
+
+    def _update_deck_strategy(self):
+        mode = (
+            "cycle"
+            if self.variables[UIField.CYCLE_DECKS_USER_TOGGLE].get()
+            else "random"
+            if self.variables[UIField.RANDOM_DECKS_USER_TOGGLE].get()
+            else "current"
+        )
+        self.deck_strategy_var.set(mode)
+        if mode == "current":
+            self.deck_selection_frame.pack_forget()
+        else:
+            self.deck_selection_frame.pack(fill="x", pady=(8, 0))
 
     def _create_deck_selection(self, parent):
         frame = ttk.Frame(parent)
-        frame.pack(fill="x", pady=(0, 4), padx=(18, 0))
+        self.deck_selection_frame = frame
         ttk.Label(frame, text="参与卡组（按勾选先后顺序）").grid(row=0, column=0, columnspan=5, sticky="w")
         for number in range(1, 11):
             variable = tk.BooleanVar(value=number in self.selected_decks)
@@ -195,9 +245,6 @@ class CrXUI(ttk.Window):
             self.config_widgets.append((widget, "normal"))
         ttk.Label(frame, textvariable=self.deck_order_var, wraplength=290).grid(
             row=3, column=0, columnspan=5, sticky="w", pady=(2, 0)
-        )
-        ttk.Label(frame, text="同时勾选时优先轮换；均未勾选时使用游戏当前卡组。", wraplength=290).grid(
-            row=4, column=0, columnspan=5, sticky="w", pady=(2, 0)
         )
         self._update_deck_order()
 
@@ -357,19 +404,22 @@ class CrXUI(ttk.Window):
                 "shop_offer_collections",
             )
         }
-        for index, (key, title) in enumerate(BATTLE_STAT_LABELS.items()):
+        for index, key in enumerate(
+            ("completed_fights", "time_since_start", "wins", "losses", "restarts_after_failure")
+        ):
+            title = BATTLE_STAT_LABELS[key]
             row, column = divmod(index, 3)
-            box = ttk.Frame(summary, padding=(8, 6))
-            box.grid(row=row, column=column + 1, sticky="ew")
-            ttk.Label(box, text=title).pack(anchor="w")
-            ttk.Label(box, textvariable=self.stat_variables[key], font=("Segoe UI", 16, "bold")).pack(anchor="w")
-        self.shop_stat_box = ttk.Frame(summary, padding=(8, 6))
-        self.shop_stat_box.grid(row=1, column=3, sticky="ew")
-        ttk.Label(self.shop_stat_box, text="商店免费领取次数").pack(anchor="w")
+            box = ttk.Frame(summary, padding=(12, 8), style="Metric.TFrame")
+            box.grid(row=row, column=column + 1, sticky="ew", padx=4, pady=4)
+            ttk.Label(box, text=title, style="Metric.TLabel").pack(anchor="w")
+            ttk.Label(box, textvariable=self.stat_variables[key], style="MetricValue.TLabel").pack(anchor="w")
+        self.shop_stat_box = ttk.Frame(summary, padding=(12, 8), style="Metric.TFrame")
+        self.shop_stat_box.grid(row=1, column=3, sticky="ew", padx=4, pady=4)
+        ttk.Label(self.shop_stat_box, text="商店免费领取次数", style="Metric.TLabel").pack(anchor="w")
         ttk.Label(
             self.shop_stat_box,
             textvariable=self.stat_variables["shop_offer_collections"],
-            font=("Segoe UI", 16, "bold"),
+            style="MetricValue.TLabel",
         ).pack(anchor="w")
         self.variables[UIField.SHOP_DAILY_OFFER_USER_TOGGLE].trace_add("write", self._update_shop_stat_visibility)
         self._update_shop_stat_visibility()
@@ -506,6 +556,17 @@ class CrXUI(ttk.Window):
                 log.configure(background=colors.inputbg, foreground=colors.inputfg, insertbackground=colors.fg)
 
     def _apply_button_styles(self):
+        colors = self.style.colors
+        self.style.configure("TNotebook.Tab", padding=(14, 8))
+        self.style.configure("Hint.TLabel", foreground=colors.fg, font=(self.font_family, 9))
+        self.style.configure("Metric.TFrame", background=colors.inputbg)
+        self.style.configure("Metric.TLabel", background=colors.inputbg, foreground=colors.inputfg)
+        self.style.configure(
+            "MetricValue.TLabel",
+            background=colors.inputbg,
+            foreground=colors.inputfg,
+            font=(self.font_family, 17, "bold"),
+        )
         for name in ("TButton", "primary.TButton", "secondary.TButton", "success.TButton", "danger.TButton"):
             self.style.configure(name, padding=(12, 6), focusthickness=0, relief="flat")
             self.style.layout(
@@ -535,6 +596,10 @@ class CrXUI(ttk.Window):
             )
 
     def _notify(self, *_):
+        if self._suspend:
+            return
+        self._update_deck_strategy()
+        self._update_run_summary()
         if not self._suspend and self.config_callback:
             self.config_callback(self.get_all_values())
 
@@ -561,6 +626,8 @@ class CrXUI(ttk.Window):
                         continue
                     self.variables[key].set(not value if key == UIField.DISABLE_WIN_TRACK_TOGGLE else value)
             self._apply_theme()
+            self._update_deck_strategy()
+            self._update_run_summary()
         finally:
             self._suspend = False
 
@@ -599,13 +666,43 @@ class CrXUI(ttk.Window):
         )
         for widget, normal_state in self.config_widgets:
             widget.configure(state="disabled" if busy else normal_state)
+        self._update_run_summary()
+
+    def _update_run_summary(self):
+        backend = self.variables[UIField.EMULATOR].get()
+        target = (
+            f"MuMu · 实例 {self.variables[UIField.MUMU_INSTANCE].get()}"
+            if backend == EmulatorType.MUMU
+            else f"ADB · {self.variables[UIField.ADB_SERIAL].get() or '自动选择'}"
+        )
+        completed = self.stat_variables["completed_fights"].get()
+        limit = self.variables[UIField.MAX_FIGHTS].get()
+        step = {
+            "start": "准备中",
+            "restart": "恢复游戏",
+            "shop_daily": "商店领取",
+            "select_battle_mode": "选择模式",
+            "randomize_deck": "选择卡组",
+            "cycle_deck": "轮换卡组",
+            "start_fight": "匹配中",
+            "fight": "对战中",
+            "end_fight": "结算中",
+            "idle": "等待下次检查",
+        }.get(self._current_step, "运行中")
+        phase = {"idle": "待机", "starting": "同步卡牌中", "cancelling": "正在取消启动"}.get(self._state, step)
+        text = f"{target}    ·    已完成 {completed} / {'不限' if limit == '0' else limit or '未设置'}\n{phase}"
+        if self.run_summary_var.get() != text:
+            self.run_summary_var.set(text)
 
     def update_stats(self, stats):
+        if "current_state" in stats:
+            self._current_step = stats["current_state"]
         changed = False
         for key, variable in self.stat_variables.items():
             if key in stats and variable.get() != str(stats[key]):
                 variable.set(str(stats[key]))
                 changed = True
+        self._update_run_summary()
         if not changed:
             return
         try:

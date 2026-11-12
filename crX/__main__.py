@@ -166,7 +166,8 @@ class BotApplication:
         self.ui.set_button_state("running")
         self.ui.update_stats(self.last_stats)
         self.ui.reset_recognition_log()
-        self.ui.notebook.select(self.ui.stats_tab)
+        self.ui.notebook.select(self.ui.run_tabs)
+        self.ui.run_tabs.select(self.ui.stats_tab)
 
     def _close_queue(self):
         if self.stats_queue is not None:
