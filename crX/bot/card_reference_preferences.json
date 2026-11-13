@@ -351,11 +351,13 @@
       "preferred": "6c693e72cbd5682f",
       "numbers": {
         "6c693e72cbd5682f": 0,
-        "316af643ab660c38": 1
+        "316af643ab660c38": 1,
+        "0a5110e6cf1e5cc4": 2
       },
       "order": [
         "6c693e72cbd5682f",
-        "316af643ab660c38"
+        "316af643ab660c38",
+        "0a5110e6cf1e5cc4"
       ]
     },
     "evo_bomber": {
@@ -761,11 +763,13 @@
       "preferred": "e0144c4139b5ef88",
       "numbers": {
         "e0144c4139b5ef88": 0,
-        "616971c25b350345": 1
+        "616971c25b350345": 1,
+        "9fad127012cba42e": 2
       },
       "order": [
         "e0144c4139b5ef88",
-        "616971c25b350345"
+        "616971c25b350345",
+        "9fad127012cba42e"
       ]
     },
     "hero_barb_barrel": {
@@ -861,11 +865,13 @@
       "preferred": "b1bbd4562401f305",
       "numbers": {
         "b1bbd4562401f305": 0,
-        "1f1d5a9e20ba7fb3": 1
+        "1f1d5a9e20ba7fb3": 1,
+        "745ca84f18bab623": 2
       },
       "order": [
         "b1bbd4562401f305",
-        "1f1d5a9e20ba7fb3"
+        "1f1d5a9e20ba7fb3",
+        "745ca84f18bab623"
       ]
     },
     "hunter": {
@@ -970,10 +976,12 @@
     "lumberjack": {
       "preferred": "7ff1878d9a448773",
       "numbers": {
-        "7ff1878d9a448773": 0
+        "7ff1878d9a448773": 0,
+        "592188d7e09e25f2": 1
       },
       "order": [
-        "7ff1878d9a448773"
+        "7ff1878d9a448773",
+        "592188d7e09e25f2"
       ]
     },
     "magic_archer": {
@@ -1082,10 +1090,12 @@
     "mortar": {
       "preferred": "a08265bdb639db19",
       "numbers": {
-        "a08265bdb639db19": 0
+        "a08265bdb639db19": 0,
+        "511a0ae8262cb19e": 1
       },
       "order": [
-        "a08265bdb639db19"
+        "a08265bdb639db19",
+        "511a0ae8262cb19e"
       ]
     },
     "mother_witch": {
@@ -1509,10 +1519,34 @@
     "hero_electro_wizard": {
       "preferred": null,
       "numbers": {
-        "c44326b5ae203281": 1
+        "c44326b5ae203281": 1,
+        "506b13c7ff394f2e": 2
       },
       "order": [
-        "c44326b5ae203281"
+        "c44326b5ae203281",
+        "506b13c7ff394f2e"
+      ]
+    },
+    "evo_witch": {
+      "preferred": null,
+      "numbers": {
+        "34be6897b621f9ac": 1,
+        "2c59cd120f0c42d8": 2
+      },
+      "order": [
+        "34be6897b621f9ac",
+        "2c59cd120f0c42d8"
+      ]
+    },
+    "hero_valkyrie": {
+      "preferred": null,
+      "numbers": {
+        "ae7e4cb9e092aea6": 1,
+        "b376c9b98b7c8c3a": 2
+      },
+      "order": [
+        "ae7e4cb9e092aea6",
+        "b376c9b98b7c8c3a"
       ]
     }
   }
