@@ -588,19 +588,19 @@
       ]
     },
     "furnace": {
-      "preferred": "00d8d21914c44c61",
+      "preferred": "be0074d81ab6610f",
       "numbers": {
-        "00d8d21914c44c61": 0,
-        "be0074d81ab6610f": 1,
+        "00d8d21914c44c61": 1,
+        "be0074d81ab6610f": 0,
         "6f814f868453ecd1": 2,
         "527c6b66950bb5a2": 3,
         "9c29de18ba78d4ca": 4,
         "7add0bbda7727239": 5
       },
       "order": [
-        "00d8d21914c44c61",
         "be0074d81ab6610f",
         "6f814f868453ecd1",
+        "00d8d21914c44c61",
         "527c6b66950bb5a2",
         "9c29de18ba78d4ca",
         "7add0bbda7727239"
