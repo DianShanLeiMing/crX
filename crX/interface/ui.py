@@ -123,8 +123,9 @@ class CrXUI(ttk.Window):
             side="bottom", fill="x", before=self.notebook
         )
         self._suspend = False
-        for variable in self.variables.values():
-            variable.trace_add("write", self._notify)
+        for key, variable in self.variables.items():
+            if key not in (UIField.STOP_AFTER_REWARDS, UIField.STOP_AFTER_WINS):
+                variable.trace_add("write", self._notify)
         self._update_run_summary()
         self._schedule_storage_update()
         self.after(200, self._poll_storage)
@@ -179,31 +180,26 @@ class CrXUI(ttk.Window):
         self.max_fights_spinbox.pack(side="left", padx=12)
         self.config_widgets.append((self.max_fights_spinbox, "normal"))
         ttk.Label(control, text="0 表示不限；各对战模式合计。", style="Hint.TLabel").pack(anchor="w", pady=(6, 0))
-        self.stop_strategy_var = tk.StringVar(value="none")
-        strategy_row = ttk.Frame(control)
-        strategy_row.pack(fill="x", pady=(6, 0))
+        self.stop_after_rewards_checkbox = self._checkbox(
+            control,
+            UIField.STOP_AFTER_REWARDS,
+            "奖励领完后停止",
+            "在主界面连续确认对战上方的空皇冠栏后停止。",
+        )
+        self.stop_after_rewards_checkbox.configure(
+            command=lambda: self._select_stop_strategy(UIField.STOP_AFTER_REWARDS, UIField.STOP_AFTER_WINS)
+        )
         win_row = ttk.Frame(control)
-        win_row.pack(fill="x", pady=(6, 0))
-        for mode, title in (
-            ("none", "不额外停止"),
-            ("rewards", "奖励领完后停止"),
-            ("wins", "累计胜利后停止"),
-        ):
-            radio = ttk.Radiobutton(
-                win_row if mode == "wins" else strategy_row,
-                text=title,
-                value=mode,
-                variable=self.stop_strategy_var,
-                command=self._select_stop_strategy,
-            )
-            radio.pack(side="left", padx=(0, 8))
-            self.config_widgets.append((radio, "normal"))
-            if mode == "rewards":
-                self.stop_after_rewards_radio = radio
-                ToolTip(radio, text="在主界面连续确认对战上方的空皇冠栏后停止。")
-            elif mode == "wins":
-                self.stop_after_wins_radio = radio
-                ToolTip(radio, text="从本次启动开始累计各模式胜场，失败和未识别的结果不计入。")
+        win_row.pack(fill="x")
+        self.stop_after_wins_checkbox = ttk.Checkbutton(
+            win_row,
+            text="累计胜利后停止",
+            variable=self.variables[UIField.STOP_AFTER_WINS],
+            command=lambda: self._select_stop_strategy(UIField.STOP_AFTER_WINS, UIField.STOP_AFTER_REWARDS),
+        )
+        self.stop_after_wins_checkbox.pack(side="left", padx=(0, 8))
+        self.config_widgets.append((self.stop_after_wins_checkbox, "normal"))
+        ToolTip(self.stop_after_wins_checkbox, text="从本次启动开始累计各模式胜场，失败和未识别的结果不计入。")
         self.win_target_spinbox = ttk.Spinbox(
             win_row,
             textvariable=self.variables[UIField.WIN_TARGET],
@@ -237,19 +233,16 @@ class CrXUI(ttk.Window):
             job = jobs[key]
             self._checkbox(options, key, job.title, job.tooltip)
 
-    def _select_stop_strategy(self):
-        mode = self.stop_strategy_var.get()
-        self._suspend = True
-        try:
-            self.variables[UIField.STOP_AFTER_REWARDS].set(mode == "rewards")
-            self.variables[UIField.STOP_AFTER_WINS].set(mode == "wins")
-        finally:
-            self._suspend = False
+    def _select_stop_strategy(self, selected: UIField, other: UIField):
+        if self.variables[selected].get():
+            self.variables[other].set(False)
         self._update_win_target_state()
         self._notify()
 
     def _update_win_target_state(self):
-        editable = self.stop_strategy_var.get() == "wins" and self._state == "idle" and not self._recordings_clearing
+        editable = (
+            self.variables[UIField.STOP_AFTER_WINS].get() and self._state == "idle" and not self._recordings_clearing
+        )
         self.win_target_spinbox.configure(state="normal" if editable else "disabled")
 
     def _select_deck_strategy(self):
@@ -681,7 +674,6 @@ class CrXUI(ttk.Window):
                     rewards.set(False)
                 else:
                     wins.set(False)
-            self.stop_strategy_var.set("rewards" if rewards.get() else "wins" if wins.get() else "none")
             self._update_win_target_state()
             self._apply_theme()
             self._update_deck_strategy()
