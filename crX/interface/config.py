@@ -99,7 +99,7 @@ DEFAULTS.update(
         UIField.MAX_FIGHTS.value: 0,
         UIField.STOP_AFTER_REWARDS.value: False,
         UIField.STOP_AFTER_WINS.value: False,
-        UIField.WIN_TARGET.value: 3,
+        UIField.WIN_TARGET.value: 5,
     }
 )
 USER_CONFIG_KEYS = tuple(DEFAULTS)
