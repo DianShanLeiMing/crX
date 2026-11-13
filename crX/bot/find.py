@@ -17,6 +17,8 @@ from crX.bot.coords import (
     PLAYER_WINNER_LABEL_REGION,
     POPUP_CLOSE_BUTTON_SIZE,
     POPUP_CLOSE_REGION,
+    QQ_AUTHORIZATION_HINT_REGION,
+    QQ_AUTHORIZATION_TITLE_REGION,
     QQ_LOGIN_REGION,
     SHOP_CATALOG_REGION,
     SHOP_DAILY_FIRST_COLUMN,
@@ -49,6 +51,16 @@ def is_game_login_screen(image) -> bool:
     return (
         find_image(image, "login_wechat", tolerance=0.94, subcrop=WECHAT_LOGIN_REGION) is not None
         and find_image(image, "login_qq", tolerance=0.94, subcrop=QQ_LOGIN_REGION) is not None
+    )
+
+
+def is_qq_authorization_screen(image) -> bool:
+    """Identify QQ authorization from its title and scan instructions."""
+    if image is None or image.shape != (*GAME_SCREEN_SIZE[::-1], 3):
+        return False
+    return (
+        find_image(image, "qq_authorization_title", tolerance=0.94, subcrop=QQ_AUTHORIZATION_TITLE_REGION) is not None
+        and find_image(image, "qq_authorization_hint", tolerance=0.94, subcrop=QQ_AUTHORIZATION_HINT_REGION) is not None
     )
 
 

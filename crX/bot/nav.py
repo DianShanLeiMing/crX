@@ -40,6 +40,7 @@ from crX.bot.find import (
     find_post_battle_button_in_image,
     find_shop_recommendations,
     is_game_login_screen,
+    is_qq_authorization_screen,
     is_startup_loading_screen,
 )
 from crX.bot.state_detect import (
@@ -180,17 +181,21 @@ def wait_for_clash_main_menu(emulator, logger: Logger, deadspace_click=True, tim
     loading = False
     startup_loading = False
     login_required = False
+    qq_authorization = False
     wait_watch = {}
     while time.monotonic() < deadline:
         image = emulator.screenshot()
         if is_clash_main_menu_image(image):
             return True
-        login_required = is_game_login_screen(image)
+        was_qq_authorization = qq_authorization
+        qq_authorization = is_qq_authorization_screen(image)
+        login_required = qq_authorization or is_game_login_screen(image)
         elapsed = int(time.monotonic() - started)
         if login_required:
-            if elapsed - last_progress >= 10:
+            if qq_authorization != was_qq_authorization or elapsed - last_progress >= 10:
+                action = "请使用手机 QQ 扫码授权" if qq_authorization else "请在设备中手动登录"
                 logger.change_status(
-                    f"正在等待游戏登录，请在设备中手动登录，完成后自动继续（已等待 {elapsed}/{wait_timeout:g} 秒）"
+                    f"正在等待游戏登录，{action}，完成后自动继续（已等待 {elapsed}/{wait_timeout:g} 秒）"
                 )
                 last_progress = elapsed
             wait_watch.pop("stage", None)
@@ -233,7 +238,14 @@ def wait_for_clash_main_menu(emulator, logger: Logger, deadspace_click=True, tim
         time.sleep(1)
     if login_required:
         reason = "等待游戏登录超时，请在设备中手动登录后重新开始任务"
-        remember_failure_frame(logger, image, reason=reason, stage="login_required", timeout_s=wait_timeout)
+        remember_failure_frame(
+            logger,
+            None if qq_authorization else image,
+            reason=reason,
+            stage="login_required",
+            timeout_s=wait_timeout,
+            capture_error="QQ 扫码授权页含登录二维码，已跳过截图留存" if qq_authorization else None,
+        )
         raise GameLoginRequiredError(reason)
     if startup_loading:
         reason, stage = "游戏启动加载超时", "startup_loading"

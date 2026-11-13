@@ -104,7 +104,7 @@ class FailureSampleRecorder:
             image = cached["image"]
             captured_at = cached["captured_at"]
             details = cached["details"]
-            capture_error = None if image is not None else "失败帧为空或格式异常"
+            capture_error = None if image is not None else details.get("capture_error") or "失败帧为空或格式异常"
             source = "failure_frame"
         else:
             image, capture_error = _capture(emulator, CAPTURE_TIMEOUT_S)
