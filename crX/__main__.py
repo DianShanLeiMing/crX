@@ -35,17 +35,15 @@ def make_job_dictionary(values: dict[str, Any]) -> dict[str, Any]:
         jobs[UIField.RANDOM_DECKS_USER_TOGGLE] or jobs[UIField.CYCLE_DECKS_USER_TOGGLE]
     ):
         raise ValueError("启用随机或轮换卡组时，请至少勾选一套卡组")
-    raw_limit = jobs[UIField.MAX_FIGHTS]
-    message = f"执行局数必须是 0 到 {MAX_FIGHT_LIMIT} 之间的整数，0 表示不限"
-    if isinstance(raw_limit, bool) or not isinstance(raw_limit, int | str):
-        raise ValueError(message)
+    jobs[UIField.MAX_FIGHTS] = _parse_run_count(jobs[UIField.MAX_FIGHTS], 0, "执行局数")
+    if jobs[UIField.STOP_AFTER_REWARDS] and jobs[UIField.STOP_AFTER_WINS]:
+        raise ValueError("奖励领完后停止与累计胜利后停止只能选择一项")
     try:
-        limit = int(raw_limit)
-    except ValueError as error:
-        raise ValueError(message) from error
-    if not 0 <= limit <= MAX_FIGHT_LIMIT:
-        raise ValueError(message)
-    jobs[UIField.MAX_FIGHTS] = limit
+        jobs[UIField.WIN_TARGET] = _parse_run_count(jobs[UIField.WIN_TARGET], 1, "目标胜场")
+    except ValueError:
+        if jobs[UIField.STOP_AFTER_WINS]:
+            raise
+        jobs[UIField.WIN_TARGET] = DEFAULTS[UIField.WIN_TARGET]
     jobs[UIField.EMULATOR] = EmulatorType(jobs[UIField.EMULATOR])
     serial = str(jobs[UIField.ADB_SERIAL] or "").strip()
     if not validate_device_serial(serial):
@@ -62,6 +60,21 @@ def make_job_dictionary(values: dict[str, Any]) -> dict[str, Any]:
         if not valid:
             raise ValueError(message)
     return jobs
+
+
+def _parse_run_count(raw_limit, minimum: int, label: str) -> int:
+    message = f"{label}必须是 {minimum} 到 {MAX_FIGHT_LIMIT} 之间的整数"
+    if minimum == 0:
+        message += "，0 表示不限"
+    if isinstance(raw_limit, bool) or not isinstance(raw_limit, int | str):
+        raise ValueError(message)
+    try:
+        limit = int(raw_limit)
+    except ValueError as error:
+        raise ValueError(message) from error
+    if not minimum <= limit <= MAX_FIGHT_LIMIT:
+        raise ValueError(message)
+    return limit
 
 
 class BotApplication:

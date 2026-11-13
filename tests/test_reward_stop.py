@@ -114,7 +114,7 @@ def gameplay(monkeypatch):
         assert device.started <= 6, "Unexpected extra matches"
         return True
 
-    def end(*args):
+    def end(*args, **kwargs):
         device.completed += 1
         return True
 

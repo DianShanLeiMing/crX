@@ -5,7 +5,7 @@ from threading import Event
 import pytest
 
 from crX.__main__ import make_job_dictionary
-from crX.bot import states, worker
+from crX.bot import fight, states, worker
 from crX.interface.enums import UIField
 from crX.utils.logger import Logger
 
@@ -44,7 +44,7 @@ def gameplay(monkeypatch, tmp_path):
     monkeypatch.setattr(states, "shop_daily_state", lambda *args: True)
     monkeypatch.setattr(states, "start_fight", start)
     monkeypatch.setattr(states, "do_fight_state", lambda *args, **kwargs: True)
-    monkeypatch.setattr(states, "end_fight_state", lambda *args: end_results.pop(0) if end_results else True)
+    monkeypatch.setattr(states, "end_fight_state", lambda *args, **kwargs: end_results.pop(0) if end_results else True)
     monkeypatch.setattr(worker, "finish_fight_recording", lambda *args: None)
     monkeypatch.setattr("crX.utils.failure_samples.get_failure_samples_dir", lambda: tmp_path / "failures")
     jobs = make_job_dictionary(
@@ -98,7 +98,7 @@ def test_zero_limit_keeps_running_until_stopped(gameplay, monkeypatch):
     process, device, jobs, logger, signal, started, _ = gameplay
     jobs[UIField.MAX_FIGHTS] = 0
 
-    def complete(*args):
+    def complete(*args, **kwargs):
         if len(started) == 3:
             signal.set()
         return True
@@ -129,3 +129,44 @@ def test_worker_cleanup_keeps_the_quota_completion_message(gameplay, monkeypatch
     monkeypatch.setattr(process, "_setup_emulator", lambda *args: device)
     process.run()
     assert "达到执行局数" in logger.current_status
+
+
+@pytest.mark.parametrize("value", [0, -1, 10001, "", "2.5", True])
+def test_invalid_win_targets_are_rejected_when_enabled(value):
+    with pytest.raises(ValueError, match="目标胜场"):
+        make_job_dictionary({UIField.STOP_AFTER_WINS: True, UIField.WIN_TARGET: value})
+
+
+def test_reward_stop_and_win_stop_are_mutually_exclusive():
+    with pytest.raises(ValueError, match="只能选择一项"):
+        make_job_dictionary({UIField.STOP_AFTER_REWARDS: True, UIField.STOP_AFTER_WINS: True})
+
+
+@pytest.mark.parametrize("limit, completed", [(0, 4), (3, 3)])
+def test_win_quota_counts_confirmed_wins_even_with_stats_disabled(gameplay, monkeypatch, limit, completed):
+    process, device, jobs, logger, _, started, _ = gameplay
+    jobs.update(
+        make_job_dictionary(
+            {
+                **jobs,
+                UIField.STOP_AFTER_WINS: True,
+                UIField.WIN_TARGET: "2",
+                UIField.MAX_FIGHTS: limit,
+            }
+        )
+    )
+    outcomes = iter(("win", "loss", None, "win"))
+
+    def return_to_main(device, logger, *, on_result_screen):
+        assert on_result_screen is not None
+        on_result_screen()
+        return True
+
+    monkeypatch.setattr(states, "end_fight_state", fight.end_fight_state)
+    monkeypatch.setattr(fight, "get_to_main_after_fight", return_to_main)
+    monkeypatch.setattr(fight, "read_battle_outcome", lambda *_: next(outcomes))
+    monkeypatch.setattr(fight, "is_recording", lambda: False)
+    assert process._run_bot_loop(device, jobs, logger)
+    assert len(started) == logger.stats["completed_fights"] == completed
+    assert logger.stats["wins"] == logger.stats["losses"] == 0
+    assert ("已累计胜利 2/2 场" if limit == 0 else "达到执行局数") in logger.current_status

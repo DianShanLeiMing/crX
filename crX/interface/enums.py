@@ -13,6 +13,8 @@ class UIField(StrEnum):
     SELECTED_DECKS = "selected_decks"
     MAX_FIGHTS = "max_fights"
     STOP_AFTER_REWARDS = "stop_after_rewards"
+    STOP_AFTER_WINS = "stop_after_wins"
+    WIN_TARGET = "win_target"
     RANDOM_PLAYS_USER_TOGGLE = "random_plays_user_toggle"
     USE_EMOTES = "use_emotes"
     DISABLE_WIN_TRACK_TOGGLE = "disable_win_track_toggle"

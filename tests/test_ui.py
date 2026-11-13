@@ -72,7 +72,15 @@ def test_tabs_settings_themes_and_running_state(desktop_ui):
         ui.set_all_values({UIField.USE_EMOTES: False})
         ui.set_all_values({UIField.STOP_AFTER_REWARDS: True})
         assert ui.get_all_values()[UIField.STOP_AFTER_REWARDS] is True
-        assert ui.stop_after_rewards_checkbox.cget("text") == "奖励领完后停止"
+        assert ui.stop_after_rewards_radio.cget("text") == "奖励领完后停止"
+        assert str(ui.win_target_spinbox.cget("state")) == "disabled"
+        ui.stop_after_wins_radio.invoke()
+        assert ui.get_all_values()[UIField.STOP_AFTER_WINS] is True
+        assert ui.get_all_values()[UIField.STOP_AFTER_REWARDS] is False
+        assert str(ui.win_target_spinbox.cget("state")) == "normal"
+        ui.stop_after_rewards_radio.invoke()
+        assert ui.get_all_values()[UIField.STOP_AFTER_WINS] is False
+        assert ui.get_all_values()[UIField.STOP_AFTER_REWARDS] is True
         assert ui.mumu_frame.winfo_manager() == "pack"
         assert ui.adb_frame.winfo_manager() == ""
         assert ui.device_advanced_frame.winfo_manager() == ""

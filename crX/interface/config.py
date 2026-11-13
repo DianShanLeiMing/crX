@@ -98,6 +98,8 @@ DEFAULTS.update(
         UIField.RECORDING_FOLDER_PATH.value: "",
         UIField.MAX_FIGHTS.value: 0,
         UIField.STOP_AFTER_REWARDS.value: False,
+        UIField.STOP_AFTER_WINS.value: False,
+        UIField.WIN_TARGET.value: 3,
     }
 )
 USER_CONFIG_KEYS = tuple(DEFAULTS)

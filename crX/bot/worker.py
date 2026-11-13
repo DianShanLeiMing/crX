@@ -122,6 +122,7 @@ class WorkerProcess(Process):
         state, recoveries = "start", 0
         context = RuntimeContext()
         max_fights = jobs.get(UIField.MAX_FIGHTS, 0)
+        win_target = jobs[UIField.WIN_TARGET] if jobs.get(UIField.STOP_AFTER_WINS) else 0
         while not self.shutdown_event.is_set():
             logger.failure_frame = None
             exception = None
@@ -139,6 +140,9 @@ class WorkerProcess(Process):
                 logger.change_status(f"检测到对战奖励已领完，任务已停止（已完成 {context.completed_fights} 局）")
                 return True
             # Check before recovery: a recording archive failure must not start an extra match.
+            if win_target and context.completed_wins >= win_target:
+                logger.change_status(f"已累计胜利 {context.completed_wins}/{win_target} 场，任务已停止")
+                return True
             if max_fights and context.completed_fights >= max_fights:
                 logger.change_status(f"已完成 {context.completed_fights}/{max_fights} 局，达到执行局数，任务已停止")
                 return True

@@ -179,12 +179,42 @@ class CrXUI(ttk.Window):
         self.max_fights_spinbox.pack(side="left", padx=12)
         self.config_widgets.append((self.max_fights_spinbox, "normal"))
         ttk.Label(control, text="0 表示不限；各对战模式合计。", style="Hint.TLabel").pack(anchor="w", pady=(6, 0))
-        self.stop_after_rewards_checkbox = self._checkbox(
-            control,
-            UIField.STOP_AFTER_REWARDS,
-            "奖励领完后停止",
-            "在主界面连续确认对战上方的空皇冠栏后停止；执行局数上限仍有效。仅商店任务不受影响。",
+        self.stop_strategy_var = tk.StringVar(value="none")
+        strategy_row = ttk.Frame(control)
+        strategy_row.pack(fill="x", pady=(6, 0))
+        win_row = ttk.Frame(control)
+        win_row.pack(fill="x", pady=(6, 0))
+        for mode, title in (
+            ("none", "不额外停止"),
+            ("rewards", "奖励领完后停止"),
+            ("wins", "累计胜利后停止"),
+        ):
+            radio = ttk.Radiobutton(
+                win_row if mode == "wins" else strategy_row,
+                text=title,
+                value=mode,
+                variable=self.stop_strategy_var,
+                command=self._select_stop_strategy,
+            )
+            radio.pack(side="left", padx=(0, 8))
+            self.config_widgets.append((radio, "normal"))
+            if mode == "rewards":
+                self.stop_after_rewards_radio = radio
+                ToolTip(radio, text="在主界面连续确认对战上方的空皇冠栏后停止。")
+            elif mode == "wins":
+                self.stop_after_wins_radio = radio
+                ToolTip(radio, text="从本次启动开始累计各模式胜场，失败和未识别的结果不计入。")
+        self.win_target_spinbox = ttk.Spinbox(
+            win_row,
+            textvariable=self.variables[UIField.WIN_TARGET],
+            from_=1,
+            to=MAX_FIGHT_LIMIT,
+            increment=1,
+            width=8,
         )
+        self.win_target_spinbox.pack(side="left")
+        ttk.Label(win_row, text="胜").pack(side="left", padx=(4, 0))
+        self._update_win_target_state()
         shop = ttk.Labelframe(left, text="每日任务", padding=12)
         shop.pack(fill="x")
         job = jobs[UIField.SHOP_DAILY_OFFER_USER_TOGGLE]
@@ -206,6 +236,21 @@ class CrXUI(ttk.Window):
         for key in (UIField.RANDOM_PLAYS_USER_TOGGLE, UIField.USE_EMOTES, UIField.DISABLE_WIN_TRACK_TOGGLE):
             job = jobs[key]
             self._checkbox(options, key, job.title, job.tooltip)
+
+    def _select_stop_strategy(self):
+        mode = self.stop_strategy_var.get()
+        self._suspend = True
+        try:
+            self.variables[UIField.STOP_AFTER_REWARDS].set(mode == "rewards")
+            self.variables[UIField.STOP_AFTER_WINS].set(mode == "wins")
+        finally:
+            self._suspend = False
+        self._update_win_target_state()
+        self._notify()
+
+    def _update_win_target_state(self):
+        editable = self.stop_strategy_var.get() == "wins" and self._state == "idle" and not self._recordings_clearing
+        self.win_target_spinbox.configure(state="normal" if editable else "disabled")
 
     def _select_deck_strategy(self):
         mode = self.deck_strategy_var.get()
@@ -629,6 +674,15 @@ class CrXUI(ttk.Window):
                     if isinstance(DEFAULTS[key], bool) and not isinstance(value, bool):
                         continue
                     self.variables[key].set(not value if key == UIField.DISABLE_WIN_TRACK_TOGGLE else value)
+            rewards = self.variables[UIField.STOP_AFTER_REWARDS]
+            wins = self.variables[UIField.STOP_AFTER_WINS]
+            if rewards.get() and wins.get():
+                if values.get(UIField.STOP_AFTER_WINS) is True and UIField.STOP_AFTER_REWARDS not in values:
+                    rewards.set(False)
+                else:
+                    wins.set(False)
+            self.stop_strategy_var.set("rewards" if rewards.get() else "wins" if wins.get() else "none")
+            self._update_win_target_state()
             self._apply_theme()
             self._update_deck_strategy()
             self._update_run_summary()
@@ -670,6 +724,7 @@ class CrXUI(ttk.Window):
         )
         for widget, normal_state in self.config_widgets:
             widget.configure(state="disabled" if busy else normal_state)
+        self._update_win_target_state()
         self._update_run_summary()
 
     def _update_run_summary(self):

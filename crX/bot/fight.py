@@ -3,6 +3,7 @@
 import collections
 import random
 import time
+from collections.abc import Callable
 from typing import Literal
 
 from crX.bot.card_data import get_card_display_name
@@ -304,9 +305,11 @@ def end_fight_state(
     logger: Logger,
     recording_flag,
     disable_win_tracker_toggle=True,
+    *,
+    on_win: Callable[[], None] | None = None,
 ):
     """Capture a best-effort outcome before leaving the result screen."""
-    needs_outcome = is_recording() or not disable_win_tracker_toggle
+    needs_outcome = is_recording() or not disable_win_tracker_toggle or on_win is not None
     outcome = None
 
     def capture_outcome():
@@ -318,6 +321,8 @@ def end_fight_state(
         finish_fight_recording(None)
         return False
 
+    if outcome == "win" and on_win is not None:
+        on_win()
     if needs_outcome:
         result = {"win": "胜利", "loss": "失败"}.get(outcome, "未知（不计入胜率）")
         logger.change_status(f"本局对战结果：{result}")

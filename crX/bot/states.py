@@ -29,6 +29,10 @@ class RuntimeContext:
     last_shop_at: float | None = None
     completed_jobs: int = 0
     completed_fights: int = 0
+    completed_wins: int = 0
+
+    def add_completed_win(self) -> None:
+        self.completed_wins += 1
 
 
 def next_state(state: str) -> str:
@@ -110,6 +114,7 @@ def state_tree(emulator, logger, state: str, jobs: dict, context: RuntimeContext
             logger,
             jobs.get(UIField.RECORD_FIGHTS_TOGGLE, False),
             jobs.get(UIField.DISABLE_WIN_TRACK_TOGGLE, False),
+            on_win=context.add_completed_win if jobs.get(UIField.STOP_AFTER_WINS) else None,
         )
         if success:
             context.completed_jobs += 1
