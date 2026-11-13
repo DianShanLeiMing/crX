@@ -9,6 +9,7 @@ from datetime import datetime
 from queue import Empty, Queue
 from tkinter import messagebox
 from tkinter.font import Font
+from tkinter.scrolledtext import ScrolledText
 
 import ttkbootstrap as ttk
 from PIL import ImageTk
@@ -56,6 +57,44 @@ FILTER_COLUMNS = {
 THUMBNAIL_CACHE_SIZE = 128
 REVIEW_THUMBNAIL_SIZE = (24, 30)
 WINDOW_RESIZE_INTERVAL_MS = 16
+
+
+class _UploadFooter(ttk.Frame):
+    def __init__(self, parent, *, row):
+        super().__init__(parent)
+        self.row = row
+        self.status = tk.StringVar(master=self)
+        self.result = ""
+        self.columnconfigure(0, weight=1)
+        ttk.Label(self, textvariable=self.status).grid(row=0, column=0, sticky="w")
+        self.details_button = ttk.Button(self, text="查看上传结果", bootstyle="secondary", command=self._show_result)
+        self.progress = ttk.Progressbar(self, mode="indeterminate")
+
+    def start(self):
+        self.result = ""
+        self.details_button.grid_remove()
+        self.status.set("正在准备上传……")
+        self.grid(row=self.row, column=0, sticky="ew", pady=(4, 0))
+        self.progress.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        self.progress.start()
+
+    def finish(self, result, *, failed):
+        self.progress.stop()
+        self.progress.grid_remove()
+        self.status.set("上传失败" if failed else "上传完成")
+        self.result = str(result) if result else ""
+        if self.result:
+            self.details_button.grid(row=0, column=1, sticky="e")
+
+    def _show_result(self):
+        window = tk.Toplevel(self)
+        window.title(self.status.get())
+        window.transient(self.winfo_toplevel())
+        colors = ttk.Style().colors
+        text = ScrolledText(window, width=60, height=14, wrap="word", bg=colors.inputbg, fg=colors.inputfg)
+        text.pack(fill="both", expand=True, padx=12, pady=12)
+        text.insert("1.0", self.result)
+        text.configure(state="disabled")
 
 
 def search_card_choices(choices: dict[str, str], query: str) -> list[str]:
@@ -188,13 +227,8 @@ class CardReviewTab(ttk.Frame):
             selection_tools, text="删除样本", bootstyle="danger", command=self._clear_samples, state="disabled"
         )
         self.clear_button.pack(side="left", padx=(24, 0))
-        self.upload_status = ttk.Frame(self)
-        self.upload_progress = ttk.Progressbar(self.upload_status, length=100, mode="indeterminate")
-        self.upload_progress.pack(side="left", padx=(0, 8))
-        self.upload_status_var = tk.StringVar()
-        ttk.Label(self.upload_status, textvariable=self.upload_status_var, wraplength=570, justify="left").pack(
-            side="left"
-        )
+        self.review_upload = _UploadFooter(self, row=3)
+        self._active_upload: _UploadFooter | None = None
         self.body_panes = tk.PanedWindow(
             self,
             orient="vertical",
@@ -434,9 +468,7 @@ class CardReviewTab(ttk.Frame):
         ttk.Button(library_header, text="刷新", bootstyle="secondary", command=self.library_view.refresh_order).pack(
             side="right"
         )
-        ttk.Label(self.library_tab, textvariable=self.upload_status_var, wraplength=640).grid(
-            row=2, column=0, sticky="ew", pady=(4, 0)
-        )
+        self.library_upload = _UploadFooter(self.library_tab, row=2)
         self.library_tab.bind("<Map>", lambda _event: self.library_view.refresh_order())
         self._later(0, self.refresh)
 
@@ -853,7 +885,7 @@ class CardReviewTab(ttk.Frame):
             if not selected:
                 self.message_var.set("请先在左侧勾选要上传顺序与次数的卡牌。")
                 return
-            self._start_upload([], metadata_only=True, update_hits=True, metadata_cards=selected)
+            self._start_upload(self.library_upload, [], metadata_only=True, update_hits=True, metadata_cards=selected)
         elif operation == "reset_cards":
             cards = view.selected_cards()
             if not cards or not messagebox.askyesno(
@@ -883,18 +915,16 @@ class CardReviewTab(ttk.Frame):
         if not samples:
             self.message_var.set("请在待更新列表选择要上传的卡牌。")
             return
-        self._start_upload(samples)
+        self._start_upload(self.review_upload, samples)
 
-    def _start_upload(self, samples, **options):
+    def _start_upload(self, footer: _UploadFooter, samples, **options):
         results, root = self._results, self.root
 
         def progress(message):
             results.put(("progress", "upload", message, None))
 
-        self.upload_status_var.set("正在准备上传……")
-        self.upload_status.grid(row=3, column=0, sticky="ew", pady=(4, 0))
-        self.upload_progress.configure(mode="indeterminate", value=0)
-        self.upload_progress.start()
+        self._active_upload = footer
+        footer.start()
         self._start_action(lambda: upload_references(root, samples, progress=progress, **options), kind="upload")
 
     def _clear_selection(self):
@@ -994,18 +1024,14 @@ class CardReviewTab(ttk.Frame):
                     while len(self._thumbnail_images) > THUMBNAIL_CACHE_SIZE:
                         self._thumbnail_images.popitem(last=False)
                 self._queue_thumbnails()
-            elif kind == "progress":
-                self.message_var.set(result)
-                if token == "upload":
-                    self.upload_status_var.set(result)
+            elif kind == "progress" and token == "upload" and self._active_upload is not None:
+                self._active_upload.status.set(result)
             elif kind in ("save", "reorder", "upload", "clear_hits", "reset_cards"):
                 if kind == "reorder":
                     self.library_view.finish_reorder(error is None)
-                if kind == "upload":
-                    self.upload_progress.stop()
-                    self.upload_progress.configure(mode="determinate", value=0 if error else 100)
-                    self.upload_status_var.set(f"上传失败：{error}" if error else f"上传完成\n{result}")
-                    self.message_var.set("")
+                if kind == "upload" and self._active_upload is not None:
+                    self._active_upload.finish(error or result, failed=error is not None)
+                    self._active_upload = None
                 if kind == "clear_hits" and error is None:
                     result, (counts, changed) = result
                     self.library_view.update_hits(counts, changed)
@@ -1553,7 +1579,8 @@ class CardReviewTab(ttk.Frame):
         self._set_action_state()
         if self.clear_busy_callback:
             self.clear_busy_callback(True)
-        self.message_var.set("正在处理选中样本……")
+        if kind != "upload":
+            self.message_var.set("正在处理选中样本……")
         self._background(kind, operation)
 
     def _chosen_card(self):

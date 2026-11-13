@@ -2071,17 +2071,28 @@ def test_upload_publishes_all_references_of_selected_cards_and_blocks_while_runn
     assert str(tab.upload_button.cget("state")) == "normal"
     tab.upload_button.invoke()
     assert tab.formalizing and str(tab.upload_button.cget("state")) == "disabled"
+    footer = tab.review_upload
     try:
-        _wait_ui(ui, lambda: tab.upload_status_var.get() == "正在提交选中的正式参考……")
-        assert tab.upload_status.winfo_ismapped()
-        assert str(tab.upload_progress.cget("mode")) == "indeterminate"
+        _wait_ui(ui, lambda: footer.status.get() == "正在提交选中的正式参考……")
+        assert footer.progress.winfo_ismapped()
+        assert footer.winfo_y() >= tab.body_panes.winfo_y() + tab.body_panes.winfo_height()
+        assert footer.progress.grid_info()["row"] == 1
+        tab.master.select(tab.library_tab)
+        ui.update()
+        assert tab.library_view.cards.winfo_ismapped()
+        assert not tab.library_upload.winfo_ismapped()
     finally:
         release.set()
     finish(ui, tab)
     assert calls == [(tab.root, {first.key, supplement.key})]
-    assert not tab.message_var.get()
-    assert tab.upload_status_var.get() == "上传完成\n新增骑士参考样本\n更新骑士参考顺序"
-    assert tab.upload_progress.cget("value") == 100
+    assert not tab.library_upload.winfo_ismapped()
+    tab.master.select(tab)
+    ui.update()
+    assert tab.body_panes.winfo_ismapped()
+    assert footer.status.get() == "上传完成"
+    assert footer.result == "新增骑士参考样本\n更新骑士参考顺序"
+    assert footer.details_button.winfo_ismapped()
+    assert not footer.progress.winfo_ismapped()
     tab.select_all_button.invoke()
     assert str(tab.upload_button.cget("state")) == "normal"
     tab.upload_button.invoke()
@@ -2092,6 +2103,17 @@ def test_upload_publishes_all_references_of_selected_cards_and_blocks_while_runn
     tab._upload()
     assert len(calls) == 2
     tab.set_running(False)
+
+    def failed_upload(*_args, **_kwargs):
+        raise ValueError("远端连接失败")
+
+    monkeypatch.setattr("crX.interface.card_review.upload_references", failed_upload)
+    tab.upload_button.invoke()
+    finish(ui, tab)
+    assert footer.status.get() == "上传失败"
+    assert footer.result == "远端连接失败"
+    assert not footer.progress.winfo_ismapped()
+    assert str(tab.upload_button.cget("state")) == "normal"
 
 
 def test_rename_and_remove_update_shared_sources_without_second_approval(review_ui, monkeypatch):
@@ -2369,7 +2391,9 @@ def test_catalog_clear_and_global_metadata_upload(review_ui, monkeypatch):
     view.upload_button.invoke()
     finish(ui, tab)
     assert {"knight", "giant"}.issubset(calls[0][2]["metadata_cards"])
-    assert tab.upload_status_var.get().startswith("上传完成")
+    assert tab.library_upload.status.get() == "上传完成"
+    assert tab.library_upload.result == "已上传顺序与命中次数"
+    assert not tab.review_upload.winfo_manager()
     view._check_all_cards()
     view.query.set("no-such-card")
     ui.update()
