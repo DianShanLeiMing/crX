@@ -600,10 +600,10 @@
       "order": [
         "be0074d81ab6610f",
         "6f814f868453ecd1",
+        "7add0bbda7727239",
         "00d8d21914c44c61",
         "527c6b66950bb5a2",
-        "9c29de18ba78d4ca",
-        "7add0bbda7727239"
+        "9c29de18ba78d4ca"
       ]
     },
     "giant": {
@@ -1153,18 +1153,18 @@
       ]
     },
     "prince": {
-      "preferred": "755ce3d9c6b433a5",
+      "preferred": "e83fbb1d94114063",
       "numbers": {
-        "755ce3d9c6b433a5": 0,
-        "e83fbb1d94114063": 1,
+        "755ce3d9c6b433a5": 1,
+        "e83fbb1d94114063": 0,
         "6b2508cc44a2bb24": 2,
         "0908bb7d9106e14c": 3,
         "4b2dbc77bac62003": 4,
         "0ef2e8e7a7d3d616": 5
       },
       "order": [
-        "755ce3d9c6b433a5",
         "e83fbb1d94114063",
+        "755ce3d9c6b433a5",
         "6b2508cc44a2bb24",
         "0908bb7d9106e14c",
         "4b2dbc77bac62003",
