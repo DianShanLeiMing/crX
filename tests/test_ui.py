@@ -2336,10 +2336,90 @@ def test_catalog_recent_sort_waits_for_battle_end_and_preserves_selection(deskto
         view.destroy()
 
 
+@pytest.mark.parametrize("interruption", ["cancel", "running", "selection"])
+def test_catalog_clear_confirmation_keeps_counts_when_cancelled_or_selection_changes(
+    review_ui, monkeypatch, interruption
+):
+    from crX.utils import reference_hits as hits
+
+    ui, tab, add, _destination = review_ui
+    source = add("confirm-clear")
+    select(tab, source)
+    tab.card_var.set("knight")
+    tab.stage_buttons["confirm"].invoke()
+    finish(ui, tab)
+    tab.master.select(tab.library_tab)
+    _wait_ui(ui, lambda: not tab._scan_busy)
+    view = tab.library_view
+    view.query.set("knight")
+    view._check_all_cards()
+    key = view.selected_card_references()[0]
+    hits.record_hits(tab.root, {key: 8})
+    view.refresh_order()
+    _wait_ui(ui, lambda: not tab._scan_busy)
+    prompts = []
+
+    def confirm(_title, message, **options):
+        prompts.append(message)
+        assert options["default"] == "no"
+        assert not tab.winfo_ismapped()
+        assert options["parent"] == view.winfo_toplevel()
+        if interruption == "running":
+            tab.set_running(True)
+        elif interruption == "selection":
+            view._check_all_cards()
+        return interruption != "cancel"
+
+    monkeypatch.setattr("crX.interface.card_review.messagebox.askyesno", confirm)
+    try:
+        view.clear_cards_button.invoke()
+        assert len(prompts) == 1 and "骑士" in prompts[0] and "1 份参考" in prompts[0]
+        assert not tab._action_busy
+        assert hits.totals(tab.root)[0][key] == 8
+    finally:
+        tab.set_running(False)
+
+
+def test_catalog_zero_clear_shows_feedback_and_checkboxes_own_highlight(review_ui, monkeypatch):
+    from crX.utils import reference_hits as hits
+
+    ui, tab, add, _destination = review_ui
+    source = add("zero-clear")
+    select(tab, source)
+    tab.card_var.set("knight")
+    tab.stage_buttons["confirm"].invoke()
+    finish(ui, tab)
+    tab.master.select(tab.library_tab)
+    _wait_ui(ui, lambda: not tab._scan_busy)
+    view = tab.library_view
+    view.query.set("knight")
+    ui.update()
+    assert not view.cards.selection()
+    x, y, width, height = view.cards.bbox("knight", "#0")
+    view.cards.event_generate("<Button-1>", x=x + width // 2, y=y + height // 2)
+    ui.update()
+    assert view.cards.selection() == ("knight",)
+    assert view.selected_cards() == ("knight",)
+    feedback = []
+    confirmations = []
+    monkeypatch.setattr("crX.interface.card_review.messagebox.showinfo", lambda *args, **options: feedback.append(args))
+    monkeypatch.setattr(
+        "crX.interface.card_review.messagebox.askyesno", lambda *args, **options: confirmations.append(args)
+    )
+    before = hits.snapshot(tab.root)
+    view.clear_cards_button.invoke()
+    assert len(feedback) == 1 and "均为 0" in feedback[0][1]
+    assert not confirmations and hits.snapshot(tab.root) == before
+    view.cards.event_generate("<Button-1>", x=x + width // 2, y=y + height // 2)
+    ui.update()
+    assert not view.cards.selection() and not view.selected_cards()
+
+
 def test_catalog_clear_and_global_metadata_upload(review_ui, monkeypatch):
     from crX.utils import reference_hits as hits
 
     ui, tab, add, _destination = review_ui
+    monkeypatch.setattr("crX.interface.card_review.messagebox.askyesno", lambda *_args, **_kwargs: True)
     source = add("first")
     select(tab, source)
     tab.card_var.set("knight")
@@ -2388,7 +2468,7 @@ def test_catalog_clear_and_global_metadata_upload(review_ui, monkeypatch):
         view.clear_cards_button.invoke()
         _wait_ui(ui, lambda: not tab._action_busy)
         assert view.references.set(giant, "hits") == "0"
-        assert view.cards.selection() == ("giant",)
+        assert set(view.cards.selection()) == set(view.selected_cards())
     counts, _ = hits.totals(tab.root)
     assert (counts[key], counts[giant], counts[unselected]) == (0, 0, 7)
     assert hits.shared_path().read_bytes() == shared_before

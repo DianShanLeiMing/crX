@@ -65,7 +65,7 @@ class CardCatalogView(ttk.Frame):
             left,
             columns=("card", "count"),
             show="tree headings",
-            selectmode="browse",
+            selectmode="none",
             style="CatalogCards.CardSamples.Treeview",
         )
         self.cards.heading("#0", text="全选", command=self._check_all_cards)
@@ -83,14 +83,16 @@ class CardCatalogView(ttk.Frame):
         self.cards.bind("<<TreeviewSelect>>", self._select_card)
         self.cards.bind("<Button-1>", self._check_card)
         self.cards.bind("<space>", self._check_card)
-        card_tools = ttk.Frame(left)
-        card_tools.grid(row=1, column=0, columnspan=2, sticky="w", pady=(10, 0))
-        self.clear_cards_button = ttk.Button(card_tools, text="清空次数", command=lambda: action("clear_cards"))
+        card_tools = ttk.Labelframe(self, text="维护操作 · 左侧勾选卡牌", padding=(10, 8))
+        card_tools.grid(row=5, column=0, sticky="ew", pady=(12, 0))
+        self.clear_cards_button = ttk.Button(
+            card_tools, text="清空次数", bootstyle="secondary", command=lambda: action("clear_cards")
+        )
         self.clear_cards_button.grid(row=0, column=0, sticky="w")
         self.reset_cards_button = ttk.Button(
             card_tools, text="重置为远端", bootstyle="secondary", command=lambda: action("reset_cards")
         )
-        self.reset_cards_button.grid(row=0, column=1, sticky="w", padx=(6, 0))
+        self.reset_cards_button.grid(row=0, column=1, sticky="w", padx=(12, 0))
         right = ttk.Frame(self.panes)
         right.columnconfigure(0, weight=1)
         right.rowconfigure(2, weight=1)
@@ -349,7 +351,6 @@ class CardCatalogView(ttk.Frame):
         self._prioritize_changed_cards()
         if cards:
             selected = self._card if self._card in cards else self.cards.get_children()[0]
-            self.cards.selection_set(selected)
             self.cards.focus(selected)
             self._select_card()
         else:
@@ -381,11 +382,10 @@ class CardCatalogView(ttk.Frame):
 
     def _select_card(self, _event=None):
         selection = self.cards.selection()
-        if not selection:
+        card = self.cards.focus() or (selection[0] if selection else None)
+        if card is None:
             self.set_disabled(self._disabled)
             return
-        focused = self.cards.focus()
-        card = focused if focused in selection else selection[0]
         if self._drag is not None and card == self._card:
             return
         if card != self._card:
@@ -424,17 +424,21 @@ class CardCatalogView(ttk.Frame):
         return self._card_name(card), len(self.data[card])
 
     def _check_card(self, event):
-        if self._disabled:
-            return
         if event.keysym == "space":
             card = self.cards.focus()
-        elif self.cards.identify_region(event.x, event.y) == "tree":
+            toggle = True
+        elif self.cards.identify_region(event.x, event.y) in ("tree", "cell"):
             card = self.cards.identify_row(event.y)
+            toggle = self.cards.identify_region(event.x, event.y) == "tree"
         else:
             return
-        if card and self.data.get(card):
+        if not card:
+            return "break"
+        self.cards.focus(card)
+        if toggle and not self._disabled and self.data.get(card):
             self._checked_cards.symmetric_difference_update((card,))
-            self._refresh_checks()
+        self._select_card()
+        self._refresh_checks()
         return "break"
 
     def _check_all_cards(self):
@@ -459,6 +463,9 @@ class CardCatalogView(ttk.Frame):
         self._disabled = disabled
         visible = {card for card in self.cards.get_children() if self.data[card]}
         all_checked = bool(visible) and visible.issubset(self._checked_cards)
+        checked_cards = self.selected_cards()
+        if set(self.cards.selection()) != set(checked_cards):
+            self.cards.selection_set(checked_cards)
         header_state = True if all_checked else None if visible & self._checked_cards else False
         self.cards.heading("#0", text="全选", image=self._check_images[header_state, disabled])
         for card in self.cards.get_children():

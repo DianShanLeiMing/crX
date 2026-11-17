@@ -871,8 +871,34 @@ class CardReviewTab(ttk.Frame):
             return
         view, root = self.library_view, self.root
         if operation in ("clear", "clear_cards"):
-            identifiers = view.selected_card_references() if operation == "clear_cards" else view.references.selection()
+            selected = view.selected_card_references() if operation == "clear_cards" else view.references.selection()
+            visible = {ref.identifier: ref for refs in view.data.values() for ref in refs}
+            identifiers = tuple(key for key in selected if key in visible and visible[key].hits > 0)
+            if selected and not identifiers:
+                messagebox.showinfo("无需清空", "所选参考的命中次数均为 0，无需清空。", parent=view.winfo_toplevel())
+                return
             if identifiers:
+                if operation == "clear_cards":
+                    cards = view.selected_cards()
+                    names = "、".join(CARD_NAMES_ZH.get(card, card) for card in cards[:5])
+                    if len(cards) > 5:
+                        names += "等"
+                    prompt = (
+                        f"将勾选的 {len(cards)} 种卡牌（{names}）中 {len(identifiers)} 份参考的本机显示次数归零？\n\n"
+                        "清空先在本机生效，之后点击「上传顺序与次数」才会将所选清空记录同步到线上。"
+                    )
+                else:
+                    prompt = f"清空右侧选中的 {len(identifiers)} 份参考的本机贡献次数？\n\n清空结果仅在本机生效，其他电脑的贡献仍计入显示。"
+                if not messagebox.askyesno("确认清空次数", prompt, parent=view.winfo_toplevel(), default=messagebox.NO):
+                    return
+                current = view.selected_card_references() if operation == "clear_cards" else view.references.selection()
+                if (
+                    self._running
+                    or self._action_busy
+                    or self._refresh_result is not None
+                    or set(current) != set(selected)
+                ):
+                    return
 
                 def clear_hits():
                     message = reference_hits.clear_local(root, identifiers, allow_upload=operation == "clear_cards")
@@ -891,7 +917,7 @@ class CardReviewTab(ttk.Frame):
             if not cards or not messagebox.askyesno(
                 "重置为远端",
                 f"将所选 {len(cards)} 种卡牌的参考、顺序和命中次数恢复为远端版本。未上传的修改和清空记录会被丢弃。继续吗？",
-                parent=self,
+                parent=view.winfo_toplevel(),
                 default=messagebox.NO,
             ):
                 return
