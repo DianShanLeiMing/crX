@@ -4,12 +4,16 @@ Imports only from crX.detection.*, crX.utils.*, crX.bot.coords and the leaf pixe
 predicates in state_detect, which does not import from find.
 """
 
+from dataclasses import dataclass
 from typing import Literal
 
+import cv2
 import numpy as np
 
 from crX.bot.coords import (
     BATTLE_RESULT_BUTTON_REGION,
+    ENEMY_PRINCESS_UI_REGIONS_LTRB,
+    ENEMY_UNIT_SEARCH_REGION_LTRB,
     GAME_SCREEN_SIZE,
     ITEM_DISTRIBUTION_COLLECT_ALL_REGION,
     ITEM_DISTRIBUTION_COLLECT_ALL_SIZE,
@@ -32,6 +36,124 @@ from crX.bot.coords import (
 )
 from crX.bot.state_detect import is_bright_collect_all_button, is_bright_red_close_button, is_item_distribution_image
 from crX.detection.image_rec import find_image, pixel_is_equal
+
+
+@dataclass(frozen=True, slots=True)
+class EnemyUnitMarker:
+    """Level glyph bounds in native screen pixels and optional health-bar evidence."""
+
+    bounds_ltrb: tuple[int, int, int, int]
+    has_health_bar: bool
+
+    @property
+    def center(self) -> tuple[int, int]:
+        left, top, right, bottom = self.bounds_ltrb
+        return (left + right) // 2, (top + bottom) // 2
+
+
+def _level_glyphs(glyph_mask: np.ndarray, red: np.ndarray, dark_red: np.ndarray) -> list[tuple[int, int, int, int]]:
+    _, _, stats, _ = cv2.connectedComponentsWithStats(glyph_mask, connectivity=8)
+    glyphs = []
+    for candidate in stats[1:]:
+        x, y, width, height, area = map(int, candidate)
+        if not (2 <= width <= 20 and 9 <= height <= 22 and width <= 1.2 * height and 3 * area >= width * height):
+            continue
+        right, bottom = x + width, y + height
+        # Seed from the digit so a badge touching red terrain stays separable.
+        if x < 4 or y < 3 or right + 4 > red.shape[1] or bottom + 4 > red.shape[0]:
+            continue
+        context = red[y - 3 : bottom + 4, x - 4 : right + 4]
+        rim = dark_red[y - 3 : bottom + 4, x - 4 : right + 4]
+        rim_pixels = cv2.countNonZero(rim)
+        bright_pixels = cv2.countNonZero(context) - rim_pixels
+        lower_rim = cv2.countNonZero(dark_red[bottom : bottom + 4, x:right])
+        if (
+            bright_pixels < context.size * 0.07
+            or rim_pixels < height
+            or cv2.countNonZero(red[y - 3 : y, x:right]) < width
+            or lower_rim < 2
+            or cv2.countNonZero(red[y:bottom, x - 4 : x]) < height // 2
+            or cv2.countNonZero(red[y:bottom, right : right + 4]) < height // 2
+        ):
+            continue
+        # Darker badges show less bright fill but retain more of their rim.
+        if bright_pixels < context.size * 0.18 and (
+            rim_pixels < 3 * height or lower_rim < width or cv2.countNonZero(dark_red[y - 3 : y, x:right]) < width
+        ):
+            continue
+        glyphs.append((x, y, right, bottom))
+    return sorted(glyphs)
+
+
+def _level_boxes(glyphs: list[tuple[int, int, int, int]]) -> list[tuple[int, int, int, int]]:
+    """Merge the adjacent, aligned digits of a two-digit level once."""
+    boxes = []
+    used = set()
+    for index, glyph in enumerate(glyphs):
+        if index in used:
+            continue
+        left, top, right, bottom = glyph
+        box = glyph
+        height = bottom - top
+        for other in range(index + 1, len(glyphs)):
+            next_left, next_top, next_right, next_bottom = glyphs[other]
+            gap = next_left - right
+            if gap > max(3, height // 4):
+                break
+            if (
+                other not in used
+                and gap >= 0
+                and abs(next_top - top) <= 2
+                and abs(next_bottom - bottom) <= 2
+                and next_right - left <= max(16, height * 1.5)
+            ):
+                box = (left, min(top, next_top), next_right, max(bottom, next_bottom))
+                used.add(other)
+                break
+        boxes.append(box)
+    return boxes
+
+
+def _has_unit_health_bar(fill: np.ndarray, dark_red: np.ndarray, right: int, center_y: int) -> bool:
+    width = 16
+    for start in range(right + 2, min(right + 11, dark_red.shape[1] - width + 1)):
+        # A dark rail above and below the fill also survives the white damage flash.
+        columns = slice(start, start + width)
+        if np.count_nonzero(fill[center_y - 1 : center_y + 2, columns]) < width * 2:
+            continue
+        rails = np.flatnonzero(np.count_nonzero(dark_red[center_y - 6 : center_y + 7, columns], axis=1) >= width - 2)
+        if any(upper < 6 < lower and 4 <= lower - upper <= 9 for upper in rails for lower in rails):
+            return True
+    return False
+
+
+def find_enemy_unit_markers(image: np.ndarray | None) -> tuple[EnemyUnitMarker, ...]:
+    """Find red enemy level marks anywhere in the native 1v1 battlefield."""
+    if not isinstance(image, np.ndarray) or image.shape != (*GAME_SCREEN_SIZE[::-1], 3) or image.dtype != np.uint8:
+        return ()
+
+    left, top, right, bottom = ENEMY_UNIT_SEARCH_REGION_LTRB
+    hsv = cv2.cvtColor(image[top:bottom, left:right], cv2.COLOR_BGR2HSV)
+    red = cv2.bitwise_or(
+        cv2.inRange(hsv, np.array((0, 105, 62)), np.array((10, 255, 255))),
+        cv2.inRange(hsv, np.array((160, 105, 62)), np.array((179, 255, 255))),
+    )
+    dark_red = cv2.bitwise_and(red, cv2.inRange(hsv, np.array((0, 0, 0)), np.array((179, 255, 150))))
+    white = cv2.inRange(hsv, np.array((0, 0, 197)), np.array((179, 78, 255)))
+    # Native recordings also show yellow level text in the same red badge.
+    yellow = cv2.inRange(hsv, np.array((18, 145, 204)), np.array((34, 255, 255)))
+    glyph_mask = cv2.bitwise_or(white, yellow)
+    for x1, y1, x2, y2 in ENEMY_PRINCESS_UI_REGIONS_LTRB:
+        glyph_mask[y1 - top : y2 - top, x1 - left : x2 - left] = 0
+
+    bar_fill = cv2.bitwise_or(cv2.subtract(red, dark_red), white)
+    return tuple(
+        EnemyUnitMarker(
+            (x1 + left, y1 + top, x2 + left, y2 + top),
+            _has_unit_health_bar(bar_fill, dark_red, x2, (y1 + y2) // 2),
+        )
+        for x1, y1, x2, y2 in _level_boxes(_level_glyphs(glyph_mask, red, dark_red))
+    )
 
 
 def is_startup_loading_screen(image) -> bool:

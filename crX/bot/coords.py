@@ -17,6 +17,8 @@ GAME_SCREEN_SIZE = (720, 1280)
 GAME_SCREEN_DPI = 320
 # Dataset preparation only; exclude the top HUD and bottom hand, without resizing.
 BATTLEFIELD_DATA_REGION_LTRB = (0, 120, 720, 1030)
+# Live enemy marker search excludes the timer, King Tower HUD and player's hand.
+ENEMY_UNIT_SEARCH_REGION_LTRB = (0, 120, 720, 1030)
 # Left and right enemy Princess Tower bars in native 1v1 frames (left edge, bottom border).
 ENEMY_PRINCESS_BAR_ANCHORS = ((144, 155), (521, 155))
 ENEMY_PRINCESS_BAR_WIDTH = 79
@@ -24,6 +26,11 @@ ENEMY_PRINCESS_BAR_WIDTH = 79
 ENEMY_PRINCESS_RUINS_REGIONS_LTRB = ((105, 220, 235, 350), (485, 220, 615, 350))
 # Native tower layouts can move the bar vertically while keeping the same lane alignment.
 ENEMY_PRINCESS_BAR_BORDER_Y_RANGE = (130, 205)
+# Include the crown badge and HP digits beside each Princess Tower bar.
+ENEMY_PRINCESS_UI_REGIONS_LTRB = tuple(
+    (x - 28, ENEMY_UNIT_SEARCH_REGION_LTRB[1], x + ENEMY_PRINCESS_BAR_WIDTH + 3, ENEMY_PRINCESS_BAR_BORDER_Y_RANGE[1])
+    for x, _ in ENEMY_PRINCESS_BAR_ANCHORS
+)
 # Offline dataset filtering: visible Princess Tower HP digits, excluding level badges.
 TOWER_HEALTH_TEXT_REGIONS_LTRB = (
     (144, 128, 205, 151),

@@ -6,6 +6,7 @@ import time
 
 from crX.bot.coords import ENEMY_PRINCESS_BAR_WIDTH
 from crX.bot.state_detect import image_has_enemy_princess_ruins, image_is_in_battle, read_enemy_princess_bars
+from crX.utils.logger import PRINCESS_TOWER_LOG_SOURCE
 
 
 class TowerHealthMonitor:
@@ -78,11 +79,11 @@ class TowerHealthMonitor:
             comparison = "两侧比例接近"
         else:
             comparison = "左侧比例更低" if left < right else "右侧比例更低"
-        message = f"敌方公主塔 | 左 {descriptions[0]} | 右 {descriptions[1]}"
+        message = f"左 {descriptions[0]} | 右 {descriptions[1]}"
         if not (any(self.destroyed) or any(self.inferred_destroyed)):
             message += f" | {comparison}"
         persist = message != self.last_message or now - self.last_log >= 15
-        self.logger.log_recognition("图色", message, persist=persist)
+        self.logger.log_recognition(PRINCESS_TOWER_LOG_SOURCE, message, persist=persist)
         if persist:
             self.last_log = now
             self.last_message = message

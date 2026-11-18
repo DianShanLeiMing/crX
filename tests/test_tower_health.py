@@ -125,7 +125,7 @@ def test_elixir_wait_logs_from_its_existing_screenshot(monkeypatch):
     monitor = tower_health.TowerHealthMonitor(logger)
     assert fight.wait_for_elixir(SimpleNamespace(screenshot=screenshot), logger, 4, tower_monitor=monitor) is True
     assert len(calls) == 1
-    assert messages == ["敌方公主塔 | 左 存在 99%（78px） | 右 存在 59%（47px） | 右侧比例更低"]
+    assert messages == ["[公主塔] 左 存在 99%（78px） | 右 存在 59%（47px） | 右侧比例更低"]
 
 
 @pytest.mark.parametrize("times", [(0, 3, 6), (0, 6, 14)])

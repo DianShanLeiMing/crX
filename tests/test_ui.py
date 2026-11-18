@@ -704,7 +704,7 @@ def test_new_worker_resets_previous_session_stats(desktop_ui, monkeypatch):
         ui.set_button_state("idle")
 
 
-def test_recognition_samples_reach_the_right_log_without_replacing_worker_stats(desktop_ui):
+def test_recognition_samples_reach_the_right_log_without_replacing_worker_stats(desktop_ui, monkeypatch):
     from queue import Queue
 
     from crX.__main__ import BotApplication
@@ -718,17 +718,30 @@ def test_recognition_samples_reach_the_right_log_without_replacing_worker_stats(
     application.stats_queue = Queue()
     application.last_stats = {}
     worker_logger = ProcessLogger(application.stats_queue)
+    saved = []
+    monkeypatch.setattr(worker_logger, "log", saved.append)
     worker_logger.change_status("正在等待圣水")
-    message = "敌方公主塔 | 左 97% | 右 59%"
-    for _ in range(2):
-        worker_logger.log_recognition("图色", message, persist=False)
+    worker_logger.log_recognition("公主塔", "左 97% | 右 59%")
+    worker_logger.log_recognition("敌方单位", "2 个 | (285, 438)、(375, 726)")
+    worker_logger.log_recognition("公主塔", "左 已摧毁 | 右 59%")
+    worker_logger.log_recognition("敌方单位", "2 个 | (290, 440)、(377, 730)", persist=False)
 
     application._drain_stats()
     assert application.last_stats["current_status"] == "正在等待圣水"
-    assert ui.recognition_log.get("1.0", "end").count(f"[图色] {message}") == 2
-    assert message not in ui.log.get("1.0", "end")
+    assert ui.tower_status_var.get() == "左 已摧毁 | 右 59%"
+    assert [line.split(" ", 1)[1] for line in ui.recognition_log.get("1.0", "end").strip().splitlines()] == [
+        "2 个 | (285, 438)、(375, 726)",
+        "2 个 | (290, 440)、(377, 730)",
+    ]
+    assert "已摧毁" not in ui.log.get("1.0", "end")
+    assert saved == [
+        "[公主塔] 左 97% | 右 59%",
+        "[敌方单位] 2 个 | (285, 438)、(375, 726)",
+        "[公主塔] 左 已摧毁 | 右 59%",
+    ]
     ui.reset_recognition_log()
-    assert ui.recognition_log.get("1.0", "end").strip() == "[YOLO] 等待模型接入"
+    assert ui.tower_status_var.get() == "等待识别"
+    assert ui.recognition_log.get("1.0", "end-1c") == ""
 
 
 def test_deck_strategy_choices_are_exclusive_and_preserve_legacy_priority(desktop_ui):

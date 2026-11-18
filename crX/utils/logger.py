@@ -14,6 +14,8 @@ from crX.utils.platform import get_log_dir
 from crX.utils.versioning import __version__
 
 LOGS_TO_KEEP = 10
+PRINCESS_TOWER_LOG_SOURCE = "公主塔"
+ENEMY_UNIT_LOG_SOURCE = "敌方单位"
 
 log_dir = get_log_dir("crX")
 log_name = join(log_dir, time.strftime("%Y-%m-%d_%H-%M", time.localtime()) + ".txt")
@@ -142,7 +144,7 @@ class Logger:
 
     def log_recognition(self, source: str, message: str, *, persist: bool = True) -> None:
         if persist:
-            self.log(message)
+            self.log(f"[{source}] {message}")
 
     def error(self, message) -> None:
         self.errored = True

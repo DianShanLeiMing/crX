@@ -25,6 +25,7 @@ from crX.bot.coords import (
     QUICKMATCH_POPUP_BUTTON_COORD,
     START_FIGHT_BUTTON_COORD,
 )
+from crX.bot.enemy_detect import EnemyUnitMonitor
 from crX.bot.find import find_battle_outcome
 from crX.bot.nav import (
     check_for_in_battle_with_delay,
@@ -224,6 +225,7 @@ def wait_for_elixir(
     recording_flag: bool = False,
     *,
     tower_monitor: TowerHealthMonitor | None = None,
+    enemy_monitor: EnemyUnitMonitor | None = None,
 ) -> Literal["restart", "no battle"] | bool:
     """Method to wait for 4 elixir during a battle"""
     start_time = time.time()
@@ -232,8 +234,14 @@ def wait_for_elixir(
     last_lost_detection_log_second = -1
     ability_available_since = None
 
-    observe_frame = tower_monitor.observe if tower_monitor is not None else None
-    while not count_elixir(emulator, elixir_wait_amount, observe_frame):
+    def observe_frame(image):
+        if tower_monitor is not None:
+            tower_monitor.observe(image)
+        if enemy_monitor is not None:
+            enemy_monitor.observe(image)
+
+    observer = observe_frame if tower_monitor is not None or enemy_monitor is not None else None
+    while not count_elixir(emulator, elixir_wait_amount, observer):
         # debug screenshot saving removed from production
         wait_time = time.time() - start_time
         elapsed_second = int(wait_time)
@@ -535,7 +543,9 @@ def _fight_loop(
     # Initialize battle strategy and start timing
     battle_strategy = BattleStrategy(fight_mode)
     battle_strategy.start_battle()
-    tower_monitor = TowerHealthMonitor(logger) if fight_mode in ("Classic 1v1", "Trophy Road") else None
+    is_1v1 = fight_mode in ("Classic 1v1", "Trophy Road")
+    tower_monitor = TowerHealthMonitor(logger) if is_1v1 else None
+    enemy_monitor = EnemyUnitMonitor(logger) if is_1v1 else None
 
     fight_deadline = time.monotonic() + 360
     while True:
@@ -576,6 +586,7 @@ def _fight_loop(
             play_threshold,
             recording_flag,
             tower_monitor=tower_monitor,
+            enemy_monitor=enemy_monitor,
         )
 
         if wait_output == "restart":
@@ -629,7 +640,9 @@ def _random_fight_loop(
     fight_timeout = 5 * 60  # 5 minutes
     start_time = time.time()
     battle_detection_lost_count = 0
-    tower_monitor = TowerHealthMonitor(logger) if fight_mode_chosen in ("Classic 1v1", "Trophy Road") else None
+    is_1v1 = fight_mode_chosen in ("Classic 1v1", "Trophy Road")
+    tower_monitor = TowerHealthMonitor(logger) if is_1v1 else None
+    enemy_monitor = EnemyUnitMonitor(logger) if is_1v1 else None
 
     # while in battle:
     while True:
@@ -660,7 +673,12 @@ def _random_fight_loop(
         # elixir gate, then play only if a card is actually available.
         target = random.randint(RANDOM_PLAY_ELIXIR_MIN, RANDOM_PLAY_ELIXIR_MAX)
         elixir_result = wait_for_elixir(
-            emulator, logger, target, recording_flag=recording_flag, tower_monitor=tower_monitor
+            emulator,
+            logger,
+            target,
+            recording_flag=recording_flag,
+            tower_monitor=tower_monitor,
+            enemy_monitor=enemy_monitor,
         )
         if elixir_result == "no battle":
             break

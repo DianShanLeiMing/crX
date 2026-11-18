@@ -19,6 +19,7 @@ from crX.interface.dataset_split import DatasetSplitTab
 from crX.interface.enums import BATTLE_STAT_LABELS, UIField, has_start_ready_job
 from crX.interface.failure_review import FailureReviewTab
 from crX.interface.widgets import DualRingGauge
+from crX.utils.logger import ENEMY_UNIT_LOG_SOURCE, PRINCESS_TOWER_LOG_SOURCE
 from crX.utils.platform import (
     clear_recordings,
     get_recordings_dir,
@@ -490,7 +491,17 @@ class CrXUI(ttk.Window):
         self.log_splitter.add(running_log, width=300, minsize=120, stretch="always")
         self.log_splitter.add(recognition, width=200, minsize=120, stretch="always")
         self.log = self._create_log_text(running_log)
-        self.recognition_log = self._create_log_text(recognition)
+
+        tower_status = ttk.Labelframe(recognition, text=PRINCESS_TOWER_LOG_SOURCE, padding=4)
+        tower_status.pack(fill="x", pady=(0, 6))
+        self.tower_status_var = tk.StringVar()
+        tower_value = ttk.Label(tower_status, textvariable=self.tower_status_var, anchor="w", justify="left")
+        tower_value.pack(fill="x")
+        tower_value.bind("<Configure>", lambda event: tower_value.configure(wraplength=event.width))
+
+        enemy_log = ttk.Labelframe(recognition, text=ENEMY_UNIT_LOG_SOURCE, padding=4)
+        enemy_log.pack(fill="both", expand=True)
+        self.recognition_log = self._create_log_text(enemy_log)
         self.reset_recognition_log()
         self.last_status = ""
 
@@ -789,12 +800,17 @@ class CrXUI(ttk.Window):
         log.configure(state="disabled")
 
     def reset_recognition_log(self):
+        self.tower_status_var.set("等待识别")
         self.recognition_log.configure(state="normal")
         self.recognition_log.delete("1.0", "end")
-        self._append_log_line(self.recognition_log, "[YOLO] 等待模型接入")
+        self.recognition_log.configure(state="disabled")
 
     def append_recognition(self, timestamp: str, source: str, message: str):
-        self._append_log_line(self.recognition_log, f"{timestamp} [{source}] {message}")
+        if source == PRINCESS_TOWER_LOG_SOURCE:
+            self.tower_status_var.set(message)
+            return
+        entry = message if source == ENEMY_UNIT_LOG_SOURCE else f"[{source}] {message}"
+        self._append_log_line(self.recognition_log, f"{timestamp} {entry}")
 
     def _schedule_storage_update(self):
         if self._recordings_clearing:
