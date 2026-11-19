@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import dataclass
 from itertools import combinations
 from typing import TYPE_CHECKING
 
@@ -65,23 +66,33 @@ def stable_marker_positions(
     )
 
 
-def choose_circular_spell_target(
+@dataclass(frozen=True, slots=True)
+class CircularSpellTarget:
+    point: tuple[int, int]
+    count: int
+    pressure: int
+    crossed_pressure: int
+
+
+def find_circular_spell_target(
     snapshot: EnemyUnitSnapshot,
     profile: CircularSpellProfile,
     *,
     stable_positions: frozenset[tuple[int, int]] = frozenset(),
-) -> tuple[tuple[int, int], int] | None:
+    threat_weights: dict[tuple[int, int], int] | None = None,
+) -> CircularSpellTarget | None:
     """Find a worthwhile unit target outside the tower platforms."""
     left, top, right, bottom = PLAYABLE_PLAY_REGION_LTRB
+    weights = threat_weights or {}
     targets = [
-        (x, y + profile.marker_offset_y_px, unit.zone != "enemy_half")
+        (x, y + profile.marker_offset_y_px, unit.zone, weights.get(unit.position, 0))
         for unit in snapshot.units
         for x, y in (unit.position,)
         if left <= x <= right
         and top <= y + profile.marker_offset_y_px <= bottom
         and (not profile.requires_stable_markers or unit.position in stable_positions)
     ]
-    centers = [(x, y) for x, y, _ in targets]
+    centers = [(x, y) for x, y, _, _ in targets]
     radius_sq = profile.radius_px**2
     midpoints = [
         ((ax + bx) // 2, (ay + by) // 2)
@@ -89,14 +100,19 @@ def choose_circular_spell_target(
         if (ax - bx) ** 2 + (ay - by) ** 2 <= 4 * radius_sq
     ]
 
-    def coverage(point: tuple[int, int]) -> tuple[int, int, int]:
+    def coverage(point: tuple[int, int]) -> tuple[int, int, int, int, int]:
         x, y = point
-        distances = [((tx - x) ** 2 + (ty - y) ** 2, near_our_side) for tx, ty, near_our_side in targets]
-        covered = [(distance, near_our_side) for distance, near_our_side in distances if distance <= radius_sq]
+        covered = [
+            (distance, zone, weight)
+            for tx, ty, zone, weight in targets
+            if (distance := (tx - x) ** 2 + (ty - y) ** 2) <= radius_sq
+        ]
         return (
+            sum(weight for _, zone, weight in covered if zone == "friendly_half"),
+            sum(weight for _, _, weight in covered),
             len(covered),
-            sum(near_our_side for _, near_our_side in covered),
-            -sum(distance for distance, _ in covered),
+            sum(zone != "enemy_half" for _, zone, _ in covered),
+            -sum(distance for distance, _, _ in covered),
         )
 
     points = (
@@ -111,10 +127,20 @@ def choose_circular_spell_target(
     eligible_points = (
         (score, point)
         for score, point in scored_points
-        if score[0] >= profile.min_targets or (defensive_minimum is not None and score[1] >= defensive_minimum)
+        if score[2] >= profile.min_targets or (defensive_minimum is not None and score[3] >= defensive_minimum)
     )
     best = max(eligible_points, key=lambda entry: entry[0], default=None)
     if best is None:
         return None
     score, point = best
-    return point, score[0]
+    return CircularSpellTarget(point, score[2], score[1], score[0])
+
+
+def choose_circular_spell_target(
+    snapshot: EnemyUnitSnapshot,
+    profile: CircularSpellProfile,
+    *,
+    stable_positions: frozenset[tuple[int, int]] = frozenset(),
+) -> tuple[tuple[int, int], int] | None:
+    target = find_circular_spell_target(snapshot, profile, stable_positions=stable_positions)
+    return (target.point, target.count) if target is not None else None

@@ -329,9 +329,9 @@ def is_hero_champion_ability_visible(emulator) -> bool:
     return False
 
 
-def check_which_cards_are_available(emulator, check_side=False, *, observe_frame=None):
+def check_which_cards_are_available(emulator, check_side=False, *, observe_frame=None, frame=None):
     global battle_iar
-    battle_iar = emulator.screenshot()
+    battle_iar = emulator.screenshot() if frame is None else frame
     card_exists_list = []
     if battle_iar is None or battle_iar.shape != (*GAME_SCREEN_SIZE[::-1], 3):
         return card_exists_list
@@ -491,11 +491,10 @@ def switch_side():
     assert battle_iar is not None, "battle_iar must be set before calling switch_side()"
     assert bridge_iar is not None, "bridge_iar must be set before calling switch_side()"
     bridge_color_offset = []
-    for i, bridge in enumerate(bridge_pixel):
-        all_coords = [(y, x) for x in range(bridge[0], bridge[0] + 68) for y in range(bridge[1], bridge[1] + 354)]
-        pixel_coords = numpy.array(all_coords)
-        iar_pixels = battle_iar[pixel_coords[:, 0], pixel_coords[:, 1]]
-        bridge_iar_pixels = bridge_iar[pixel_coords[:, 0], pixel_coords[:, 1]]
+    for x, y in bridge_pixel:
+        area = (slice(y, y + 354), slice(x, x + 68))
+        iar_pixels = battle_iar[area]
+        bridge_iar_pixels = bridge_iar[area]
         # Native area has four times as many pixels; preserve activity units.
         offset = numpy.linalg.norm(iar_pixels - bridge_iar_pixels) / 2
         bridge_color_offset.append(offset * numpy.sqrt((40 * 175) / (34 * 177)))

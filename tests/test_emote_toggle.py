@@ -10,6 +10,7 @@ from crX.bot.coords import EMOTE_BUTTON_COORD, EMOTE_ICON_COORDS
 from crX.interface.enums import UIField
 from crX.utils import caching
 from crX.utils.logger import Logger
+from tests.test_enemy_detect import battle_frame, mock_decision_hand
 
 
 @pytest.mark.parametrize("value", [None, "true", 0, 1])
@@ -59,7 +60,7 @@ def test_actual_play_only_sends_emote_when_enabled(monkeypatch, random_mode, mod
     monkeypatch.setattr(fight, "_maybe_start_fight_recording", lambda *_: None)
     monkeypatch.setattr(fight, "stop_fight_capture", lambda: None)
     monkeypatch.setattr(fight, "wait_for_elixir", lambda *args, **kwargs: True)
-    monkeypatch.setattr(fight, "check_which_cards_are_available", lambda *args, **kwargs: [0])
+    mock_decision_hand(monkeypatch, battle_frame())
     monkeypatch.setattr(fight, "get_play_coords_for_card", lambda *_: ("knight", (200, 350)))
     monkeypatch.setattr(fight.time, "sleep", lambda *_: None)
     monkeypatch.setattr(fight.random, "choice", lambda choices: choices[0])

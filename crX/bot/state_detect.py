@@ -310,6 +310,11 @@ def image_has_enemy_princess_ruins(image: numpy.ndarray, side: int) -> bool:
     )
 
 
+def read_battle_elixir(image) -> int:
+    """Estimate spendable whole elixir using the existing native HUD probes."""
+    return max((level for level in range(1, len(ELIXIR_COORDS) + 1) if image_has_elixir(image, level)), default=0)
+
+
 def image_has_elixir(image, elixir_count: int) -> bool:
     """Read elixir from an already captured frame, without another device call."""
     if image is None or image.shape != (*GAME_SCREEN_SIZE[::-1], 3) or not 1 <= elixir_count <= len(ELIXIR_COORDS):

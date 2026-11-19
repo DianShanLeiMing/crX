@@ -1,0 +1,100 @@
+"""Decision ordering and affordability for the shared battle planner."""
+
+from unittest.mock import Mock
+
+from crX.bot import fight
+from crX.bot.battle_strategy import HandCard, rank_hand_plays
+from crX.bot.coords import DEFENSE_LANE_POINTS
+from crX.bot.enemy_detect import EnemyUnitLocation, EnemyUnitMonitor, EnemyUnitSnapshot
+from crX.bot.state_detect import ELIXIR_COLOR, ELIXIR_COORDS, read_battle_elixir
+from tests.test_enemy_detect import RED, battle_frame, draw_badge, mock_decision_hand
+
+FULL_TOWERS = ((79, True), (79, True))
+ARROWS = HandCard(0, "arrows", "large_spell", 3, (204, 292))
+ZAP = HandCard(1, "zap", "reactive_spell", 2, (202, 374))
+HOG = HandCard(2, "hog", "bridge_rush", 4, (132, 568))
+
+
+def test_cheaper_spell_wins_when_both_cover_the_same_crossed_threat():
+    crossed = EnemyUnitLocation((183, 640), "left", "friendly_half")
+    snapshot = EnemyUnitSnapshot(10.0, (crossed,))
+    options = rank_hand_plays((ARROWS, HOG, ZAP), snapshot, FULL_TOWERS, 8)
+    play = max(options, key=lambda option: option.priority)
+    assert play.card == ZAP and play.purpose == "defend"
+    assert play.crossed_pressure > 0
+    assert all(option.card != HOG for option in options)
+
+
+def test_spell_aim_prioritizes_crossed_threat_over_a_cluster_at_the_river():
+    crossed = EnemyUnitLocation((190, 735), "left", "friendly_half")
+    river = tuple(EnemyUnitLocation((x, 510), "right", "river") for x in (410, 430, 450, 470, 490, 510))
+    options = rank_hand_plays((ARROWS,), EnemyUnitSnapshot(10.0, (*river, crossed)), FULL_TOWERS, 7)
+    assert options[0].point == (190, 767)
+    assert options[0].covered == 1
+
+
+def test_safe_push_uses_the_weaker_enemy_tower_and_leaves_elixir():
+    snapshot = EnemyUnitSnapshot(10.0, ())
+    towers = ((73, True), (27, True))
+    assert rank_hand_plays((HOG,), snapshot, towers, 6) == []
+    plan = rank_hand_plays((HOG,), snapshot, towers, 7)
+    assert plan[0].point[0] > 400 and plan[0].purpose == "advance"
+    assert plan[0].card.cost == 4
+    unknown = HandCard(3, "mirror", "center_spell", None, (200, 324))
+    assert rank_hand_plays((unknown,), snapshot, towers, 10) == []
+
+
+def test_defensive_troop_uses_the_deeper_threat_lane_without_advance_reserve():
+    knight = HandCard(3, "knight", "bridge_line", 3, (198, 672))
+    snapshot = EnemyUnitSnapshot(
+        10.0,
+        (
+            EnemyUnitLocation((190, 610), "left", "friendly_half"),
+            EnemyUnitLocation((540, 870), "right", "friendly_half"),
+        ),
+    )
+    assert rank_hand_plays((knight,), snapshot, FULL_TOWERS, 2) == []
+    assert rank_hand_plays((knight,), snapshot, FULL_TOWERS, 3)[0].point == DEFENSE_LANE_POINTS[1][-1]
+
+
+def test_over_river_threat_bypasses_routine_elixir_wait_and_reuses_the_frame():
+    frame = battle_frame()
+    draw_badge(frame, 180, 620, bar_color=RED)
+    for y, x in ELIXIR_COORDS[:3]:
+        frame[y, x] = ELIXIR_COLOR
+    emulator = Mock()
+    emulator.screenshot.return_value = frame
+    logger = Mock()
+    snapshots = []
+    monitor = EnemyUnitMonitor(logger)
+    assert read_battle_elixir(frame) == 3
+    assert fight.wait_for_elixir(
+        emulator,
+        logger,
+        7,
+        enemy_monitor=monitor,
+        on_decision_frame=snapshots.append,
+    )
+    emulator.screenshot.assert_called_once_with()
+    assert snapshots[0] is frame
+
+
+def test_live_spell_recheck_can_change_cards_and_recent_slots_cannot_override_defense(monkeypatch):
+    before, after = battle_frame(), battle_frame()
+    for pos in ((180, 620), (295, 621)):
+        draw_badge(before, *pos, bar_color=RED)
+    draw_badge(after, 180, 620, bar_color=RED)
+    mock_decision_hand(monkeypatch, before, slots=(0, 1, 2), elixir=5)
+    # Slot 0 is the last played, but covering two crossed units beats the
+    # defender. Then the refresh makes the cheaper slot 1 the best response.
+    monkeypatch.setattr(fight, "last_three_cards", [0])
+    hand = [ARROWS, ZAP, HandCard(2, "knight", "bridge_line", 3, (198, 672))]
+    monkeypatch.setattr(
+        fight, "get_play_coords_for_card", lambda _device, _log, slot, _elapsed: (hand[slot].card_id, hand[slot].preset)
+    )
+    emulator = Mock()
+    emulator.screenshot.return_value = after
+    logger = Mock()
+    assert fight.play_a_card(emulator, logger, False, fight.BattleStrategy())
+    emulator.screenshot.assert_called_once_with()
+    assert emulator.click.call_args_list[0].args == fight.HAND_CARDS_COORDS[1]

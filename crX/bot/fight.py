@@ -6,7 +6,8 @@ import time
 from collections.abc import Callable
 from typing import Literal
 
-from crX.bot.card_data import CIRCULAR_SPELL_PROFILES, TOWER_FINISH_SPELLS, UNRESTRICTED_SPELLS, get_card_display_name
+from crX.bot.battle_strategy import ADVANCE_ELIXIR, PURPOSE_LABELS, HandCard, rank_hand_plays
+from crX.bot.card_data import get_card_display_name, get_card_elixir_cost
 from crX.bot.card_detection import (
     check_which_cards_are_available,
     create_default_bridge_iar,
@@ -22,12 +23,11 @@ from crX.bot.coords import (
     EMOTE_ICON_COORDS,
     ENEMY_PRINCESS_BAR_WIDTH,
     HAND_CARDS_COORDS,
-    PLAYABLE_PLAY_REGION_LTRB,
     QUICKMATCH_POPUP_BUTTON_COORD,
     START_FIGHT_BUTTON_COORD,
 )
 from crX.bot.enemy_detect import EnemyUnitMonitor
-from crX.bot.find import find_battle_outcome, find_enemy_unit_markers
+from crX.bot.find import find_battle_outcome
 from crX.bot.nav import (
     check_for_in_battle_with_delay,
     finish_pending_battle_rewards,
@@ -41,12 +41,14 @@ from crX.bot.recorder import (
     start_fight_recording,
     stop_fight_capture,
 )
-from crX.bot.spell_targeting import choose_circular_spell_target, low_princess_tower_target, stable_marker_positions
+from crX.bot.spell_targeting import low_princess_tower_target, stable_marker_positions
 from crX.bot.state_detect import (
     check_if_battle_has_ended,
     check_if_in_battle,
     count_elixir,
+    image_has_elixir,
     image_is_in_battle,
+    read_battle_elixir,
     read_enemy_princess_bars,
 )
 from crX.bot.tower_health import TowerHealthMonitor
@@ -57,17 +59,6 @@ from crX.utils.versioning import __version__
 ELIXIR_WAIT_TIMEOUT = 40  # too high but someone got errors with that so idk
 ABILITY_TRIGGER_DELAY_S = 3
 BATTLE_OUTCOME_WAIT_S = 3
-SPELL_PLACEMENT_GROUPS = {
-    "center_spell",
-    "lane_spell",
-    "large_spell",
-    "poison",
-    "reactive_spell",
-    "rocket",
-    "tornado",
-    "graveyard",
-    "goblin_barrel",
-}
 
 
 def _maybe_start_fight_recording(
@@ -197,10 +188,6 @@ def _maybe_send_emote(emulator, logger, use_emotes: bool):
         send_emote(emulator, logger)
 
 
-RANDOM_PLAY_ELIXIR_MIN = 3
-RANDOM_PLAY_ELIXIR_MAX = 9
-
-
 def play_random_available_card(
     emulator,
     logger,
@@ -208,9 +195,10 @@ def play_random_available_card(
     elapsed_s: float,
     *,
     enemy_monitor: EnemyUnitMonitor | None = None,
+    decision_frame=None,
 ) -> bool:
-    """Pick a random hand slot, applying the same spell rules as strategy play."""
-    play = _pick_card_play(emulator, logger, elapsed_s, enemy_monitor, random_placement=True)
+    """Use battle priorities, with random choice among equivalent hand slots."""
+    play = _pick_card_play(emulator, logger, elapsed_s, enemy_monitor, decision_frame=decision_frame)
     if play is None:
         return False
     card_index, play_coord = play
@@ -218,6 +206,7 @@ def play_random_available_card(
     time.sleep(0.1)
     emulator.click(*play_coord)
     time.sleep(0.1)
+    _remember_played_slot(card_index)
 
     if recording_flag:
         log_play(card_index, play_coord[0], play_coord[1], elapsed_s)
@@ -235,6 +224,7 @@ def wait_for_elixir(
     *,
     tower_monitor: TowerHealthMonitor | None = None,
     enemy_monitor: EnemyUnitMonitor | None = None,
+    on_decision_frame=None,
 ) -> Literal["restart", "no battle"] | bool:
     """Method to wait for 4 elixir during a battle"""
     start_time = time.time()
@@ -242,15 +232,30 @@ def wait_for_elixir(
     last_logged_second = -1
     last_lost_detection_log_second = -1
     ability_available_since = None
+    decision_ready = False
 
     def observe_frame(image):
+        nonlocal decision_ready
         if tower_monitor is not None:
             tower_monitor.observe(image)
         if enemy_monitor is not None:
-            enemy_monitor.observe(image)
+            enemy_monitor.observe(image, force=on_decision_frame is not None)
+        if on_decision_frame is not None:
+            on_decision_frame(image)
+            snapshot = enemy_monitor.snapshot if enemy_monitor is not None else None
+            decision_ready = (
+                snapshot is not None
+                and image_has_elixir(image, 1)
+                and (
+                    any(unit.zone != "enemy_half" for unit in snapshot.units)
+                    or low_princess_tower_target(read_enemy_princess_bars(image)) is not None
+                )
+            )
 
-    observer = observe_frame if tower_monitor is not None or enemy_monitor is not None else None
+    observer = observe_frame if tower_monitor is not None or enemy_monitor is not None or on_decision_frame else None
     while not count_elixir(emulator, elixir_wait_amount, observer):
+        if decision_ready:
+            return True
         # debug screenshot saving removed from production
         wait_time = time.time() - start_time
         elapsed_second = int(wait_time)
@@ -277,10 +282,14 @@ def wait_for_elixir(
         action_offset, _ = switch_side()
         if action_offset > PLAY_THRESHOLD and card_inhand > 0:
             logger.change_status("战场活动较多，立即出牌")
+            if on_decision_frame is not None:
+                on_decision_frame(None)
             return True
 
         if action_offset > WAIT_THRESHOLD and card_inhand == 4:
             logger.change_status("所有手牌均可使用")
+            if on_decision_frame is not None:
+                on_decision_frame(None)
             return True
 
         if wait_time > ELIXIR_WAIT_TIMEOUT:
@@ -400,111 +409,96 @@ def select_card_index(card_indices, last_three_cards):
     return random.choice(preferred_cards)
 
 
+def _remember_played_slot(card_index: int) -> None:
+    if card_index in last_three_cards:
+        last_three_cards.remove(card_index)
+    last_three_cards.append(card_index)
+
+
 def _pick_card_play(
     emulator,
     logger,
     elapsed_s: float,
     enemy_monitor: EnemyUnitMonitor | None,
     *,
-    random_placement: bool = False,
+    decision_frame=None,
 ) -> tuple[int, tuple[int, int]] | None:
     if enemy_monitor is None:
         enemy_monitor = EnemyUnitMonitor(logger)
 
-    # check which cards are available
-    logger.change_status("正在检查可用手牌")
-    available_card_check_start_time = time.time()
-    hand_frame = None
-    hand_sampled_at = 0.0
+    def inspect_hand(frame=None):
+        captured_frame = None
 
-    def remember_hand_frame(image):
-        nonlocal hand_frame, hand_sampled_at
-        hand_frame = image
-        hand_sampled_at = time.monotonic()
+        def remember(image):
+            nonlocal captured_frame
+            captured_frame = image
 
-    card_indices = check_which_cards_are_available(emulator, check_side=True, observe_frame=remember_hand_frame)
+        slots = check_which_cards_are_available(emulator, check_side=True, observe_frame=remember, frame=frame)
+        # Gate the frame before relying on hand highlights or enemy markers.
+        if not slots or not image_is_in_battle(captured_frame):
+            return None
+        hand = []
+        for slot in slots:
+            card_id, preset = get_play_coords_for_card(emulator, logger, slot, elapsed_s)
+            if card_id and card_id != "UNKNOWN":
+                hand.append(HandCard(slot, card_id, get_card_group(card_id), get_card_elixir_cost(card_id), preset))
+        return captured_frame, hand
 
-    if not card_indices:
-        logger.change_status("暂时没有可用手牌……")
+    observation = inspect_hand(decision_frame)
+    if observation is None:
+        return None
+    frame, hand = observation
+    if decision_frame is None or enemy_monitor.snapshot is None:
+        enemy_monitor.observe(frame, force=True)
+    snapshot = enemy_monitor.snapshot
+    if snapshot is None:
+        return None
+    elixir = read_battle_elixir(frame)
+    options = rank_hand_plays(hand, snapshot, read_enemy_princess_bars(frame), elixir)
+    if not options:
         return None
 
-    available_card_check_time_taken = str(
-        time.time() - available_card_check_start_time,
-    )[:3]
+    def select(options):
+        priority = max(option.priority for option in options)
+        tied = [option for option in options if option.priority == priority]
+        slot = select_card_index([option.card.slot for option in tied], last_three_cards)
+        return next(option for option in tied if option.card.slot == slot)
 
+    play = select(options)
+    if play.card.is_spell:
+        # Read all slots again from the casting frame, so a delayed or changed
+        # hand cannot cast a different card using the preview's coordinates.
+        latest = inspect_hand()
+        if latest is None:
+            logger.change_status("本次法术已跳过：复核未确认战斗画面或可用手牌")
+            return None
+        fresh_frame, hand = latest
+        enemy_monitor.observe(fresh_frame, force=True)
+        fresh = enemy_monitor.snapshot
+        if fresh is None:
+            return None
+        stable = stable_marker_positions(
+            tuple(unit.position for unit in fresh.units),
+            tuple(unit.position for unit in snapshot.units),
+            fresh.sampled_at - snapshot.sampled_at,
+        )
+        elixir = read_battle_elixir(fresh_frame)
+        options = rank_hand_plays(hand, fresh, read_enemy_princess_bars(fresh_frame), elixir, stable_positions=stable)
+        if not options:
+            logger.change_status("本次法术已跳过：复核后没有合适的出牌方案")
+            return None
+        play = select(options)
+
+    note = PURPOSE_LABELS[play.purpose]
+    if play.card.is_spell and play.covered:
+        note += f"，实时落点，估算覆盖 {play.covered} 个标记"
+    if play.tower_fill is not None:
+        note += f"，血条约 {play.tower_fill / ENEMY_PRINCESS_BAR_WIDTH:.1%}"
+    cost = f"{play.card.cost} 费，剩余约 {elixir - play.card.cost}" if play.card.cost is not None else "费用未知"
     logger.change_status(
-        f"可用手牌位置：{card_indices}（耗时 {available_card_check_time_taken} 秒）",
+        f"已计算卡牌 {get_card_display_name(play.card.card_id)} 的出牌位置 {play.point} | {note} | {cost}"
     )
-
-    play_coord_calculation_start_time = time.time()
-    remaining = list(card_indices)
-    snapshot = None
-    spell_frame = None
-    stable_positions: frozenset[tuple[int, int]] | None = None
-    tower_bars = None
-    while remaining:
-        card_index = random.choice(remaining) if random_placement else select_card_index(remaining, last_three_cards)
-        remaining.remove(card_index)
-        logger.change_status(f"选择手牌位置：{card_index}")
-        card_id, play_coord = get_play_coords_for_card(emulator, logger, card_index, elapsed_s)
-        if play_coord is None and not random_placement:
-            logger.change_status("本次出牌已跳过：未能确定出牌坐标")
-            continue
-
-        target_note = ""
-        profile = CIRCULAR_SPELL_PROFILES.get(card_id)
-        if not card_id:
-            logger.change_status("本次出牌已跳过：未能确认卡牌类型")
-            continue
-        if profile is None and get_card_group(card_id) not in SPELL_PLACEMENT_GROUPS and card_id != "clone":
-            break
-
-        if snapshot is None:
-            spell_frame = emulator.screenshot()
-            enemy_monitor.observe(spell_frame, force=True)
-            snapshot = enemy_monitor.snapshot
-            if snapshot is None:
-                logger.change_status("本次法术已跳过：当前画面无法确认仍在对战")
-                return None
-        if card_id in UNRESTRICTED_SPELLS:
-            break
-
-        if profile is not None:
-            if profile.requires_stable_markers and stable_positions is None:
-                stable_positions = frozenset()
-                if hand_frame is not None and image_is_in_battle(hand_frame):
-                    stable_positions = stable_marker_positions(
-                        tuple(unit.position for unit in snapshot.units),
-                        tuple(marker.center for marker in find_enemy_unit_markers(hand_frame)),
-                        snapshot.sampled_at - hand_sampled_at,
-                    )
-            target = choose_circular_spell_target(snapshot, profile, stable_positions=stable_positions or frozenset())
-            if target is not None:
-                play_coord, covered = target
-                target_note = f" | 实时落点，估算覆盖 {covered} 个标记"
-                break
-
-        if card_id in TOWER_FINISH_SPELLS:
-            if tower_bars is None:
-                tower_bars = read_enemy_princess_bars(spell_frame)
-            finisher = low_princess_tower_target(tower_bars)
-            if finisher is not None:
-                play_coord, fill = finisher
-                target_note = f" | 残血公主塔补刀，血条约 {fill / ENEMY_PRINCESS_BAR_WIDTH:.1%}"
-                break
-        logger.change_status(f"暂缓释放 {get_card_display_name(card_id)}：未找到可施放目标")
-    else:
-        return None
-
-    if random_placement and not target_note:
-        left, top, right, bottom = PLAYABLE_PLAY_REGION_LTRB
-        play_coord = (random.randint(left, right), random.randint(top, bottom))
-
-    calculation_seconds = time.time() - play_coord_calculation_start_time
-    logger.change_status(
-        f"已计算卡牌 {get_card_display_name(card_id)} 的出牌位置 {play_coord}{target_note}（耗时 {calculation_seconds:.2f} 秒）",
-    )
-    return card_index, play_coord
+    return play.card.slot, play.point
 
 
 def play_a_card(
@@ -515,8 +509,11 @@ def play_a_card(
     *,
     use_emotes: bool = False,
     enemy_monitor: EnemyUnitMonitor | None = None,
+    decision_frame=None,
 ) -> bool:
-    play = _pick_card_play(emulator, logger, battle_strategy.get_elapsed_time(), enemy_monitor)
+    play = _pick_card_play(
+        emulator, logger, battle_strategy.get_elapsed_time(), enemy_monitor, decision_frame=decision_frame
+    )
     if play is None:
         return False
     card_index, play_coord = play
@@ -525,9 +522,7 @@ def play_a_card(
     emulator.click(HAND_CARDS_COORDS[card_index][0], HAND_CARDS_COORDS[card_index][1])
 
     emulator.click(play_coord[0], play_coord[1])
-    if card_index in last_three_cards:
-        last_three_cards.remove(card_index)
-    last_three_cards.append(card_index)
+    _remember_played_slot(card_index)
     click_and_play_card_time_taken = str(time.time() - click_and_play_card_start_time)[:3]
     if recording_flag:
         log_play(card_index, play_coord[0], play_coord[1], battle_strategy.get_elapsed_time())
@@ -538,13 +533,6 @@ def play_a_card(
     _maybe_send_emote(emulator, logger, use_emotes)
     return True
 
-
-_PHASE_STRATEGIES = {
-    "early": [0, 0, 0, 0, 0.3, 0.3, 0.4],  # 0-7s: Conservative, wait for more elixir
-    "single": [0.05, 0.05, 0.1, 0.15, 0.15, 0.3, 0.2],  # 7-90s: Balanced distribution
-    "double": [0.05, 0.05, 0.1, 0.15, 0.25, 0.3, 0.1],  # 90-200s: Favor 7-8 elixir
-    "triple": [0.05, 0.05, 0.1, 0.1, 0.3, 0.4, 0],  # 200s+: Heavy favor 7-8, never 9
-}
 
 _PHASE_THRESHOLDS_1V1 = {
     "early": (6000, 9000),
@@ -570,10 +558,8 @@ class BattleStrategy:
 
     def __init__(self, fight_mode: str = "Classic 1v1"):
         self.start_time = None
-        self.elixir_amounts = [3, 4, 5, 6, 7, 8, 9]
 
         is_2v2 = fight_mode == "Classic 2v2"
-        self.phase_strategies = _PHASE_STRATEGIES
         self.phase_thresholds = _PHASE_THRESHOLDS_2V2 if is_2v2 else _PHASE_THRESHOLDS_1V1
 
     def start_battle(self):
@@ -596,12 +582,6 @@ class BattleStrategy:
         else:
             return "triple"
 
-    def select_elixir_amount(self):
-        """Select elixir amount to wait for based on current battle phase."""
-        phase = self.get_battle_phase()
-        weights = self.phase_strategies[phase]
-        return random.choices(self.elixir_amounts, weights=weights, k=1)[0]
-
     def get_thresholds(self):
         """Get (WAIT_THRESHOLD, PLAY_THRESHOLD) for current battle phase."""
         phase = self.get_battle_phase()
@@ -616,6 +596,7 @@ def _fight_loop(
     custom_path: str | None = None,
     *,
     use_emotes: bool = False,
+    random_mode: bool = False,
 ) -> bool:
     """Method for handling dynamically timed fight"""
     create_default_bridge_iar(emulator)
@@ -631,10 +612,17 @@ def _fight_loop(
     tower_monitor = TowerHealthMonitor(logger) if is_1v1 else None
     enemy_monitor = EnemyUnitMonitor(logger)
 
-    fight_deadline = time.monotonic() + 360
+    decision_frame = None
+
+    def remember_decision_frame(image):
+        nonlocal decision_frame
+        decision_frame = image
+
+    timeout = 300 if random_mode else 360
+    fight_deadline = time.monotonic() + timeout
     while True:
         if time.monotonic() >= fight_deadline:
-            logger.change_status("对战执行超时（6 分钟）")
+            logger.change_status(f"对战执行超时（{timeout // 60} 分钟）")
             return False
         if not check_for_in_battle_with_delay(emulator):
             if check_if_battle_has_ended(emulator):
@@ -658,19 +646,21 @@ def _fight_loop(
         battle_detection_lost_count = 0
         # debug screenshot saving removed from production
 
-        # Get elixir amount and thresholds based on current battle phase
-        elixir_amount = battle_strategy.select_elixir_amount()
+        # A routine play needs a reserve, but confirmed pressure wakes the
+        # planner before this threshold. Reuse the decision frame for the hand.
+        decision_frame = None
         wait_threshold, play_threshold = battle_strategy.get_thresholds()
 
         wait_output = wait_for_elixir(
             emulator,
             logger,
-            elixir_amount,
+            ADVANCE_ELIXIR,
             wait_threshold,
             play_threshold,
             recording_flag,
             tower_monitor=tower_monitor,
             enemy_monitor=enemy_monitor,
+            on_decision_frame=remember_decision_frame,
         )
 
         if wait_output == "restart":
@@ -681,7 +671,7 @@ def _fight_loop(
             logger.change_status("当前已不在对战中")
             break
 
-        if not check_if_in_battle(emulator):
+        if not image_is_in_battle(decision_frame) and not check_if_in_battle(emulator):
             if check_if_battle_has_ended(emulator):
                 logger.change_status("已确认对战结束")
                 break
@@ -690,12 +680,28 @@ def _fight_loop(
             continue
 
         play_start_time = time.time()
-        if (
-            play_a_card(
-                emulator, logger, recording_flag, battle_strategy, use_emotes=use_emotes, enemy_monitor=enemy_monitor
+        if random_mode:
+            played = play_random_available_card(
+                emulator,
+                logger,
+                recording_flag,
+                battle_strategy.get_elapsed_time(),
+                enemy_monitor=enemy_monitor,
+                decision_frame=decision_frame,
             )
-            is False
-        ):
+            if played:
+                _maybe_send_emote(emulator, logger, use_emotes)
+        else:
+            played = play_a_card(
+                emulator,
+                logger,
+                recording_flag,
+                battle_strategy,
+                use_emotes=use_emotes,
+                enemy_monitor=enemy_monitor,
+                decision_frame=decision_frame,
+            )
+        if not played:
             logger.change_status("暂缓出牌，继续观察战场……")
             time.sleep(0.2)
         # play_time_taken = str(time.time() - play_start_time)[:4]
@@ -722,66 +728,9 @@ def _random_fight_loop(
     *,
     use_emotes: bool = False,
 ) -> bool:
-    """Method for handling dynamically timed fight with random plays"""
-    logger.change_status(status="开始执行随机出牌对战")
-    _maybe_start_fight_recording(emulator, logger, recording_flag, fight_mode_chosen, custom_path)
-    create_default_bridge_iar(emulator)
-    fight_timeout = 5 * 60  # 5 minutes
-    start_time = time.time()
-    battle_detection_lost_count = 0
-    is_1v1 = fight_mode_chosen in ("Classic 1v1", "Trophy Road")
-    tower_monitor = TowerHealthMonitor(logger) if is_1v1 else None
-    enemy_monitor = EnemyUnitMonitor(logger)
-
-    # while in battle:
-    while True:
-        if not check_for_in_battle_with_delay(emulator):
-            if check_if_battle_has_ended(emulator):
-                break
-
-            battle_detection_lost_count += 1
-            logger.change_status(
-                f"对战中暂未检测到战斗画面（第 {battle_detection_lost_count} 次），继续等待",
-            )
-
-            if battle_detection_lost_count >= 4:
-                logger.change_status(
-                    "连续多次未检测到战斗画面，尚未确认结算，请求恢复",
-                )
-                return False
-
-            time.sleep(1)
-            continue
-
-        battle_detection_lost_count = 0
-        if time.time() - start_time > fight_timeout:
-            logger.change_status("随机出牌对战超时（5 分钟）")
-            return False
-
-        # Clean random-play flow (mirrors rl-bot RandomPlayer): wait for a random
-        # elixir gate, then play only if a card is actually available.
-        target = random.randint(RANDOM_PLAY_ELIXIR_MIN, RANDOM_PLAY_ELIXIR_MAX)
-        elixir_result = wait_for_elixir(
-            emulator,
-            logger,
-            target,
-            recording_flag=recording_flag,
-            tower_monitor=tower_monitor,
-            enemy_monitor=enemy_monitor,
-        )
-        if elixir_result == "no battle":
-            break
-        if elixir_result == "restart":
-            return False
-        if play_random_available_card(
-            emulator, logger, recording_flag, time.time() - start_time, enemy_monitor=enemy_monitor
-        ):
-            _maybe_send_emote(emulator, logger, use_emotes)
-
-    # Fight over: freeze capture so the pack excludes post-fight nav (manifest/outcome written later).
-    stop_fight_capture()
-    logger.change_status("随机出牌对战已完成")
-    return True
+    return _fight_loop(
+        emulator, logger, recording_flag, fight_mode_chosen, custom_path, use_emotes=use_emotes, random_mode=True
+    )
 
 
 if __name__ == "__main__":

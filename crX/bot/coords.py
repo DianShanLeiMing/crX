@@ -22,6 +22,8 @@ ENEMY_UNIT_SEARCH_REGION_LTRB = (0, 120, 720, 1030)
 # Native level-marker bands. Include a margin around the river banks for overhead badges.
 ENEMY_UNIT_CENTER_LANE_X_RANGE = (320, 400)
 ENEMY_UNIT_RIVER_Y_RANGE = (480, 576)
+# Defensive taps on our side of either lane, at the bridge and nearer the towers.
+DEFENSE_LANE_POINTS = (((198, 672), (198, 804), (214, 900)), ((506, 680), (506, 804), (506, 900)))
 # Left and right enemy Princess Tower bars in native 1v1 frames (left edge, bottom border).
 ENEMY_PRINCESS_BAR_ANCHORS = ((144, 155), (521, 155))
 ENEMY_PRINCESS_BAR_WIDTH = 79

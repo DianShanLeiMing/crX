@@ -248,6 +248,81 @@ TOWER_FINISH_SPELLS = frozenset(
     {"arrows", "fireball", "zap", "evo_zap", "poison", "snowball", "evo_snowball", "lightning"}
 )
 
+# Fixed costs used by the first strategy pass. Variable and unverified costs stay unknown.
+CARD_ELIXIR_COSTS = {
+    "skeletons": 1,
+    "fire_spirit": 1,
+    "ice_spirit": 1,
+    "electro_spirit": 1,
+    "heal_spirit": 1,
+    "bats": 2,
+    "bomber": 2,
+    "barb_barrel": 2,
+    "log": 2,
+    "zap": 2,
+    "snowball": 2,
+    "wall_breakers": 2,
+    "ice_golem": 2,
+    "goblins": 2,
+    "spear_goblins": 2,
+    "cannon": 3,
+    "knight": 3,
+    "archers": 3,
+    "ice_wizard": 3,
+    "hero_ice_wizard": 3,
+    "minions": 3,
+    "mega_minion": 3,
+    "royal_ghost": 3,
+    "bandit": 3,
+    "arrows": 3,
+    "earthquake": 3,
+    "tornado": 3,
+    "goblin_barrel": 3,
+    "miner": 3,
+    "royal_delivery": 3,
+    "guards": 3,
+    "dart_goblin": 3,
+    "goblin_gang": 3,
+    "fireball": 4,
+    "furnace": 4,
+    "poison": 4,
+    "freeze": 4,
+    "baby_dragon": 4,
+    "minion_giant": 4,
+    "hog": 4,
+    "battle_ram": 4,
+    "musketeer": 4,
+    "electro_wizard": 4,
+    "tesla": 4,
+    "bomb_tower": 4,
+    "goblin_cage": 4,
+    "goblin_drill": 4,
+    "valkyrie": 4,
+    "mortar": 4,
+    "balloon": 5,
+    "giant": 5,
+    "ram_rider": 5,
+    "royal_hogs": 5,
+    "witch": 5,
+    "bowler": 5,
+    "executioner": 5,
+    "graveyard": 5,
+    "royal_giant": 6,
+    "lightning": 6,
+    "rocket": 6,
+    "xbow": 6,
+    "giant_skeleton": 6,
+    "pekka": 7,
+    "mega_knight": 7,
+    "lava_hound": 7,
+    "golem": 8,
+}
+
+
+def get_card_elixir_cost(card_id: str) -> int | None:
+    return CARD_ELIXIR_COSTS.get(card_id) or CARD_ELIXIR_COSTS.get(card_id.removeprefix("evo_"))
+
+
 # Placement profiles: where on screen to tap (left/right), not card role in battle.
 # Shared arena zones use zone_* keys; card-named keys stay when only that card (or its evo) uses the region.
 # CARD_GROUPS maps card ids → key below (see #674 for full id list including pre-fingerprint evo/hero).

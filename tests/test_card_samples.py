@@ -274,9 +274,11 @@ def test_selected_unknown_is_saved_even_when_periodic_observation_is_throttled(t
 
 
 def test_random_play_also_checks_the_selected_card_without_changing_placement(tmp_path, monkeypatch):
+    from tests.test_enemy_detect import battle_frame, mock_decision_hand
+
     samples.start_card_samples("Classic 2v2", tmp_path)
     calls, clicks = [], []
-    monkeypatch.setattr(fight, "check_which_cards_are_available", lambda *_args, **_kwargs: [0])
+    mock_decision_hand(monkeypatch, battle_frame())
     monkeypatch.setattr(cd, "identify_hand_cards", lambda *_args: calls.append("identified") or "knight")
     monkeypatch.setattr(fight.time, "sleep", lambda *_: None)
 

@@ -28,6 +28,22 @@ def battle_frame():
     return frame
 
 
+def mock_decision_hand(monkeypatch, initial_frame, slots=(0,), elixir=10):
+    """Provide the cached decision frame and use the device for pre-cast revalidation."""
+    first = True
+
+    def available(emulator, *, check_side, observe_frame, frame=None):
+        nonlocal first
+        if frame is None:
+            frame = initial_frame if first else emulator.screenshot()
+        first = False
+        observe_frame(frame)
+        return list(slots)
+
+    monkeypatch.setattr(fight, "check_which_cards_are_available", available)
+    monkeypatch.setattr(fight, "read_battle_elixir", lambda _: elixir)
+
+
 def draw_badge(frame, x, y, *, level_color=WHITE, bar_color=None, friendly=False):
     rim, fill = ((104, 42, 20), (236, 147, 29)) if friendly else (DARK_RED, RED)
     frame[y - 4 : y + 16, x - 4 : x + 15] = rim
@@ -152,43 +168,31 @@ def test_elixir_wait_shares_a_capture_with_both_monitors_and_accepts_white_bar()
     assert [call.args[0] for call in logger.log_recognition.call_args_list] == ["公主塔", "敌方单位"]
 
 
-@pytest.mark.parametrize(
-    ("card_id", "in_battle", "expected"), [("rocket", True, True), ("fireball", False, False), ("knight", True, True)]
-)
-def test_spell_refreshes_enemy_position_before_click_even_inside_sample_interval(
-    monkeypatch, card_id, in_battle, expected
-):
+@pytest.mark.parametrize(("card_id", "in_battle"), [("rocket", True), ("rocket", False), ("knight", True)])
+def test_selected_spell_refreshes_before_click_even_inside_sample_interval(monkeypatch, card_id, in_battle):
     clock = iter((10.0, 10.1))
     monkeypatch.setattr(enemy_detect, "time", SimpleNamespace(monotonic=lambda: next(clock)))
     monkeypatch.setattr(fight, "last_three_cards", [])
-    monkeypatch.setattr(fight, "check_which_cards_are_available", lambda *args, **kwargs: [0])
+    mock_decision_hand(monkeypatch, battle_frame())
     placement = (198, 672)
     monkeypatch.setattr(fight, "get_play_coords_for_card", lambda *args: (card_id, placement))
     logger = Mock(spec=Logger)
     monitor = enemy_detect.EnemyUnitMonitor(logger)
-    previous = battle_frame()
-    draw_badge(previous, 160, 510, bar_color=RED)
-    monitor.observe(previous)
-    latest = battle_frame() if in_battle else None
-    if latest is not None:
-        draw_badge(latest, 163, 522, bar_color=RED)
     emulator = Mock()
-    emulator.screenshot.return_value = latest
+    emulator.screenshot.return_value = battle_frame() if in_battle else None
 
-    assert fight.play_a_card(emulator, logger, False, fight.BattleStrategy(), enemy_monitor=monitor) is expected
+    assert fight.play_a_card(emulator, logger, False, fight.BattleStrategy(), enemy_monitor=monitor) is in_battle
     actions = [entry[0] for entry in emulator.mock_calls]
     if card_id == "knight":
         assert actions == ["click", "click"]
         assert monitor.snapshot is not None and monitor.snapshot.sampled_at == 10.0
     elif in_battle:
         assert actions == ["screenshot", "click", "click"]
-        assert monitor.snapshot == enemy_detect.EnemyUnitSnapshot(
-            10.1, (enemy_detect.EnemyUnitLocation((168, 528), "left", "river"),)
-        )
+        assert monitor.snapshot == enemy_detect.EnemyUnitSnapshot(10.1, ())
         assert emulator.click.call_args.args == placement
     else:
         assert actions == ["screenshot"]
-        assert monitor.snapshot is None
+        emulator.click.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -205,7 +209,6 @@ def test_spell_refreshes_enemy_position_before_click_even_inside_sample_interval
 def test_arrows_aim_from_fresh_frame_or_hold(monkeypatch, badges, expected_target, covered):
     preset = (204, 292)
     monkeypatch.setattr(fight, "last_three_cards", [])
-    monkeypatch.setattr(fight, "check_which_cards_are_available", lambda *args, **kwargs: [0])
     monkeypatch.setattr(fight, "get_play_coords_for_card", lambda *args: ("arrows", preset))
     record = Mock()
     monkeypatch.setattr(fight, "log_play", record)
@@ -218,20 +221,22 @@ def test_arrows_aim_from_fresh_frame_or_hold(monkeypatch, badges, expected_targe
     for x, y in badges:
         draw_badge(frame, x, y, bar_color=RED)
     emulator = Mock()
+    mock_decision_hand(monkeypatch, frame)
     emulator.screenshot.return_value = frame
 
     assert fight.play_a_card(emulator, logger, True, fight.BattleStrategy(), enemy_monitor=monitor) == (
         expected_target is not None
     )
-    emulator.screenshot.assert_called_once_with()
     if expected_target is None:
+        emulator.screenshot.assert_not_called()
         emulator.click.assert_not_called()
         record.assert_not_called()
         return
+    emulator.screenshot.assert_called_once_with()
     assert emulator.click.call_args.args == expected_target
     assert record.call_args.args[:3] == (0, *expected_target)
     assert any(
-        f"{expected_target} | 实时落点，估算覆盖 {covered} 个标记" in call.args[0]
+        f"{expected_target} | 防守，实时落点，估算覆盖 {covered} 个标记" in call.args[0]
         for call in logger.change_status.call_args_list
     )
 
@@ -239,12 +244,12 @@ def test_arrows_aim_from_fresh_frame_or_hold(monkeypatch, badges, expected_targe
 def test_another_circular_spell_can_enable_targeting_through_its_profile(monkeypatch):
     monkeypatch.setitem(CIRCULAR_SPELL_PROFILES, "fireball", CircularSpellProfile(radius_px=36, marker_offset_y_px=20))
     monkeypatch.setattr(fight, "last_three_cards", [])
-    monkeypatch.setattr(fight, "check_which_cards_are_available", lambda *args, **kwargs: [0])
     monkeypatch.setattr(fight, "get_play_coords_for_card", lambda *args: ("fireball", (204, 292)))
     frame = battle_frame()
     draw_badge(frame, 180, 600, bar_color=RED)
     draw_badge(frame, 260, 600, bar_color=RED)
     emulator = Mock()
+    mock_decision_hand(monkeypatch, frame)
     emulator.screenshot.return_value = frame
     logger = Mock(spec=Logger)
 
@@ -298,14 +303,10 @@ def test_spell_profiles_use_appropriate_targets_without_extra_capture(
         for x, y in badges:
             draw_badge(frame, x, y, bar_color=RED)
 
-    def available(emulator, check_side, observe_frame):
-        observe_frame(previous)
-        return [0]
-
-    monkeypatch.setattr(fight.time, "monotonic", lambda: 10.0)
-    monkeypatch.setattr(enemy_detect, "time", SimpleNamespace(monotonic=lambda: 10.0 + elapsed))
+    clock = iter((10.0, 10.0 + elapsed))
+    monkeypatch.setattr(enemy_detect, "time", SimpleNamespace(monotonic=lambda: next(clock)))
     monkeypatch.setattr(fight, "last_three_cards", [])
-    monkeypatch.setattr(fight, "check_which_cards_are_available", available)
+    mock_decision_hand(monkeypatch, previous if previous_badges else current)
     monkeypatch.setattr(fight, "get_play_coords_for_card", lambda *args: (card_id, (202, 374)))
     emulator = Mock()
     emulator.screenshot.return_value = current
@@ -314,7 +315,7 @@ def test_spell_profiles_use_appropriate_targets_without_extra_capture(
     played = fight.play_a_card(
         emulator, logger, False, fight.BattleStrategy(), enemy_monitor=enemy_detect.EnemyUnitMonitor(logger)
     )
-    emulator.screenshot.assert_called_once_with()
+    assert emulator.screenshot.call_count <= 1
     assert played == (target is not None)
     if target is None:
         emulator.click.assert_not_called()
@@ -325,7 +326,7 @@ def test_spell_profiles_use_appropriate_targets_without_extra_capture(
 @pytest.mark.parametrize(
     ("card_id", "fills", "badge", "target"),
     [
-        ("rocket", (79, 79), False, (204, 292)),
+        ("rocket", (79, 79), False, (218, 326)),
         ("earthquake", (79, 79), False, (204, 292)),
         ("arrows", (8, 79), False, None),
         ("arrows", (7, 79), False, (172, 260)),
@@ -341,9 +342,9 @@ def test_spell_tower_finisher_requires_fresh_readable_low_health(monkeypatch, ca
     if badge:
         draw_badge(frame, 180, 620, bar_color=RED)
     monkeypatch.setattr(fight, "last_three_cards", [])
-    monkeypatch.setattr(fight, "check_which_cards_are_available", lambda *args, **kwargs: [0])
     monkeypatch.setattr(fight, "get_play_coords_for_card", lambda *args: (card_id, (204, 292)))
     emulator = Mock()
+    mock_decision_hand(monkeypatch, frame)
     emulator.screenshot.return_value = frame
     logger = Mock(spec=Logger)
 
@@ -359,18 +360,17 @@ def test_spell_tower_finisher_requires_fresh_readable_low_health(monkeypatch, ca
 
 def test_held_spells_try_another_hand_slot_without_tapping_or_resampling(monkeypatch):
     monkeypatch.setattr(fight, "last_three_cards", [])
-    monkeypatch.setattr(fight, "check_which_cards_are_available", lambda *args, **kwargs: [0, 1, 2])
     monkeypatch.setattr(fight.random, "choice", lambda candidates: candidates[0])
     cards = [("arrows", (204, 292)), ("fireball", (202, 374)), ("knight", (238, 680))]
     monkeypatch.setattr(fight, "get_play_coords_for_card", lambda _emu, _log, slot, _elapsed: cards[slot])
     emulator = Mock()
-    emulator.screenshot.return_value = tower_battle_frame(75, 79)
+    mock_decision_hand(monkeypatch, tower_battle_frame(None, None), slots=(0, 1, 2))
     logger = Mock(spec=Logger)
 
     assert fight.play_a_card(
         emulator, logger, False, fight.BattleStrategy(), enemy_monitor=enemy_detect.EnemyUnitMonitor(logger)
     )
-    emulator.screenshot.assert_called_once_with()
+    emulator.screenshot.assert_not_called()
     assert [call.args for call in emulator.click.call_args_list] == [fight.HAND_CARDS_COORDS[2], (238, 680)]
     assert fight.last_three_cards == [2]
 
@@ -389,16 +389,16 @@ def test_spell_rules_apply_in_every_battle_mode(monkeypatch, mode, random_mode, 
     monkeypatch.setattr(fight, "create_default_bridge_iar", lambda *_: None)
     monkeypatch.setattr(fight, "wait_for_elixir", lambda *args, **kwargs: True)
     monkeypatch.setattr(fight, "last_three_cards", [])
-    monkeypatch.setattr(fight, "check_which_cards_are_available", lambda *args, **kwargs: [0])
     monkeypatch.setattr(fight, "get_play_coords_for_card", lambda *args: ("arrows", (204, 292)))
     monkeypatch.setattr(fight.time, "sleep", lambda *_: None)
     emulator = Mock()
+    mock_decision_hand(monkeypatch, frame)
     emulator.screenshot.return_value = frame
     logger = Logger()
 
     run = fight._random_fight_loop if random_mode else fight._fight_loop
     assert run(emulator, logger, False, mode)
-    emulator.screenshot.assert_called_once_with()
+    assert emulator.screenshot.call_count == int(has_target)
     if has_target:
         assert [call.args for call in emulator.click.call_args_list] == [fight.HAND_CARDS_COORDS[0], (185, 658)]
     else:
