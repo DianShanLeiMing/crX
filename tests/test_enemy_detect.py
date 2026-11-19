@@ -78,14 +78,53 @@ def test_confirms_level_only_on_nearby_frame_and_clears_after_observation_gap(mo
     monitor.observe(first)
     monitor.observe(next_frame)
     assert monitor.markers == ()
+    assert monitor.snapshot == enemy_detect.EnemyUnitSnapshot(0.0, ())
 
     monitor.observe(next_frame)
     assert [marker.center for marker in monitor.markers] == [(116, 450)]
-    logger.log_recognition.assert_called_once_with("敌方单位", "1 个 | (116, 450)", persist=True)
+    logger.log_recognition.assert_called_once_with(
+        "敌方单位", "1 个 | 左路 1（敌方半场 1） | 中路 0 | 右路 0 | (116, 450)", persist=True
+    )
 
     monitor.observe(next_frame)
     assert monitor.markers == ()
+    assert monitor.snapshot == enemy_detect.EnemyUnitSnapshot(2.0, ())
     logger.log_recognition.assert_called_with("敌方单位", "当前无已确认标记", persist=True)
+
+
+def test_locations_follow_lane_and_river_boundaries_and_log_same_count_transitions(monkeypatch):
+    clock = iter((10.0, 10.25, 10.5, 11.5, 11.75))
+    monkeypatch.setattr(enemy_detect, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+    logger = Mock(spec=Logger)
+    monitor = enemy_detect.EnemyUnitMonitor(logger)
+
+    for left, middle, right in (
+        ((319, 479), (370, 510), (400, 700)),
+        ((320, 480), (370, 575), (400, 700)),
+        ((320, 480), (370, 576), (400, 700)),
+        ((320, 490), (374, 577), (410, 703)),
+    ):
+        frame = battle_frame()
+        for x, y in (left, middle, right):
+            draw_badge(frame, x - 5, y - 6, bar_color=RED)
+        monitor.observe(frame)
+
+    assert monitor.snapshot == enemy_detect.EnemyUnitSnapshot(
+        11.5,
+        (
+            enemy_detect.EnemyUnitLocation((320, 490), "center", "river"),
+            enemy_detect.EnemyUnitLocation((374, 577), "center", "friendly_half"),
+            enemy_detect.EnemyUnitLocation((410, 703), "right", "friendly_half"),
+        ),
+    )
+    calls = logger.log_recognition.call_args_list
+    assert [call.kwargs["persist"] for call in calls] == [True, True, True, False]
+    assert "左路 1（敌方半场 1） | 中路 1（河道 1） | 右路 1（我方半场 1）" in calls[0].args[1]
+    assert "中路 2（河道 2）" in calls[1].args[1]
+    assert "中路 2（河道 1、我方半场 1）" in calls[2].args[1]
+
+    monitor.observe(None)
+    assert monitor.snapshot is None
 
 
 def test_elixir_wait_shares_a_capture_with_both_monitors_and_accepts_white_bar():

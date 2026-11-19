@@ -19,6 +19,9 @@ GAME_SCREEN_DPI = 320
 BATTLEFIELD_DATA_REGION_LTRB = (0, 120, 720, 1030)
 # Live enemy marker search excludes the timer, King Tower HUD and player's hand.
 ENEMY_UNIT_SEARCH_REGION_LTRB = (0, 120, 720, 1030)
+# Native level-marker bands. Include a margin around the river banks for overhead badges.
+ENEMY_UNIT_CENTER_LANE_X_RANGE = (320, 400)
+ENEMY_UNIT_RIVER_Y_RANGE = (480, 576)
 # Left and right enemy Princess Tower bars in native 1v1 frames (left edge, bottom border).
 ENEMY_PRINCESS_BAR_ANCHORS = ((144, 155), (521, 155))
 ENEMY_PRINCESS_BAR_WIDTH = 79
