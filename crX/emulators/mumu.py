@@ -6,14 +6,21 @@ import ipaddress
 import json
 import os
 import shutil
+import struct
 import subprocess
 import time
 from pathlib import Path
 
+import cv2
+import numpy as np
+
+from crX.bot.coords import GAME_SCREEN_SIZE
 from crX.emulators.adb import AdbConnectionNotReadyError, AdbController
 from crX.emulators.adb_base import resolve_adb, run_command
 from crX.emulators.base import EmulatorNotReadyError
 from crX.utils.platform import Platform, is_windows
+
+RAW_SCREENSHOT_TIMEOUT_S = 2
 
 
 def run_manager(args: list[str], *, timeout: int = 15):
@@ -126,6 +133,17 @@ class MuMuEmulatorController(AdbController):
             raise ValueError("请选择一个有效的 MuMu 实例编号")
         bundled_adb = self.manager_path.parent / "adb.exe"
         super().__init__(logger, adb_path=adb_path or (str(bundled_adb) if bundled_adb.is_file() else ""))
+
+    def screenshot_native_raw(self) -> np.ndarray:
+        """Read one native RGBA frame and convert it to the shared BGR format."""
+        result = self.adb(["exec-out", "screencap"], binary_output=True, timeout=RAW_SCREENSHOT_TIMEOUT_S)
+        width, height = GAME_SCREEN_SIZE
+        data = result.stdout
+        header_size = len(data) - width * height * 4
+        if result.returncode or header_size not in (12, 16) or struct.unpack_from("<III", data) != (width, height, 1):
+            raise ValueError("MuMu RAW 截图尺寸或像素格式无效")
+        rgba = np.frombuffer(data, dtype=np.uint8, offset=header_size).reshape(height, width, 4)
+        return cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGR)
 
     @classmethod
     def list_instances(cls, mumu_path="") -> list[dict]:

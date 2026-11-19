@@ -19,8 +19,8 @@ from crX.utils.logger import ProcessLogger, attach_worker_file_logging
 
 
 @contextmanager
-def screenshot_retry_policy(emulator, logger, shutdown_event):
-    """Retry one timed-out read via shell, without replaying states or inputs.
+def screenshot_retry_policy(emulator, logger, shutdown_event, *, prefer_raw=False):
+    """Use RAW when supported and keep recovery scoped to screen reads.
 
     The worker owns recovery policy. Adapters retain a single bounded I/O attempt;
     patching the instance also covers screenshot calls inside adapter.restart().
@@ -31,8 +31,22 @@ def screenshot_retry_policy(emulator, logger, shutdown_event):
         yield
         return
     overridden = method in vars(emulator)
+    raw_capture = getattr(emulator, "screenshot_native_raw", None) if prefer_raw else None
 
     def capture():
+        nonlocal raw_capture
+        capture_raw = raw_capture
+        if capture_raw is not None:
+            try:
+                frame = capture_raw()
+            except (OSError, ValueError, subprocess.TimeoutExpired):
+                if shutdown_event.is_set():
+                    raise
+                raw_capture = None
+                logger.log("MuMu RAW 截图不可用，本次运行改用 PNG")
+            else:
+                logging.debug("Screenshot captured: %dx%d", frame.shape[1], frame.shape[0])
+                return frame
         try:
             return original()
         except subprocess.TimeoutExpired as error:
@@ -112,7 +126,7 @@ class WorkerProcess(Process):
         except Exception:
             logging.warning("异常采样未能启动，继续执行任务", exc_info=True)
         try:
-            with screenshot_retry_policy(emulator, logger, self.shutdown_event):
+            with screenshot_retry_policy(emulator, logger, self.shutdown_event, prefer_raw=True):
                 return self._run_bot_states(emulator, jobs, logger, diagnostics)
         finally:
             if diagnostics is not None:

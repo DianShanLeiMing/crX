@@ -82,7 +82,7 @@ class AdbBasedController(BaseEmulatorController):
     def is_device_connected(cls, device_serial, adb_path=""):
         return bool(device_serial) and device_serial in cls.discover_devices(adb_path)
 
-    def adb(self, command: str | list[str], binary_output=False):
+    def adb(self, command: str | list[str], binary_output=False, *, timeout=ADB_TIMEOUT):
         if not validate_device_serial(self.device_serial):
             raise ValueError("ADB 设备序列号无效")
         parts = shlex.split(command) if isinstance(command, str) else command
@@ -93,7 +93,7 @@ class AdbBasedController(BaseEmulatorController):
             if not self.device_serial:
                 raise ValueError("执行设备指令前请先选择设备")
             args += ["-s", self.device_serial]
-        return run_command([*args, *parts], binary=binary_output)
+        return run_command([*args, *parts], binary=binary_output, timeout=timeout)
 
     def is_app_installed(self, package: str) -> bool:
         return self._check_app_installed(package)

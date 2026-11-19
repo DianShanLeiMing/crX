@@ -1,5 +1,6 @@
 """Worker retries one timed-out screen read, never input or whole gameplay states."""
 
+import struct
 import subprocess
 from threading import Event
 from unittest.mock import Mock
@@ -10,6 +11,8 @@ import pytest
 
 from crX.bot import worker
 from crX.emulators.adb import AdbController
+from crX.emulators.adb_base import ADB_TIMEOUT
+from crX.emulators.mumu import RAW_SCREENSHOT_TIMEOUT_S, MuMuEmulatorController
 from crX.interface.enums import UIField
 from crX.utils.logger import Logger
 
@@ -40,7 +43,45 @@ def test_single_timeout_recovers_frame_and_restores_adapter(monkeypatch):
     assert device.screenshot == original and "screenshot" not in vars(device)
     assert run.call_args_list[0].args[0] == ["adb", "-s", device.device_serial, "exec-out", "screencap", "-p"]
     assert run.call_args_list[1].args[0] == ["adb", "-s", device.device_serial, "shell", "-T", "screencap", "-p"]
-    assert all(call.kwargs == {"binary": True} for call in run.call_args_list)
+    assert all(call.kwargs == {"binary": True, "timeout": ADB_TIMEOUT} for call in run.call_args_list)
+
+
+@pytest.mark.parametrize("header_size", [12, 16])
+def test_mumu_raw_preserves_native_bgr_pixels(monkeypatch, header_size):
+    device, signal, run = device_with_capture(monkeypatch, [])
+    mumu = MuMuEmulatorController.__new__(MuMuEmulatorController)
+    mumu.adb_path, mumu.device_serial = device.adb_path, device.device_serial
+    rgba = bytes([11, 22, 33, 255]) * (720 * 1280)
+    header = struct.pack("<III", 720, 1280, 1) + b"\0" * (header_size - 12)
+    run.side_effect = [subprocess.CompletedProcess([], 0, header + rgba, b"")]
+    with worker.screenshot_retry_policy(mumu, Logger(), signal, prefer_raw=True):
+        frame = mumu.screenshot()
+    assert frame.shape == (1280, 720, 3) and frame.dtype == np.uint8
+    assert np.all(frame == (33, 22, 11))
+    run.assert_called_once_with(
+        ["adb", "-s", mumu.device_serial, "exec-out", "screencap"], binary=True, timeout=RAW_SCREENSHOT_TIMEOUT_S
+    )
+
+
+@pytest.mark.parametrize("failure", ["timeout", "truncated", "unsupported_format", "wrong_geometry"])
+def test_mumu_raw_failure_falls_back_to_png_for_the_run(monkeypatch, failure):
+    device, signal, run = device_with_capture(monkeypatch, ["ok"])
+    png = next(run.side_effect)
+    mumu = MuMuEmulatorController.__new__(MuMuEmulatorController)
+    mumu.adb_path, mumu.device_serial = device.adb_path, device.device_serial
+    cmd = ["adb", "-s", mumu.device_serial, "exec-out", "screencap"]
+    if failure == "timeout":
+        raw_result = subprocess.TimeoutExpired(cmd, RAW_SCREENSHOT_TIMEOUT_S)
+    else:
+        width = 1280 if failure == "wrong_geometry" else 720
+        pixel_format = 2 if failure == "unsupported_format" else 1
+        payload = b"" if failure == "truncated" else bytes(720 * 1280 * 4)
+        raw_result = subprocess.CompletedProcess(cmd, 0, struct.pack("<III", width, 1280, pixel_format) + payload, b"")
+    run.side_effect = [raw_result, png, png]
+    with worker.screenshot_retry_policy(mumu, Logger(), signal, prefer_raw=True):
+        assert mumu.screenshot().shape == (1280, 720, 3)
+        assert mumu.screenshot().shape == (1280, 720, 3)
+    assert [call.args[0] for call in run.call_args_list] == [cmd, [*cmd, "-p"], [*cmd, "-p"]]
 
 
 def test_native_capture_retry_keeps_hd_pixels_and_restores_method(monkeypatch):

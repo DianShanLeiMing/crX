@@ -1,6 +1,5 @@
 import random
 import time
-from collections import Counter
 
 import numpy
 
@@ -63,8 +62,10 @@ COLORS = {
     "Maroon": [128, 0, 0],
 }
 
-COLORS_ARRAY = numpy.array(list(COLORS.values()))
 COLORS_KEYS = list(COLORS.keys())
+_PALETTE = numpy.array(list(COLORS.values()), dtype=numpy.int32)
+_PALETTE_WEIGHTS = -2 * _PALETTE.T.copy()
+_PALETTE_SQUARED_NORMS = numpy.sum(_PALETTE * _PALETTE, axis=1)
 
 # Pre-compute numpy arrays for each card's corner data
 # Build a fresh dict with the transformed values
@@ -220,38 +221,13 @@ def find_closest_card(collected_data):
     return recognize_card_fingerprint(collected_data)["fingerprint_id"]
 
 
-# identification methods
-def make_pixel_dict_from_color_list(color_list):
-    # Initialize the pixel_dict with zeros
-    pixel_dict = dict.fromkeys(COLORS.keys(), 0)
-
-    # Count the occurrences of each color in color_list
-    color_counts = Counter(color_list)
-
-    # Update the pixel_dict with the counts
-    pixel_dict.update(color_counts)
-
-    return pixel_dict
-
-
-def color_from_pixel(pixels):
-    # Calculate the Euclidean distance between the pixels and each color
-    distances = numpy.linalg.norm(COLORS_ARRAY - pixels[:, None], axis=2)
-
-    # Find the color with the minimum distance for each pixel
-    closest_colors = [COLORS_KEYS[i] for i in numpy.argmin(distances, axis=1)]
-
-    return closest_colors
-
-
 def get_corner_pixels(x_range, y_range, iar):
-    # Get all pixels in the range
     pixels = iar[y_range[0] : y_range[1], x_range[0] : x_range[1]].reshape(-1, 3)
-
-    # Get the color for each pixel
-    colors = color_from_pixel(pixels)
-
-    return make_pixel_dict_from_color_list(colors)
+    # Squared Euclidean distance gives the same ordering and palette tie breaks.
+    # The squared norm of each pixel is common to every palette color.
+    scores = pixels.astype(numpy.int32) @ _PALETTE_WEIGHTS + _PALETTE_SQUARED_NORMS
+    counts = numpy.bincount(numpy.argmin(scores, axis=1), minlength=len(COLORS_KEYS))
+    return dict(zip(COLORS_KEYS, map(int, counts), strict=True))
 
 
 def get_all_pixel_data(emulator, chosen_card_index):
@@ -309,6 +285,19 @@ card_coords = [
 
 play_side = "left"
 battle_iar: numpy.ndarray[tuple[int, ...], numpy.dtype[numpy.uint8]] | None = None
+_recognized_hand_frame = None
+_recognized_hand_slots: dict[int, tuple[list[dict], dict]] = {}
+
+
+def _recognize_hand_slot(image, slot):
+    global _recognized_hand_frame
+    if image is not _recognized_hand_frame:
+        _recognized_hand_slots.clear()
+        _recognized_hand_frame = image
+    if slot not in _recognized_hand_slots:
+        fingerprint = extract_card_fingerprint(image, slot)
+        _recognized_hand_slots[slot] = fingerprint, recognize_card_fingerprint(fingerprint)
+    return _recognized_hand_slots[slot]
 
 
 def image_has_hero_champion_ability(iar) -> bool:
@@ -371,8 +360,7 @@ def _observe_hand_diagnostics(image, available, purple_counts):
         if collector.empty_observations >= 3:
             collector.offer(image, None, {"reason": "no_available_cards_high_elixir", "purple_counts": purple_counts})
     for slot in available:
-        fingerprint = extract_card_fingerprint(image, slot)
-        recognition = recognize_card_fingerprint(fingerprint)
+        fingerprint, recognition = _recognize_hand_slot(image, slot)
         _record_match_sample(
             image, slot, fingerprint, recognition, trigger="hand_observation", purple_counts=purple_counts
         )
@@ -417,10 +405,9 @@ def trigger_hero_champion_ability(emulator, logger) -> None:
 
 
 def identify_hand_cards(emulator, card_index):
-    color_chosen_card = get_all_pixel_data(emulator, card_index)
-    recognition = recognize_card_fingerprint(color_chosen_card)
+    fingerprint, recognition = _recognize_hand_slot(battle_iar, card_index)
     # A selected-card failure must not be lost to the periodic observation gate.
-    _record_match_sample(battle_iar, card_index, color_chosen_card, recognition, trigger="selected_card")
+    _record_match_sample(battle_iar, card_index, fingerprint, recognition, trigger="selected_card")
     return recognition["card_id"]
 
 

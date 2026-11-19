@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import Mock
 
 import cv2
 import numpy as np
@@ -52,3 +53,27 @@ def test_bgr_path_identifies_hand() -> None:
         raw = cd.find_closest_card(corners)
         got = cd.CARD_DETECTION_ALIASES.get(raw, raw)
         assert got == expected, f"slot {slot}: expected {expected}, got {got} (raw {raw})"
+
+
+def test_color_counts_match_euclidean_reference():
+    bgr = native_replay(_load_bgr())
+    left, top = cd.toplefts[0]
+    corner = bgr[top : top + 66, left : left + 54]
+    palette = np.array(list(cd.COLORS.values()), dtype=np.int64)
+    distances = np.linalg.norm(palette - corner.reshape(-1, 1, 3), axis=2)
+    expected = np.bincount(np.argmin(distances, axis=1), minlength=len(palette))
+    assert cd.get_corner_pixels((0, 54), (0, 66), corner) == dict(zip(cd.COLORS, expected, strict=True))
+
+
+def test_diagnostic_and_play_reuse_recognition_only_on_the_same_frame(monkeypatch):
+    frame = native_replay(_load_bgr())
+    collector = Mock()
+    collector.observation_due.return_value = True
+    monkeypatch.setattr(cd, "active_card_samples", lambda: collector)
+    monkeypatch.setattr(cd, "_card_purple_counts", lambda _: [104, 0, 0, 0])
+    extract = Mock(wraps=cd.extract_card_fingerprint)
+    monkeypatch.setattr(cd, "extract_card_fingerprint", extract)
+    for current in (frame, frame.copy()):
+        assert cd.check_which_cards_are_available(None, frame=current) == [0]
+        assert cd.identify_hand_cards(None, 0) == EXPECTED[0]
+    assert extract.call_count == 2

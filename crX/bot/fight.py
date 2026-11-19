@@ -117,7 +117,6 @@ def do_fight_state(
         elif fight_mode_chosen == "Classic 2v2":
             logger.increment_classic_2v2_fights()
 
-    time.sleep(10)
     return True
 
 
@@ -653,7 +652,9 @@ def _fight_loop(
             )
         if not played:
             logger.change_status("暂缓出牌，继续观察战场……")
-            time.sleep(0.2)
+            snapshot = enemy_monitor.snapshot
+            if snapshot is None or all(unit.zone == "enemy_half" for unit in snapshot.units):
+                time.sleep(0.2)
         # play_time_taken = str(time.time() - play_start_time)[:4]
         logger.change_status(
             f"本次出牌耗时 {str(time.time() - play_start_time)[:4]} 秒",
@@ -662,7 +663,6 @@ def _fight_loop(
     # Fight over: freeze capture so the pack excludes post-fight nav (manifest/outcome written later).
     stop_fight_capture()
     logger.change_status("对战已完成")
-    time.sleep(2.13)
     cards_played = logger.get_cards_played()
     logger.change_status(f"本场对战共出牌约 {cards_played - prev_cards_played} 次")
 
