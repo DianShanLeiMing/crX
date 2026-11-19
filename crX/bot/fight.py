@@ -7,7 +7,7 @@ from collections.abc import Callable
 from typing import Literal
 
 from crX.bot.battle_strategy import ADVANCE_ELIXIR, PURPOSE_LABELS, HandCard, rank_hand_plays
-from crX.bot.card_data import get_card_display_name, get_card_elixir_cost
+from crX.bot.card_data import CIRCULAR_SPELL_PROFILES, get_card_display_name, get_card_elixir_cost
 from crX.bot.card_detection import (
     check_which_cards_are_available,
     create_default_bridge_iar,
@@ -36,7 +36,7 @@ from crX.bot.recorder import (
     start_fight_recording,
     stop_fight_capture,
 )
-from crX.bot.spell_targeting import low_princess_tower_target, stable_marker_positions
+from crX.bot.spell_targeting import MIN_STABILITY_INTERVAL_S, low_princess_tower_target, stable_marker_positions
 from crX.bot.state_detect import (
     image_has_elixir,
     image_is_battle_over,
@@ -181,6 +181,18 @@ def _maybe_send_emote(emulator, logger, use_emotes: bool):
         send_emote(emulator, logger)
 
 
+def _tap_card_and_target(emulator, card_index, play_coord, *, wait_between=False):
+    card_coord = HAND_CARDS_COORDS[card_index]
+    tap_pair = getattr(type(emulator), "tap_card_and_target", None)
+    if tap_pair is not None:
+        tap_pair(emulator, card_coord, play_coord, wait_between=wait_between)
+        return
+    emulator.click(*card_coord)
+    if wait_between:
+        time.sleep(0.1)
+    emulator.click(*play_coord)
+
+
 def play_random_available_card(
     emulator,
     logger,
@@ -195,9 +207,7 @@ def play_random_available_card(
     if play is None:
         return False
     card_index, play_coord = play
-    emulator.click(*HAND_CARDS_COORDS[card_index])
-    time.sleep(0.1)
-    emulator.click(*play_coord)
+    _tap_card_and_target(emulator, card_index, play_coord, wait_between=True)
     time.sleep(0.1)
     _remember_played_slot(card_index)
 
@@ -446,6 +456,12 @@ def _pick_card_play(
 
     play = select(options)
     if play.card.is_spell:
+        profile = CIRCULAR_SPELL_PROFILES.get(play.card.card_id)
+        if play.covered and profile is not None and profile.requires_stable_markers:
+            remaining = snapshot.sampled_at + MIN_STABILITY_INTERVAL_S - time.monotonic()
+            if remaining > 0:
+                # Wait before capturing so the casting frame is still fresh at input time.
+                time.sleep(remaining)
         # Read all slots again from the casting frame, so a delayed or changed
         # hand cannot cast a different card using the preview's coordinates.
         latest = inspect_hand()
@@ -498,16 +514,14 @@ def play_a_card(
         return False
     card_index, play_coord = play
 
-    click_and_play_card_start_time = time.time()
-    emulator.click(HAND_CARDS_COORDS[card_index][0], HAND_CARDS_COORDS[card_index][1])
-
-    emulator.click(play_coord[0], play_coord[1])
+    click_and_play_card_start_time = time.perf_counter()
+    _tap_card_and_target(emulator, card_index, play_coord)
     _remember_played_slot(card_index)
-    click_and_play_card_time_taken = str(time.time() - click_and_play_card_start_time)[:3]
+    click_and_play_card_time_taken = time.perf_counter() - click_and_play_card_start_time
     if recording_flag:
         log_play(card_index, play_coord[0], play_coord[1], battle_strategy.get_elapsed_time())
 
-    logger.change_status(f"已完成出牌，耗时 {click_and_play_card_time_taken} 秒")
+    logger.change_status(f"已完成出牌，耗时 {click_and_play_card_time_taken:.3f} 秒")
     logger.add_card_played()
 
     _maybe_send_emote(emulator, logger, use_emotes)

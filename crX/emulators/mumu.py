@@ -21,6 +21,7 @@ from crX.emulators.base import EmulatorNotReadyError
 from crX.utils.platform import Platform, is_windows
 
 RAW_SCREENSHOT_TIMEOUT_S = 2
+CARD_TAP_TIMEOUT_S = 2
 
 
 def run_manager(args: list[str], *, timeout: int = 15):
@@ -144,6 +145,25 @@ class MuMuEmulatorController(AdbController):
             raise ValueError("MuMu RAW 截图尺寸或像素格式无效")
         rgba = np.frombuffer(data, dtype=np.uint8, offset=header_size).reshape(height, width, 4)
         return cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGR)
+
+    def tap_card_and_target(
+        self, card: tuple[int, int], target: tuple[int, int], *, wait_between: bool = False
+    ) -> None:
+        width, height = GAME_SCREEN_SIZE
+        for x, y in (card, target):
+            if type(x) is not int or type(y) is not int or not (0 <= x < width and 0 <= y < height):
+                raise ValueError("出牌坐标必须是原生画面内的整数")
+
+        # ADB joins these arguments on Android. Only validated decimal coordinates
+        # and fixed tokens reach the device shell.
+        command = ["shell", "-T", "input", "tap", *map(str, card), "&&"]
+        if wait_between:
+            command.extend(("sleep", "0.1", "&&"))
+        command.extend(("input", "tap", *map(str, target)))
+        result = self.adb(command, timeout=CARD_TAP_TIMEOUT_S)
+        if result.returncode:
+            # The first tap may have succeeded. Do not replay the combined input.
+            raise RuntimeError(f"MuMu 出牌点击失败（返回码 {result.returncode}）")
 
     @classmethod
     def list_instances(cls, mumu_path="") -> list[dict]:

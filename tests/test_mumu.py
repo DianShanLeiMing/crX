@@ -78,6 +78,50 @@ def test_adb_uses_argument_vector_with_timeout(monkeypatch):
     assert options["timeout"] == 20
 
 
+@pytest.mark.parametrize("wait_between", [False, True])
+def test_mumu_card_taps_use_one_device_command_and_are_not_replayed_on_failure(monkeypatch, wait_between):
+    calls = []
+
+    def fail(args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args, 1, "", "")
+
+    monkeypatch.setattr(adb_base.subprocess, "run", fail)
+    device = mumu.MuMuEmulatorController.__new__(mumu.MuMuEmulatorController)
+    device.adb_path, device.device_serial = "adb", "127.0.0.1:16417"
+    with pytest.raises(RuntimeError, match="出牌点击失败"):
+        device.tap_card_and_target((224, 1136), (260, 650), wait_between=wait_between)
+
+    ((args, options),) = calls
+    delay = ["sleep", "0.1", "&&"] if wait_between else []
+    assert args == [
+        "adb",
+        "-s",
+        device.device_serial,
+        "shell",
+        "-T",
+        "input",
+        "tap",
+        "224",
+        "1136",
+        "&&",
+        *delay,
+        "input",
+        "tap",
+        "260",
+        "650",
+    ]
+    assert options["shell"] is False and options["timeout"] == mumu.CARD_TAP_TIMEOUT_S
+
+
+@pytest.mark.parametrize("target", [("260; false", 650), (720, 650), (260, -1), (True, 650)])
+def test_mumu_card_taps_reject_invalid_coordinates_before_input(monkeypatch, target):
+    device = mumu.MuMuEmulatorController.__new__(mumu.MuMuEmulatorController)
+    monkeypatch.setattr(device, "adb", lambda *a, **k: pytest.fail("Invalid coordinates must prevent both taps"))
+    with pytest.raises(ValueError, match="出牌坐标"):
+        device.tap_card_and_target((224, 1136), target)
+
+
 def test_missing_game_does_not_modify_display(monkeypatch):
     device = AdbController(Logger(), "127.0.0.1:16417")
     monkeypatch.setattr(device, "start", lambda: None)

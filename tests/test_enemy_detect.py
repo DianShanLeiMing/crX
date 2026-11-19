@@ -259,6 +259,41 @@ def test_another_circular_spell_can_enable_targeting_through_its_profile(monkeyp
     assert emulator.click.call_args.args == (185, 626)
 
 
+@pytest.mark.parametrize(("card_id", "expected_wait"), [("fireball", 0.15), ("zap", 0)])
+def test_fast_capture_preserves_fireball_stability_without_delaying_zap(monkeypatch, card_id, expected_wait):
+    before, after = battle_frame(), battle_frame()
+    for frame in (before, after):
+        draw_badge(frame, 180, 600, bar_color=RED)
+    now = 10.0
+    waits = []
+
+    def sleep(seconds):
+        nonlocal now
+        waits.append(seconds)
+        now += seconds
+
+    def capture():
+        nonlocal now
+        now += 0.05
+        return after
+
+    emulator = Mock()
+    emulator.screenshot.side_effect = capture
+    logger = Mock(spec=Logger)
+    monitor = enemy_detect.EnemyUnitMonitor(logger)
+    monkeypatch.setattr(enemy_detect, "time", SimpleNamespace(monotonic=lambda: now))
+    monkeypatch.setattr(fight, "time", SimpleNamespace(monotonic=lambda: now, sleep=sleep))
+    monkeypatch.setattr(fight, "last_three_cards", [])
+    mock_decision_hand(monkeypatch, before)
+    monkeypatch.setattr(fight, "get_play_coords_for_card", lambda *args: (card_id, (202, 374)))
+    monitor.observe(before)
+    now += 0.05
+
+    assert fight._pick_card_play(emulator, logger, 0, monitor, decision_frame=before) == (0, (185, 638))
+    emulator.screenshot.assert_called_once_with()
+    assert waits == (pytest.approx([expected_wait]) if expected_wait else [])
+
+
 @pytest.mark.parametrize(
     ("min_targets", "min_defensive_targets", "expected"),
     [
