@@ -595,7 +595,8 @@
         "6f814f868453ecd1": 2,
         "527c6b66950bb5a2": 3,
         "9c29de18ba78d4ca": 4,
-        "7add0bbda7727239": 5
+        "7add0bbda7727239": 5,
+        "f6ecdf1211d92ad7": 6
       },
       "order": [
         "be0074d81ab6610f",
@@ -603,7 +604,8 @@
         "7add0bbda7727239",
         "00d8d21914c44c61",
         "527c6b66950bb5a2",
-        "9c29de18ba78d4ca"
+        "9c29de18ba78d4ca",
+        "f6ecdf1211d92ad7"
       ]
     },
     "giant": {
@@ -1192,10 +1194,12 @@
     "ram_rider": {
       "preferred": "aec4bc799bc22ec2",
       "numbers": {
-        "aec4bc799bc22ec2": 0
+        "aec4bc799bc22ec2": 0,
+        "021a6ef7ab67c447": 1
       },
       "order": [
-        "aec4bc799bc22ec2"
+        "aec4bc799bc22ec2",
+        "021a6ef7ab67c447"
       ]
     },
     "rascals": {
@@ -1551,6 +1555,15 @@
       "order": [
         "ae7e4cb9e092aea6",
         "b376c9b98b7c8c3a"
+      ]
+    },
+    "evo_royal_hogs": {
+      "preferred": null,
+      "numbers": {
+        "a312b58e6d2420c4": 1
+      },
+      "order": [
+        "a312b58e6d2420c4"
       ]
     }
   }
