@@ -1,5 +1,7 @@
 """Card placement profiles, groups and color fingerprints (upstream data)."""
 
+from dataclasses import dataclass
+
 from crX.bot.card_fingerprints import load_builtin_fingerprints
 
 _fingerprints = load_builtin_fingerprints()
@@ -214,6 +216,37 @@ def get_card_display_name(card_id: str | None) -> str:
     """Return the Chinese card name for status messages."""
     return CARD_NAMES_ZH.get(card_id or "", "未知卡牌")
 
+
+@dataclass(frozen=True, slots=True)
+class CircularSpellProfile:
+    """Native coverage estimate and the minimum coverage required to cast."""
+
+    radius_px: int
+    marker_offset_y_px: int = 32
+    requires_stable_markers: bool = False
+    min_targets: int = 2
+    # Counts only markers at the river or on our half. None disables this alternative.
+    min_defensive_targets: int | None = 1
+
+
+# Native screen coverage estimates. These deliberately leave room for badge offset and movement.
+CIRCULAR_SPELL_PROFILES: dict[str, CircularSpellProfile] = {
+    "arrows": CircularSpellProfile(radius_px=64),
+    "fireball": CircularSpellProfile(radius_px=52, requires_stable_markers=True),
+    "zap": CircularSpellProfile(radius_px=50),
+    "evo_zap": CircularSpellProfile(radius_px=50),
+    "poison": CircularSpellProfile(radius_px=64, requires_stable_markers=True, min_defensive_targets=None),
+    "snowball": CircularSpellProfile(radius_px=50, requires_stable_markers=True),
+    "evo_snowball": CircularSpellProfile(radius_px=50, requires_stable_markers=True),
+    "freeze": CircularSpellProfile(radius_px=52),
+    "lightning": CircularSpellProfile(radius_px=60),
+}
+
+UNRESTRICTED_SPELLS = frozenset({"rocket", "earthquake"})
+# Only spells with a supported tower-damage placement can use the finisher.
+TOWER_FINISH_SPELLS = frozenset(
+    {"arrows", "fireball", "zap", "evo_zap", "poison", "snowball", "evo_snowball", "lightning"}
+)
 
 # Placement profiles: where on screen to tap (left/right), not card role in battle.
 # Shared arena zones use zone_* keys; card-named keys stay when only that card (or its evo) uses the region.

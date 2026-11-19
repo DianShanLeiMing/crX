@@ -6,27 +6,28 @@ import time
 from collections.abc import Callable
 from typing import Literal
 
-from crX.bot.card_data import get_card_display_name
+from crX.bot.card_data import CIRCULAR_SPELL_PROFILES, TOWER_FINISH_SPELLS, UNRESTRICTED_SPELLS, get_card_display_name
 from crX.bot.card_detection import (
     check_which_cards_are_available,
     create_default_bridge_iar,
+    get_card_group,
     get_play_coords_for_card,
-    identify_hand_cards,
     is_hero_champion_ability_visible,
     switch_side,
     trigger_hero_champion_ability,
 )
-from crX.bot.card_samples import active_card_samples, card_sample_session
+from crX.bot.card_samples import card_sample_session
 from crX.bot.coords import (
     EMOTE_BUTTON_COORD,
     EMOTE_ICON_COORDS,
+    ENEMY_PRINCESS_BAR_WIDTH,
     HAND_CARDS_COORDS,
     PLAYABLE_PLAY_REGION_LTRB,
     QUICKMATCH_POPUP_BUTTON_COORD,
     START_FIGHT_BUTTON_COORD,
 )
 from crX.bot.enemy_detect import EnemyUnitMonitor
-from crX.bot.find import find_battle_outcome
+from crX.bot.find import find_battle_outcome, find_enemy_unit_markers
 from crX.bot.nav import (
     check_for_in_battle_with_delay,
     finish_pending_battle_rewards,
@@ -40,10 +41,13 @@ from crX.bot.recorder import (
     start_fight_recording,
     stop_fight_capture,
 )
+from crX.bot.spell_targeting import choose_circular_spell_target, low_princess_tower_target, stable_marker_positions
 from crX.bot.state_detect import (
     check_if_battle_has_ended,
     check_if_in_battle,
     count_elixir,
+    image_is_in_battle,
+    read_enemy_princess_bars,
 )
 from crX.bot.tower_health import TowerHealthMonitor
 from crX.interface.enums import BATTLE_MODE_LABELS
@@ -53,6 +57,17 @@ from crX.utils.versioning import __version__
 ELIXIR_WAIT_TIMEOUT = 40  # too high but someone got errors with that so idk
 ABILITY_TRIGGER_DELAY_S = 3
 BATTLE_OUTCOME_WAIT_S = 3
+SPELL_PLACEMENT_GROUPS = {
+    "center_spell",
+    "lane_spell",
+    "large_spell",
+    "poison",
+    "reactive_spell",
+    "rocket",
+    "tornado",
+    "graveyard",
+    "goblin_barrel",
+}
 
 
 def _maybe_start_fight_recording(
@@ -186,31 +201,25 @@ RANDOM_PLAY_ELIXIR_MIN = 3
 RANDOM_PLAY_ELIXIR_MAX = 9
 
 
-def play_random_available_card(emulator, logger, recording_flag: bool, elapsed_s: float) -> bool:
-    """Play one card that is actually available, at a random friendly-half coord.
-
-    Mirrors the rl-bot RandomPlayer so recorded plays are never polluted with cards
-    that didn't deploy: read the available hand slots (affordable, non-empty) and, if
-    any, play a random one; if none are available, do nothing. Returns True if a card
-    was played. The caller gates this behind a random elixir wait.
-    """
-    card_indices = check_which_cards_are_available(emulator, check_side=True)
-    if not card_indices:
-        return False  # nothing playable -> no play, nothing recorded (caller re-rolls)
-
-    card_index = random.choice(card_indices)
-    if active_card_samples() is not None:
-        identify_hand_cards(emulator, card_index)  # Diagnostics only; random placement stays unchanged.
-    left, top, right, bottom = PLAYABLE_PLAY_REGION_LTRB
-    play_coord = (random.randint(left, right), random.randint(top, bottom))
-
-    emulator.click(HAND_CARDS_COORDS[card_index][0], HAND_CARDS_COORDS[card_index][1])
+def play_random_available_card(
+    emulator,
+    logger,
+    recording_flag: bool,
+    elapsed_s: float,
+    *,
+    enemy_monitor: EnemyUnitMonitor | None = None,
+) -> bool:
+    """Pick a random hand slot, applying the same spell rules as strategy play."""
+    play = _pick_card_play(emulator, logger, elapsed_s, enemy_monitor, random_placement=True)
+    if play is None:
+        return False
+    card_index, play_coord = play
+    emulator.click(*HAND_CARDS_COORDS[card_index])
     time.sleep(0.1)
-    emulator.click(play_coord[0], play_coord[1])
+    emulator.click(*play_coord)
     time.sleep(0.1)
 
     if recording_flag:
-        # Recording retains the hand slot; diagnostic identity does not affect random placement.
         log_play(card_index, play_coord[0], play_coord[1], elapsed_s)
     logger.add_card_played()
     return True
@@ -391,19 +400,33 @@ def select_card_index(card_indices, last_three_cards):
     return random.choice(preferred_cards)
 
 
-def play_a_card(
-    emulator, logger, recording_flag: bool, battle_strategy: "BattleStrategy", *, use_emotes: bool = False
-) -> bool:
-    print("\n")
+def _pick_card_play(
+    emulator,
+    logger,
+    elapsed_s: float,
+    enemy_monitor: EnemyUnitMonitor | None,
+    *,
+    random_placement: bool = False,
+) -> tuple[int, tuple[int, int]] | None:
+    if enemy_monitor is None:
+        enemy_monitor = EnemyUnitMonitor(logger)
 
     # check which cards are available
     logger.change_status("正在检查可用手牌")
     available_card_check_start_time = time.time()
-    card_indices = check_which_cards_are_available(emulator, check_side=True)
+    hand_frame = None
+    hand_sampled_at = 0.0
+
+    def remember_hand_frame(image):
+        nonlocal hand_frame, hand_sampled_at
+        hand_frame = image
+        hand_sampled_at = time.monotonic()
+
+    card_indices = check_which_cards_are_available(emulator, check_side=True, observe_frame=remember_hand_frame)
 
     if not card_indices:
         logger.change_status("暂时没有可用手牌……")
-        return False
+        return None
 
     available_card_check_time_taken = str(
         time.time() - available_card_check_start_time,
@@ -413,32 +436,93 @@ def play_a_card(
         f"可用手牌位置：{card_indices}（耗时 {available_card_check_time_taken} 秒）",
     )
 
-    card_index = select_card_index(card_indices, last_three_cards)
-    logger.change_status(f"选择手牌位置：{card_index}")
-
-    # get a coord based on the selected side
     play_coord_calculation_start_time = time.time()
-    card_id, play_coord = get_play_coords_for_card(emulator, logger, card_index, battle_strategy.get_elapsed_time())
-    play_coord_calculation_time_taken = str(
-        time.time() - play_coord_calculation_start_time,
-    )[:3]
+    remaining = list(card_indices)
+    snapshot = None
+    spell_frame = None
+    stable_positions: frozenset[tuple[int, int]] | None = None
+    tower_bars = None
+    while remaining:
+        card_index = random.choice(remaining) if random_placement else select_card_index(remaining, last_three_cards)
+        remaining.remove(card_index)
+        logger.change_status(f"选择手牌位置：{card_index}")
+        card_id, play_coord = get_play_coords_for_card(emulator, logger, card_index, elapsed_s)
+        if play_coord is None and not random_placement:
+            logger.change_status("本次出牌已跳过：未能确定出牌坐标")
+            continue
 
+        target_note = ""
+        profile = CIRCULAR_SPELL_PROFILES.get(card_id)
+        if not card_id:
+            logger.change_status("本次出牌已跳过：未能确认卡牌类型")
+            continue
+        if profile is None and get_card_group(card_id) not in SPELL_PLACEMENT_GROUPS and card_id != "clone":
+            break
+
+        if snapshot is None:
+            spell_frame = emulator.screenshot()
+            enemy_monitor.observe(spell_frame, force=True)
+            snapshot = enemy_monitor.snapshot
+            if snapshot is None:
+                logger.change_status("本次法术已跳过：当前画面无法确认仍在对战")
+                return None
+        if card_id in UNRESTRICTED_SPELLS:
+            break
+
+        if profile is not None:
+            if profile.requires_stable_markers and stable_positions is None:
+                stable_positions = frozenset()
+                if hand_frame is not None and image_is_in_battle(hand_frame):
+                    stable_positions = stable_marker_positions(
+                        tuple(unit.position for unit in snapshot.units),
+                        tuple(marker.center for marker in find_enemy_unit_markers(hand_frame)),
+                        snapshot.sampled_at - hand_sampled_at,
+                    )
+            target = choose_circular_spell_target(snapshot, profile, stable_positions=stable_positions or frozenset())
+            if target is not None:
+                play_coord, covered = target
+                target_note = f" | 实时落点，估算覆盖 {covered} 个标记"
+                break
+
+        if card_id in TOWER_FINISH_SPELLS:
+            if tower_bars is None:
+                tower_bars = read_enemy_princess_bars(spell_frame)
+            finisher = low_princess_tower_target(tower_bars)
+            if finisher is not None:
+                play_coord, fill = finisher
+                target_note = f" | 残血公主塔补刀，血条约 {fill / ENEMY_PRINCESS_BAR_WIDTH:.1%}"
+                break
+        logger.change_status(f"暂缓释放 {get_card_display_name(card_id)}：未找到可施放目标")
+    else:
+        return None
+
+    if random_placement and not target_note:
+        left, top, right, bottom = PLAYABLE_PLAY_REGION_LTRB
+        play_coord = (random.randint(left, right), random.randint(top, bottom))
+
+    calculation_seconds = time.time() - play_coord_calculation_start_time
     logger.change_status(
-        f"已计算卡牌 {get_card_display_name(card_id)} 的出牌位置 {play_coord}（耗时 {play_coord_calculation_time_taken} 秒）",
+        f"已计算卡牌 {get_card_display_name(card_id)} 的出牌位置 {play_coord}{target_note}（耗时 {calculation_seconds:.2f} 秒）",
     )
+    return card_index, play_coord
 
-    # click the card index
+
+def play_a_card(
+    emulator,
+    logger,
+    recording_flag: bool,
+    battle_strategy: "BattleStrategy",
+    *,
+    use_emotes: bool = False,
+    enemy_monitor: EnemyUnitMonitor | None = None,
+) -> bool:
+    play = _pick_card_play(emulator, logger, battle_strategy.get_elapsed_time(), enemy_monitor)
+    if play is None:
+        return False
+    card_index, play_coord = play
+
     click_and_play_card_start_time = time.time()
-    if None in [HAND_CARDS_COORDS, card_index]:
-        logger.change_status("本次出牌已跳过：未能确定手牌位置")
-        return False
-
     emulator.click(HAND_CARDS_COORDS[card_index][0], HAND_CARDS_COORDS[card_index][1])
-
-    # click the play coord
-    if play_coord is None:
-        logger.change_status("本次出牌已跳过：未能确定出牌坐标")
-        return False
 
     emulator.click(play_coord[0], play_coord[1])
     if card_index in last_three_cards:
@@ -545,7 +629,7 @@ def _fight_loop(
     battle_strategy.start_battle()
     is_1v1 = fight_mode in ("Classic 1v1", "Trophy Road")
     tower_monitor = TowerHealthMonitor(logger) if is_1v1 else None
-    enemy_monitor = EnemyUnitMonitor(logger) if is_1v1 else None
+    enemy_monitor = EnemyUnitMonitor(logger)
 
     fight_deadline = time.monotonic() + 360
     while True:
@@ -606,8 +690,13 @@ def _fight_loop(
             continue
 
         play_start_time = time.time()
-        if play_a_card(emulator, logger, recording_flag, battle_strategy, use_emotes=use_emotes) is False:
-            logger.change_status("出牌失败，正在重试……")
+        if (
+            play_a_card(
+                emulator, logger, recording_flag, battle_strategy, use_emotes=use_emotes, enemy_monitor=enemy_monitor
+            )
+            is False
+        ):
+            logger.change_status("暂缓出牌，继续观察战场……")
             time.sleep(0.2)
         # play_time_taken = str(time.time() - play_start_time)[:4]
         logger.change_status(
@@ -642,7 +731,7 @@ def _random_fight_loop(
     battle_detection_lost_count = 0
     is_1v1 = fight_mode_chosen in ("Classic 1v1", "Trophy Road")
     tower_monitor = TowerHealthMonitor(logger) if is_1v1 else None
-    enemy_monitor = EnemyUnitMonitor(logger) if is_1v1 else None
+    enemy_monitor = EnemyUnitMonitor(logger)
 
     # while in battle:
     while True:
@@ -684,7 +773,9 @@ def _random_fight_loop(
             break
         if elixir_result == "restart":
             return False
-        if play_random_available_card(emulator, logger, recording_flag, time.time() - start_time):
+        if play_random_available_card(
+            emulator, logger, recording_flag, time.time() - start_time, enemy_monitor=enemy_monitor
+        ):
             _maybe_send_emote(emulator, logger, use_emotes)
 
     # Fight over: freeze capture so the pack excludes post-fight nav (manifest/outcome written later).

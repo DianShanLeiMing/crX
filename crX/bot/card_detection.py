@@ -329,12 +329,14 @@ def is_hero_champion_ability_visible(emulator) -> bool:
     return False
 
 
-def check_which_cards_are_available(emulator, check_side=False):
+def check_which_cards_are_available(emulator, check_side=False, *, observe_frame=None):
     global battle_iar
     battle_iar = emulator.screenshot()
     card_exists_list = []
     if battle_iar is None or battle_iar.shape != (*GAME_SCREEN_SIZE[::-1], 3):
         return card_exists_list
+    if observe_frame is not None:
+        observe_frame(battle_iar)
 
     if check_side:
         global play_side

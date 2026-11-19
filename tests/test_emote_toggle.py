@@ -61,7 +61,6 @@ def test_actual_play_only_sends_emote_when_enabled(monkeypatch, random_mode, mod
     monkeypatch.setattr(fight, "wait_for_elixir", lambda *args, **kwargs: True)
     monkeypatch.setattr(fight, "check_which_cards_are_available", lambda *args, **kwargs: [0])
     monkeypatch.setattr(fight, "get_play_coords_for_card", lambda *_: ("knight", (200, 350)))
-    monkeypatch.setattr(fight, "active_card_samples", lambda: None)
     monkeypatch.setattr(fight.time, "sleep", lambda *_: None)
     monkeypatch.setattr(fight.random, "choice", lambda choices: choices[0])
     # Trigger the existing 10% emote branch; other random ranges use their minimum.

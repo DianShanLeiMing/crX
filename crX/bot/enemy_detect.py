@@ -90,10 +90,10 @@ class EnemyUnitMonitor:
         self._last_log = float("-inf")
         self._reported_groups: Counter[tuple[EnemyLane, EnemyZone]] = Counter()
 
-    def observe(self, image: np.ndarray | None) -> None:
+    def observe(self, image: np.ndarray | None, *, force: bool = False) -> None:
         now = time.monotonic()
         elapsed = now - self._last_sample
-        if elapsed < SAMPLE_INTERVAL_S:
+        if not force and elapsed < SAMPLE_INTERVAL_S:
             return
         self._last_sample = now
 

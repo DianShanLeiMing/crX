@@ -25,10 +25,17 @@ ENEMY_UNIT_RIVER_Y_RANGE = (480, 576)
 # Left and right enemy Princess Tower bars in native 1v1 frames (left edge, bottom border).
 ENEMY_PRINCESS_BAR_ANCHORS = ((144, 155), (521, 155))
 ENEMY_PRINCESS_BAR_WIDTH = 79
+# Native 1v1 tap points on the left and right enemy Princess Towers.
+ENEMY_PRINCESS_AIM_POINTS = ((172, 260), (548, 260))
 # Destroyed tower platforms, below the health bars on native frames.
 ENEMY_PRINCESS_RUINS_REGIONS_LTRB = ((105, 220, 235, 350), (485, 220, 615, 350))
 # Native tower layouts can move the bar vertically while keeping the same lane alignment.
 ENEMY_PRINCESS_BAR_BORDER_Y_RANGE = (130, 205)
+# Exclude direct taps on the tower and its platform when selecting a unit target.
+ENEMY_PRINCESS_TAP_REGIONS_LTRB = tuple(
+    (left, ENEMY_PRINCESS_BAR_BORDER_Y_RANGE[1], right, bottom)
+    for left, _, right, bottom in ENEMY_PRINCESS_RUINS_REGIONS_LTRB
+)
 # Include the crown badge and HP digits beside each Princess Tower bar.
 ENEMY_PRINCESS_UI_REGIONS_LTRB = tuple(
     (x - 28, ENEMY_UNIT_SEARCH_REGION_LTRB[1], x + ENEMY_PRINCESS_BAR_WIDTH + 3, ENEMY_PRINCESS_BAR_BORDER_Y_RANGE[1])

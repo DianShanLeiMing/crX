@@ -277,7 +277,7 @@ def test_random_play_also_checks_the_selected_card_without_changing_placement(tm
     samples.start_card_samples("Classic 2v2", tmp_path)
     calls, clicks = [], []
     monkeypatch.setattr(fight, "check_which_cards_are_available", lambda *_args, **_kwargs: [0])
-    monkeypatch.setattr(fight, "identify_hand_cards", lambda *_args: calls.append("identified") or "UNKNOWN")
+    monkeypatch.setattr(cd, "identify_hand_cards", lambda *_args: calls.append("identified") or "knight")
     monkeypatch.setattr(fight.time, "sleep", lambda *_: None)
 
     class Device:
