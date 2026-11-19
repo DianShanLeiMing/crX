@@ -311,8 +311,7 @@ play_side = "left"
 battle_iar: numpy.ndarray[tuple[int, ...], numpy.dtype[numpy.uint8]] | None = None
 
 
-def is_hero_champion_ability_visible(emulator) -> bool:
-    iar = emulator.screenshot()
+def image_has_hero_champion_ability(iar) -> bool:
     pixels = numpy.array([iar[934][556], iar[916][574], iar[934][578]])
     colors = numpy.array(
         [

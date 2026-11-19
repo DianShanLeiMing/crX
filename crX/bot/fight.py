@@ -13,7 +13,7 @@ from crX.bot.card_detection import (
     create_default_bridge_iar,
     get_card_group,
     get_play_coords_for_card,
-    is_hero_champion_ability_visible,
+    image_has_hero_champion_ability,
     switch_side,
     trigger_hero_champion_ability,
 )
@@ -28,12 +28,7 @@ from crX.bot.coords import (
 )
 from crX.bot.enemy_detect import EnemyUnitMonitor
 from crX.bot.find import find_battle_outcome
-from crX.bot.nav import (
-    check_for_in_battle_with_delay,
-    finish_pending_battle_rewards,
-    get_to_main_after_fight,
-    wait_for_battle_start,
-)
+from crX.bot.nav import finish_pending_battle_rewards, get_to_main_after_fight, wait_for_battle_start
 from crX.bot.recorder import (
     finish_fight_recording,
     is_recording,
@@ -43,10 +38,8 @@ from crX.bot.recorder import (
 )
 from crX.bot.spell_targeting import low_princess_tower_target, stable_marker_positions
 from crX.bot.state_detect import (
-    check_if_battle_has_ended,
-    check_if_in_battle,
-    count_elixir,
     image_has_elixir,
+    image_is_battle_over,
     image_is_in_battle,
     read_battle_elixir,
     read_enemy_princess_bars,
@@ -59,6 +52,7 @@ from crX.utils.versioning import __version__
 ELIXIR_WAIT_TIMEOUT = 40  # too high but someone got errors with that so idk
 ABILITY_TRIGGER_DELAY_S = 3
 BATTLE_OUTCOME_WAIT_S = 3
+BATTLE_DETECTION_LOSS_S = 12
 
 
 def _maybe_start_fight_recording(
@@ -226,38 +220,52 @@ def wait_for_elixir(
     enemy_monitor: EnemyUnitMonitor | None = None,
     on_decision_frame=None,
 ) -> Literal["restart", "no battle"] | bool:
-    """Method to wait for 4 elixir during a battle"""
-    start_time = time.time()
-    battle_detection_lost_count = 0
+    """Wait for a playable battle frame, sharing it across the HUD checks."""
+    start_time = time.monotonic()
+    battle_detection_lost_since = None
     last_logged_second = -1
-    last_lost_detection_log_second = -1
     ability_available_since = None
-    decision_ready = False
 
-    def observe_frame(image):
-        nonlocal decision_ready
+    while True:
+        image = emulator.screenshot()
+        now = time.monotonic()
+        if not image_is_in_battle(image):
+            if image_is_battle_over(image):
+                logger.change_status("对战已结束，停止等待圣水")
+                return "no battle"
+            if battle_detection_lost_since is None:
+                battle_detection_lost_since = now
+                logger.change_status("等待圣水时暂未检测到战斗画面，继续等待")
+            elif now - battle_detection_lost_since >= BATTLE_DETECTION_LOSS_S:
+                logger.change_status("连续多次未检测到战斗画面，尚未确认结算，请求恢复")
+                return "restart"
+            ability_available_since = None
+            time.sleep(0.5)
+            continue
+
+        battle_detection_lost_since = None
         if tower_monitor is not None:
             tower_monitor.observe(image)
         if enemy_monitor is not None:
             enemy_monitor.observe(image, force=on_decision_frame is not None)
-        if on_decision_frame is not None:
-            on_decision_frame(image)
-            snapshot = enemy_monitor.snapshot if enemy_monitor is not None else None
-            decision_ready = (
-                snapshot is not None
-                and image_has_elixir(image, 1)
-                and (
-                    any(unit.zone != "enemy_half" for unit in snapshot.units)
-                    or low_princess_tower_target(read_enemy_princess_bars(image)) is not None
-                )
-            )
 
-    observer = observe_frame if tower_monitor is not None or enemy_monitor is not None or on_decision_frame else None
-    while not count_elixir(emulator, elixir_wait_amount, observer):
-        if decision_ready:
-            return True
-        # debug screenshot saving removed from production
-        wait_time = time.time() - start_time
+        wait_time = now - start_time
+        if image_has_elixir(image, elixir_wait_amount):
+            logger.change_status(f"耗时 {wait_time:.2f} 秒，已等到 {elixir_wait_amount} 点圣水。")
+            break
+
+        snapshot = enemy_monitor.snapshot if enemy_monitor is not None else None
+        if (
+            on_decision_frame is not None
+            and snapshot is not None
+            and image_has_elixir(image, 1)
+            and (
+                any(unit.zone != "enemy_half" for unit in snapshot.units)
+                or low_princess_tower_target(read_enemy_princess_bars(image)) is not None
+            )
+        ):
+            break
+
         elapsed_second = int(wait_time)
         if elapsed_second != last_logged_second:
             logger.change_status(
@@ -265,16 +273,18 @@ def wait_for_elixir(
             )
             last_logged_second = elapsed_second
 
-        card_indices = check_which_cards_are_available(emulator)
-        if is_hero_champion_ability_visible(emulator):
+        card_indices = check_which_cards_are_available(emulator, frame=image)
+        if image_has_hero_champion_ability(image):
             if ability_available_since is None:
-                ability_available_since = time.time()
+                ability_available_since = now
                 logger.change_status(
                     f"英雄／冠军技能已就绪，将在 {ABILITY_TRIGGER_DELAY_S} 秒后触发",
                 )
-            elif time.time() - ability_available_since >= ABILITY_TRIGGER_DELAY_S:
+            elif now - ability_available_since >= ABILITY_TRIGGER_DELAY_S:
                 trigger_hero_champion_ability(emulator, logger)
                 ability_available_since = None
+                # The ability can consume elixir or change the battlefield.
+                continue
         else:
             ability_available_since = None
 
@@ -282,47 +292,18 @@ def wait_for_elixir(
         action_offset, _ = switch_side()
         if action_offset > PLAY_THRESHOLD and card_inhand > 0:
             logger.change_status("战场活动较多，立即出牌")
-            if on_decision_frame is not None:
-                on_decision_frame(None)
-            return True
+            break
 
         if action_offset > WAIT_THRESHOLD and card_inhand == 4:
             logger.change_status("所有手牌均可使用")
-            if on_decision_frame is not None:
-                on_decision_frame(None)
-            return True
+            break
 
         if wait_time > ELIXIR_WAIT_TIMEOUT:
             logger.change_status(status="等待圣水超时")
             return "restart"
 
-        if not check_for_in_battle_with_delay(emulator):
-            if check_if_battle_has_ended(emulator):
-                logger.change_status(status="对战已结束，停止等待圣水")
-                return "no battle"
-
-            battle_detection_lost_count += 1
-            lost_detection_second = int(time.time())
-            if lost_detection_second != last_lost_detection_log_second:
-                logger.change_status(
-                    status="等待圣水时暂未检测到战斗画面，继续等待",
-                )
-                last_lost_detection_log_second = lost_detection_second
-            if battle_detection_lost_count >= 4:
-                logger.change_status(
-                    status="连续多次未检测到战斗画面，尚未确认结算，请求恢复",
-                )
-                return "restart"
-
-            time.sleep(0.5)
-            continue
-
-        battle_detection_lost_count = 0
-
-    logger.change_status(
-        f"耗时 {str(time.time() - start_time)[:4]} 秒，已等到 {elixir_wait_amount} 点圣水。",
-    )
-
+    if on_decision_frame is not None:
+        on_decision_frame(image)
     return True
 
 
@@ -603,7 +584,6 @@ def _fight_loop(
     _maybe_start_fight_recording(emulator, logger, recording_flag, fight_mode, custom_path)
     last_three_cards.clear()
     prev_cards_played = logger.get_cards_played()
-    battle_detection_lost_count = 0
 
     # Initialize battle strategy and start timing
     battle_strategy = BattleStrategy(fight_mode)
@@ -624,28 +604,6 @@ def _fight_loop(
         if time.monotonic() >= fight_deadline:
             logger.change_status(f"对战执行超时（{timeout // 60} 分钟）")
             return False
-        if not check_for_in_battle_with_delay(emulator):
-            if check_if_battle_has_ended(emulator):
-                break
-
-            battle_detection_lost_count += 1
-            logger.change_status(
-                f"对战中暂未检测到战斗画面（第 {battle_detection_lost_count} 次），继续等待",
-            )
-
-            # Unknown frames are a detection failure, not proof that the fight completed.
-            if battle_detection_lost_count >= 4:
-                logger.change_status(
-                    "连续多次未检测到战斗画面，尚未确认结算，请求恢复",
-                )
-                return False
-
-            time.sleep(1)
-            continue
-
-        battle_detection_lost_count = 0
-        # debug screenshot saving removed from production
-
         # A routine play needs a reserve, but confirmed pressure wakes the
         # planner before this threshold. Reuse the decision frame for the hand.
         decision_frame = None
@@ -670,14 +628,6 @@ def _fight_loop(
         if wait_output == "no battle":
             logger.change_status("当前已不在对战中")
             break
-
-        if not image_is_in_battle(decision_frame) and not check_if_in_battle(emulator):
-            if check_if_battle_has_ended(emulator):
-                logger.change_status("已确认对战结束")
-                break
-
-            logger.change_status("暂未检测到战斗画面，继续执行对战")
-            continue
 
         play_start_time = time.time()
         if random_mode:

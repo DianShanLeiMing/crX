@@ -52,17 +52,12 @@ def test_native_frames_identify_the_winning_side_despite_animation(frame, result
 
 
 @pytest.mark.parametrize("number", [1, 2, 3])
-def test_native_failure_results_end_elixir_wait_without_recovery(monkeypatch, number):
+def test_native_failure_results_end_elixir_wait_without_recovery(number):
     screen = ResultScreen(f"failure-result-720-20261107-{number}.png")
     assert screen.image.shape == (1280, 720, 3)
     assert find_post_battle_button(screen) == (310, 1100)
     assert check_if_battle_has_ended(screen)
     assert find_battle_outcome(screen) == "loss"
-    monkeypatch.setattr(fight, "count_elixir", lambda *_args: False)
-    monkeypatch.setattr(fight, "check_which_cards_are_available", lambda *_args: [])
-    monkeypatch.setattr(fight, "is_hero_champion_ability_visible", lambda *_args: False)
-    monkeypatch.setattr(fight, "switch_side", lambda: (0, 0))
-    monkeypatch.setattr(fight, "check_for_in_battle_with_delay", lambda *_args: False)
     assert fight.wait_for_elixir(screen, Logger(), 8) == "no battle"
     assert screen.clicks == []
 

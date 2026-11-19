@@ -7,6 +7,7 @@ import pytest
 from crX.__main__ import make_job_dictionary
 from crX.bot import fight, states
 from crX.bot.coords import EMOTE_BUTTON_COORD, EMOTE_ICON_COORDS
+from crX.bot.state_detect import ELIXIR_COLOR, ELIXIR_COORDS
 from crX.interface.enums import UIField
 from crX.utils import caching
 from crX.utils.logger import Logger
@@ -52,15 +53,14 @@ def test_worker_job_reaches_the_selected_fight_loop(monkeypatch, random_mode, en
 )
 @pytest.mark.parametrize("enabled", [False, True])
 def test_actual_play_only_sends_emote_when_enabled(monkeypatch, random_mode, mode, enabled):
-    checks = iter((True, False))
-    monkeypatch.setattr(fight, "check_for_in_battle_with_delay", lambda *_: next(checks))
-    monkeypatch.setattr(fight, "check_if_in_battle", lambda *_: True)
-    monkeypatch.setattr(fight, "check_if_battle_has_ended", lambda *_: True)
+    frame = battle_frame()
+    y, x = ELIXIR_COORDS[fight.ADVANCE_ELIXIR - 1]
+    frame[y, x] = ELIXIR_COLOR
+    monkeypatch.setattr(fight, "image_is_battle_over", lambda image: image is None)
     monkeypatch.setattr(fight, "create_default_bridge_iar", lambda *_: None)
     monkeypatch.setattr(fight, "_maybe_start_fight_recording", lambda *_: None)
     monkeypatch.setattr(fight, "stop_fight_capture", lambda: None)
-    monkeypatch.setattr(fight, "wait_for_elixir", lambda *args, **kwargs: True)
-    mock_decision_hand(monkeypatch, battle_frame())
+    mock_decision_hand(monkeypatch, frame)
     monkeypatch.setattr(fight, "get_play_coords_for_card", lambda *_: ("knight", (200, 350)))
     monkeypatch.setattr(fight.time, "sleep", lambda *_: None)
     monkeypatch.setattr(fight.random, "choice", lambda choices: choices[0])
@@ -70,6 +70,10 @@ def test_actual_play_only_sends_emote_when_enabled(monkeypatch, random_mode, mod
     class Device:
         def __init__(self):
             self.clicks = []
+            self.frames = iter((frame, None))
+
+        def screenshot(self):
+            return next(self.frames)
 
         def click(self, x, y):
             self.clicks.append((x, y))

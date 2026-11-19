@@ -79,6 +79,24 @@ def test_over_river_threat_bypasses_routine_elixir_wait_and_reuses_the_frame():
     assert snapshots[0] is frame
 
 
+def test_low_elixir_poll_reuses_the_frame_for_activity_and_card_play(monkeypatch):
+    frame = battle_frame()
+    emulator = Mock()
+    emulator.screenshot.return_value = frame
+    available = Mock(return_value=[0])
+    ability = Mock(return_value=False)
+    monkeypatch.setattr(fight, "check_which_cards_are_available", available)
+    monkeypatch.setattr(fight, "image_has_hero_champion_ability", ability)
+    monkeypatch.setattr(fight, "switch_side", lambda: (11000, "left"))
+    decision_frames = []
+
+    assert fight.wait_for_elixir(emulator, Mock(), 7, on_decision_frame=decision_frames.append)
+    emulator.screenshot.assert_called_once_with()
+    assert available.call_args.kwargs["frame"] is frame
+    assert ability.call_args.args[0] is frame
+    assert decision_frames[0] is frame
+
+
 def test_live_spell_recheck_can_change_cards_and_recent_slots_cannot_override_defense(monkeypatch):
     before, after = battle_frame(), battle_frame()
     for pos in ((180, 620), (295, 621)):

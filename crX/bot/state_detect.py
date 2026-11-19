@@ -140,20 +140,21 @@ def image_is_in_battle(iar_bgr) -> bool:
 
 
 def check_if_battle_has_ended(emulator) -> bool:
-    """Best-effort confirmation that a battle ended (avoid false positives mid-fight)."""
-    if check_if_on_clash_main_menu(emulator):
-        return True
-    if check_for_trophy_reward_menu(emulator):
-        return True
-    if check_for_post_battle_button(emulator):
-        return True
-    return False
+    return image_is_battle_over(emulator.screenshot())
+
+
+def image_is_battle_over(image) -> bool:
+    """Confirm a main menu or result screen on the current frame."""
+    return is_clash_main_menu_image(image) or is_trophy_reward_image(image) or image_has_post_battle_button(image)
 
 
 def check_for_post_battle_button(emulator) -> bool:
     """Check for the Chinese 确定 button on a battle result screen."""
-    image = emulator.screenshot()
-    if image is None:
+    return image_has_post_battle_button(emulator.screenshot())
+
+
+def image_has_post_battle_button(image) -> bool:
+    if image is None or image.shape != (*GAME_SCREEN_SIZE[::-1], 3):
         return False
     return find_image(image, "post_battle_button", tolerance=0.9, subcrop=BATTLE_RESULT_BUTTON_REGION) is not None
 

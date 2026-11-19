@@ -380,25 +380,23 @@ def test_held_spells_try_another_hand_slot_without_tapping_or_resampling(monkeyp
 @pytest.mark.parametrize("has_target", [False, True])
 def test_spell_rules_apply_in_every_battle_mode(monkeypatch, mode, random_mode, has_target):
     frame = tower_battle_frame(79, 79)
+    y, x = ELIXIR_COORDS[fight.ADVANCE_ELIXIR - 1]
+    frame[y, x] = ELIXIR_COLOR
     if has_target:
         draw_badge(frame, 180, 620, bar_color=RED)
-    checks = iter((True, False))
-    monkeypatch.setattr(fight, "check_for_in_battle_with_delay", lambda *_: next(checks))
-    monkeypatch.setattr(fight, "check_if_in_battle", lambda *_: True)
-    monkeypatch.setattr(fight, "check_if_battle_has_ended", lambda *_: True)
+    monkeypatch.setattr(fight, "image_is_battle_over", lambda image: image is None)
     monkeypatch.setattr(fight, "create_default_bridge_iar", lambda *_: None)
-    monkeypatch.setattr(fight, "wait_for_elixir", lambda *args, **kwargs: True)
     monkeypatch.setattr(fight, "last_three_cards", [])
     monkeypatch.setattr(fight, "get_play_coords_for_card", lambda *args: ("arrows", (204, 292)))
     monkeypatch.setattr(fight.time, "sleep", lambda *_: None)
     emulator = Mock()
     mock_decision_hand(monkeypatch, frame)
-    emulator.screenshot.return_value = frame
+    emulator.screenshot.side_effect = [frame, frame, None] if has_target else [frame, None]
     logger = Logger()
 
     run = fight._random_fight_loop if random_mode else fight._fight_loop
     assert run(emulator, logger, False, mode)
-    assert emulator.screenshot.call_count == int(has_target)
+    assert emulator.screenshot.call_count == 2 + int(has_target)
     if has_target:
         assert [call.args for call in emulator.click.call_args_list] == [fight.HAND_CARDS_COORDS[0], (185, 658)]
     else:
