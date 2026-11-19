@@ -13,13 +13,12 @@ from crX.utils import card_workflow as workflow
 from crX.utils import formal_library as formal
 from crX.utils import reference_hits as hits
 from crX.utils.card_catalog import build_catalog, reorder_references, set_preferred_reference
-from crX.utils.card_review import atomic_json
+from crX.utils.card_review import atomic_json, export_candidate
 from tests.test_card_library import fingerprint
 from tests.test_card_review import add_group_sample
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="Git is unavailable")
 run_lint_checks = upload._lint
-source_fingerprint = local.sample_fingerprint
 
 
 def git(repo, *args):
@@ -140,7 +139,7 @@ def test_upload_only_selected_fingerprints_and_keep_unstaged_edits(upload_store)
     result = upload.upload_references(root, [first], progress=progress.append)
     assert result.splitlines()[0] == f"新增{formal.CARD_NAMES_ZH['knight']}参考样本" and checks == [True]
     assert git(remote, "log", "-1", "--format=%s", "main").startswith(f"data(cards): {result.splitlines()[0]}")
-    assert progress[-2:] == ["正在推送正式参考……", "推送成功，正在更新本机上传记录……"]
+    assert progress[-2:] == ["正在推送正式参考……", "推送成功，正在清理本机来源样本……"]
     document = json.loads(git(remote, "show", f"main:{upload.LIBRARY_FILE}"))
     assert [entry["id"] for entry in document["entries"]] == [first.review["formal_id"]]
     assert other.review["formal_id"] not in {entry["id"] for entry in document["entries"]}
@@ -151,7 +150,7 @@ def test_upload_only_selected_fingerprints_and_keep_unstaged_edits(upload_store)
     assert git(repo, "diff", "--cached", "--name-only") == ""
     assert git(repo, "diff", "--name-only").splitlines() == [upload.LIBRARY_FILE, "notes.txt"]
     head = git(repo, "rev-parse", "HEAD")
-    assert "无需重复提交" in upload.upload_references(root, [first])
+    assert "无需重复提交" in upload.upload_references(root, [], cards={"knight"})
     assert git(repo, "rev-parse", "HEAD") == head and checks == [True]
     upload.upload_references(root, [other])
     assert len(json.loads(git(remote, "show", f"main:{upload.LIBRARY_FILE}"))["entries"]) == 2
@@ -234,34 +233,49 @@ def test_failed_push_retries_without_duplicate_commit(upload_store, monkeypatch,
     assert f"新增{formal.CARD_NAMES_ZH['knight']}参考样本" in upload.upload_references(root, [sample])
     assert git(repo, "rev-parse", "HEAD") == head == git(remote, "rev-parse", "main")
     assert checks == [True]
-    assert workflow.scan_review(root)[0][0].uploaded
+    assert not workflow.scan_review(root)[0]
     assert all(not sample.file(kind).exists() for kind in ("card", "hand", "frame"))
 
 
-def test_uploaded_samples_archive_per_reference_and_keep_sources(upload_store):
+def test_uploaded_samples_are_removed_per_reference(upload_store):
     _repo, _remote, root, add, _checks = upload_store
     first, second = add("first"), add("second", 4)
+    pending = add_group_sample(root, "first", "sample-001")
+    exported = export_candidate(first)
+    (first.directory / "index.html").write_text("old report", encoding="utf-8")
+    atomic_json(first.directory / "summary.json", {"saved": 2})
+    formal_entries = formal._read_entries(formal.formal_path())
+    identifier = first.review["formal_id"]
+    hits.record_hits(root, {identifier: 7})
+
     upload.upload_references(root, [first])
     current = {sample.key: sample for sample in workflow.scan_review(root)[0]}
-    assert current[first.key].uploaded and not current[second.key].uploaded
-    assert all(sample.status == "included" for sample in current.values())
-    assert current[first.key].review["note"] == "private local note"
-    assert source_fingerprint(current[first.key]).tolist() == next(
-        entry["fingerprint"]
-        for entry in formal._read_entries(formal.formal_path())
-        if entry["id"] == first.review["formal_id"]
-    )
-    assert all(not first.file(kind).exists() for kind in ("card", "hand", "frame"))
+    assert set(current) == {second.key, pending.key}
+    assert current[second.key].status == "included" and not current[second.key].uploaded
+    assert current[pending.key].status == "pending"
+    assert not exported.exists()
+    assert {path.name for path in first.directory.iterdir()} == {
+        "samples.jsonl",
+        "annotations.json",
+        *(pending.file(kind).name for kind in ("card", "hand", "frame")),
+    }
+    assert set(json.loads((first.directory / "annotations.json").read_text(encoding="utf-8"))) == {pending.name}
     assert all(second.file(kind).is_file() for kind in ("card", "hand", "frame"))
-    later = add("later", 8)
-    assert not later.uploaded
-    # Old records recover their archive status from the fetched remote, not HEAD alone.
-    entries = formal._read_entries(formal.formal_path())
-    workflow._commit(
-        root, entries, entries, [(current[first.key], {"published_reference_id": "", "published_commit": ""})]
-    )
-    recovered = {sample.key: sample for sample in workflow.scan_review(root)[0]}
-    assert recovered[first.key].uploaded and not recovered[later.key].uploaded
+    assert formal._read_entries(formal.formal_path()) == formal_entries
+    assert hits.totals(root)[0][identifier] == 7
+
+
+def test_refresh_recovers_publication_without_a_local_marker(upload_store, monkeypatch):
+    _repo, _remote, root, add, _checks = upload_store
+    first, second = add("first"), add("second", 4)
+    # A successful push may be interrupted before local publication is recorded.
+    with monkeypatch.context() as patch:
+        patch.setattr(upload, "_archive_published", lambda *_args: None)
+        upload.upload_references(root, [first])
+    assert not next(sample for sample in workflow._scan(root) if sample.key == first.key).uploaded
+    current = workflow.scan_review(root)[0]
+    assert [sample.key for sample in current] == [second.key]
+    assert not first.directory.exists() and not current[0].uploaded
 
 
 def test_upload_settings_and_hits_only_when_explicitly_selected(upload_store):
@@ -302,9 +316,8 @@ def test_manual_reference_order_is_published_with_the_selected_card(upload_store
     assert document["cards"]["knight"]["order"] == list(original[::-1])
 
 
-def test_history_cleanup_recovers_after_interruption_and_requires_valid_published_fingerprint(
-    upload_store, monkeypatch
-):
+@pytest.mark.parametrize("interrupted_file", ["sample-000-hand.png", "samples.jsonl"])
+def test_history_cleanup_recovers_after_interruption(upload_store, monkeypatch, interrupted_file):
     _repo, _remote, root, add, _checks = upload_store
     sample, unpublished = add("first"), add("second", 4)
     entries = formal._read_entries(formal.formal_path())
@@ -313,26 +326,35 @@ def test_history_cleanup_recovers_after_interruption_and_requires_valid_publishe
         root,
         entries,
         entries,
-        [(sample, {"published_reference_id": sample.review["formal_id"], "published_commit": "a" * 40})],
+        [
+            (
+                sample,
+                {
+                    "published_reference_id": sample.review["formal_id"],
+                    "published_commit": "a" * 40,
+                    "images_cleaned": True,
+                },
+            )
+        ],
     )
     original_unlink = type(root).unlink
 
-    def locked_image(path, *args, **kwargs):
-        if path.name == "sample-000-hand.png" and path.parent == sample.directory:
-            raise PermissionError("image is open")
+    def locked_file(path, *args, **kwargs):
+        if path.name == interrupted_file and path.parent == sample.directory:
+            raise PermissionError("sample file is open")
         return original_unlink(path, *args, **kwargs)
 
-    monkeypatch.setattr(type(root), "unlink", locked_image)
+    monkeypatch.setattr(type(root), "unlink", locked_file)
     with pytest.raises(PermissionError):
         workflow.scan_review(root)
     current = {item.key: item for item in workflow._scan(root)}
-    assert not current[sample.key].review.get("images_cleaned")
-    assert sample.file("frame").exists()
+    assert sample.key in current
     assert all(unpublished.file(kind).exists() for kind in ("card", "hand", "frame"))
     monkeypatch.setattr(type(root), "unlink", original_unlink)
     current = {item.key: item for item in workflow.scan_review(root)[0]}
-    assert current[sample.key].review["images_cleaned"]
-    assert all(not sample.file(kind).exists() for kind in ("card", "hand", "frame"))
+    assert set(current) == {unpublished.key}
+    assert not sample.directory.exists()
+    assert not (root / "sample-deletion.json").exists()
     assert formal._read_entries(formal.formal_path()) == entries
 
 

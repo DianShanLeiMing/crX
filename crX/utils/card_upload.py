@@ -320,7 +320,7 @@ def _archive_published(root, identifiers, revision):
     ]
     if updates:
         workflow._commit(root, entries, entries, updates)
-    workflow._cleanup_uploaded_images(root, workflow._scan(root), entries)
+    workflow._delete_processed_samples(root, workflow._scan(root), entries)
 
 
 def _describe_upload(repo, directory, revision, payloads):
@@ -577,7 +577,7 @@ def upload_references(
             if detached:
                 raise ValueError("推送未完成，本机数据已保留。请检查网络或远端更新后重试") from error
             raise ValueError("推送未完成，本地提交已保留；检查网络、登录权限或远端更新后可再次点击上传") from error
-        progress("推送成功，正在更新本机上传记录……")
+        progress("推送成功，正在更新本机同步状态……" if metadata_only else "推送成功，正在清理本机来源样本……")
         try:
             if uploaded_stats is not None:
                 hits.acknowledge_upload(root, uploaded_stats)
@@ -586,11 +586,11 @@ def upload_references(
             if detached:
                 _git(repo, "update-ref", _baseline_ref(remote, target), head)
         except (OSError, ValueError) as error:
-            raise ValueError("远端已上传，本机归档或图片清理未完成；刷新后可重试，正式参考保留") from error
+            raise ValueError("远端已上传，本机来源样本清理未完成；刷新后可重试，正式参考保留") from error
         if details:
             return "\n".join(details)
         if selected_resets:
             return "已清空所选样本的线上命中次数"
         if metadata_only:
             return "所选卡牌的顺序与命中次数已同步" if metadata_cards is not None else "顺序与命中次数已同步"
-        return f"已上传 {len(chosen)} 份正式参考及所选配置；其他机器更新代码后生效，来源图片已清理，备注保留"
+        return f"已上传 {len(chosen)} 份正式参考及所选配置；其他机器更新代码后生效，本机来源样本已清理"

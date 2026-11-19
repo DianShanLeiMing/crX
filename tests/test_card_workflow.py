@@ -35,7 +35,7 @@ def review_store(tmp_path, monkeypatch):
 
 
 def records(root):
-    samples, errors, _ = workflow.scan_review(root, refresh_library=True)
+    samples, errors, _ = workflow.scan_review(root, refresh_library=True, cleanup_processed=False)
     assert not errors
     return {sample.key: sample for sample in samples}
 
@@ -250,6 +250,10 @@ def test_legacy_formal_and_ignored_records_are_classified_separately(tmp_path, r
     assert [current[sample.key].status for sample in (included, covered, ignored)] == ["included", "covered", "ignored"]
     assert current[ignored.key].review["work_reason"] == "切牌动画"
     assert current[included.key].review["work_reason"] == "已加入正式库"
+    remaining, errors, _ = workflow.scan_review(tmp_path)
+    assert not errors and {sample.key for sample in remaining} == {included.key, ignored.key}
+    assert not covered.directory.exists()
+    assert formal._read_entries(destination) == [entry]
 
 
 def seed_old_approvals(root, add, destination, shifts, *, protected=False):

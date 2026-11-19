@@ -1473,7 +1473,7 @@ def test_two_tabs_single_approval_routes_and_keeps_owned_status(review_ui):
     tab.card_var.set("knight")
     tab.stage_buttons["confirm"].invoke()
     finish(ui, tab)
-    assert tab.samples[duplicate.key].status == "covered"
+    assert duplicate.key not in tab.samples and not duplicate.directory.exists()
     assert duplicate.key not in tab.tree.get_children()
     assert "覆盖" in tab.message_var.get()
     assert "覆盖" not in tab.summary_var.get()
@@ -1519,9 +1519,9 @@ def test_pending_list_shows_all_groups_and_updates_after_processing(review_ui, m
     tab.card_var.set("knight")
     tab.stage_buttons["confirm"].invoke()
     finish(ui, tab)
-    assert tab.samples[duplicate.key].status == "covered"
+    assert duplicate.key not in tab.samples and not duplicate.directory.exists()
     assert not tab.tree.get_children()
-    # Processed samples remain available in their corresponding tabs.
+    # The newly added reference remains available for upload.
     switch(ui, tab, "待更新")
     assert tab.tree.get_children() == (first.key,)
     switch(ui, tab, "待确认")
@@ -1584,8 +1584,10 @@ def test_batch_approval_uses_visible_selection_and_preserves_edits(review_ui):
     assert tab.card_var.get() == "knight" and tab.note_var.get() == "批量备注"
     tab.stage_buttons["confirm"].invoke()
     finish(ui, tab)
-    assert {tab.samples[key].status for key in (first.key, second.key)} == {"included", "covered"}
-    assert all(tab.samples[key].review["note"] == "批量备注" for key in (first.key, second.key))
+    (retained,) = (sample for sample in (first, second) if sample.key in tab.samples)
+    assert tab.samples[retained.key].status == "included" and tab.samples[retained.key].review["note"] == "批量备注"
+    removed = second if retained.key == first.key else first
+    assert not removed.directory.exists()
     assert tab.samples[other.key].status == "pending"
     assert len(formal._read_entries(destination)) == 1
 
@@ -2141,7 +2143,7 @@ def test_upload_publishes_all_references_of_selected_cards_and_blocks_while_runn
     assert str(tab.upload_button.cget("state")) == "normal"
 
 
-def test_rename_and_remove_update_shared_sources_without_second_approval(review_ui, monkeypatch):
+def test_rename_and_remove_keep_the_source_of_the_unpublished_reference(review_ui, monkeypatch):
     ui, tab, add, destination = review_ui
     first, duplicate = add("first"), add("duplicate", shift=5)
     for sample in (first, duplicate):
@@ -2153,15 +2155,16 @@ def test_rename_and_remove_update_shared_sources_without_second_approval(review_
     tab.card_var.set("cannon")
     tab.stage_buttons["rename"].invoke()
     finish(ui, tab)
-    assert {tab.samples[key].card_id for key in (first.key, duplicate.key)} == {"cannon"}
+    assert tab.samples[first.key].card_id == "cannon"
+    assert duplicate.key not in tab.samples and not duplicate.directory.exists()
     assert formal._read_entries(destination)[0]["card_id"] == "cannon"
     monkeypatch.setattr("crX.interface.card_review.messagebox.askyesno", lambda *args, **kwargs: True)
     tab.stage_buttons["remove"].invoke()
     finish(ui, tab)
     assert not formal._read_entries(destination)
     switch(ui, tab, "待确认")
-    assert set(tab.tree.get_children()) == {first.key, duplicate.key}
-    assert first.file("frame").exists() and duplicate.file("frame").exists()
+    assert tab.tree.get_children() == (first.key,)
+    assert first.file("frame").exists()
 
 
 def test_catalog_search_and_upload_archive_clean_images(review_ui, monkeypatch):
@@ -2225,7 +2228,10 @@ def test_catalog_search_and_upload_archive_clean_images(review_ui, monkeypatch):
 
     def publish(root, samples, *, progress):
         progress("正在上传……")
-        _archive_published(root, {sample.review["formal_id"] for sample in samples}, "a" * 40)
+        revision = "a" * 40
+        published = {sample.review["formal_id"]: revision for sample in samples}
+        monkeypatch.setattr("crX.utils.card_upload.published_reference_ids", lambda: published)
+        _archive_published(root, published, revision)
         return "已上传 2 份正式参考"
 
     monkeypatch.setattr("crX.interface.card_review.upload_references", publish)
@@ -2234,9 +2240,9 @@ def test_catalog_search_and_upload_archive_clean_images(review_ui, monkeypatch):
     finish(ui, tab)
     assert not tab.tree.get_children()
     assert tab.stage_tabs.tab(tab.stage_pages["待更新"], "text") == "待更新（0）"
-    assert all(tab.samples[sample.key].uploaded for sample in (first, second))
+    assert all(sample.key not in tab.samples for sample in (first, second))
     assert destination.read_bytes() == before
-    assert all(not sample.file(kind).exists() for sample in (first, second) for kind in ("card", "hand", "frame"))
+    assert all(not sample.directory.exists() for sample in (first, second))
     tab.master.select(tab.library_tab)
     ui.update()
     assert tab.master.select() == str(tab.library_tab)

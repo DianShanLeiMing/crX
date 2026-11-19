@@ -154,6 +154,7 @@ class CardReviewTab(ttk.Frame):
         self._scan_busy = False
         self._history_pending = True
         self._maintenance_scan = False
+        self._cleanup_pending = False
         self._action_busy = False
         self._images = {}
         self._thumbnail_images = OrderedDict()
@@ -792,11 +793,11 @@ class CardReviewTab(ttk.Frame):
             self._scan_busy = True
             history = self._history_pending and not self._running
             maintenance = not self._running and (
-                history
-                or any(sample.uploaded and not sample.review.get("images_cleaned") for sample in self.samples.values())
+                history or self._cleanup_pending or any(sample.uploaded for sample in self.samples.values())
             )
             self._maintenance_scan = maintenance
             if maintenance:
+                self._cleanup_pending = False
                 self._action_busy = self.formalizing = True
                 self._set_action_state()
                 if self.clear_busy_callback:
@@ -808,7 +809,7 @@ class CardReviewTab(ttk.Frame):
     @staticmethod
     def _scan_contents(root, history, cleanup=False, running=False):
         samples, errors, groups = scan_review(
-            root, refresh_library=True, reassess_history=history, cleanup_uploaded=cleanup
+            root, refresh_library=True, reassess_history=history, cleanup_processed=cleanup
         )
         return samples, errors, groups, build_catalog(samples, root=root, completed_usage_only=running)
 
@@ -1064,6 +1065,8 @@ class CardReviewTab(ttk.Frame):
                     self.library_summary_var.set(self.library_view.summary)
                 if error:
                     self._history_pending = True
+                elif kind == "save" and not self.clearing:
+                    self._cleanup_pending = True
                 self._action_busy = self.formalizing = self.clearing = False
                 if self.clear_busy_callback:
                     self.clear_busy_callback(False)
@@ -1579,8 +1582,8 @@ class CardReviewTab(ttk.Frame):
         )
         self.stage_help.set(
             {
-                "待确认": "核对卡名与版本后确认并入库；无需保留的样本可选中后删除。正式库已覆盖时无需新增，冲突保留待确认。任务停止后可操作。",
-                "待更新": "在下方选择具体参考更正或移出；上传共享上方选中卡牌的全部正式参考。上传成功后清理来源图片，备注保留。",
+                "待确认": "核对卡名与版本后确认并入库；无需保留的样本可选中后删除。正式库已覆盖时清理来源样本，冲突保留待确认。任务停止后可操作。",
+                "待更新": "在下方选择具体参考更正或移出；上传共享上方选中卡牌的全部正式参考。上传成功后清理本机来源截图、记录和标注。",
             }[stage]
         )
 

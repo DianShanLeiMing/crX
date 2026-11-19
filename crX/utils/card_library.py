@@ -20,7 +20,7 @@ import numpy as np
 
 from crX.bot.card_data import CARD_NAMES_ZH
 from crX.bot.coords import GAME_SCREEN_SIZE, LEGACY_SCREEN_SIZE, REFERENCE_SCREEN_SIZE
-from crX.utils.card_review import atomic_json, read_json, sample_file
+from crX.utils.card_review import SAMPLE_NAME, atomic_json, read_json, sample_file
 
 MAX_PER_CARD = 8
 SIMILAR_FINGERPRINT_DISTANCE = 100
@@ -30,6 +30,7 @@ _LOCK = threading.Lock()
 _cache: tuple[Path | None, float, list[dict]] = (None, 0, [])
 MAX_MATCH_OBSERVATIONS = 100000
 ASSIST_FIELDS = ("assists", "assist_battles", "assist_distance_total", "assist_margin_total")
+_SAMPLE_DELETION = "sample-deletion.json"
 
 
 def empty_match_stats() -> dict[str, int]:
@@ -246,8 +247,8 @@ def clear_filtered_samples(
         return 0
     if root.is_symlink() or root.is_junction():
         raise ValueError("样本目录不能是链接")
-    base = root.resolve(strict=True)
     with _LOCK:
+        _resume_sample_deletion(root)
         samples, errors = scan_samples(root)
         if errors:
             raise ValueError("样本记录存在错误，请修复后再清空，避免丢失未解析的内容")
@@ -261,71 +262,136 @@ def clear_filtered_samples(
             and (statuses is None or sample.status in statuses)
             and sample.card_id not in protected_cards
         ]
-        keys = {sample.key for sample in selected}
-        plans = []
-        for directory in {sample.directory for sample in selected}:
-            if directory.is_symlink() or directory.is_junction() or directory.resolve().parent != base:
-                raise ValueError("样本目录超出允许范围或包含链接")
-            names = {sample.name for sample in selected if sample.directory == directory}
-            files = []
-            for sample in selected:
-                if sample.directory != directory:
-                    continue
-                for kind in ("card", "hand", "frame"):
-                    if sample.record["files"][kind] != f"{sample.name}-{kind}.png":
-                        raise ValueError("样本图片命名异常，已停止清空")
-                files.extend(sample_file(directory, f"{sample.name}-{kind}.png") for kind in ("card", "hand", "frame"))
-                files.append(sample_file(directory, f"{sample.name}-candidate.json"))
-            source = sample_file(directory, "samples.jsonl")
-            lines = source.read_text(encoding="utf-8").splitlines()
-            remaining = [
-                line for line in lines if json.loads(line)["files"]["card"].removesuffix("-card.png") not in names
-            ]
-            reviews = {}
-            for filename in ("review.json", "annotations.json"):
-                path = sample_file(directory, filename)
-                if path.exists():
-                    reviews[path] = {name: review for name, review in read_json(path).items() if name not in names}
-            files.extend(sample_file(directory, filename) for filename in ("index.html", "summary.json"))
-            if any(
-                path.is_symlink() or path.is_junction() or (path.exists() and not path.is_file())
-                for path in [source, *reviews, *files]
-            ):
-                raise ValueError("样本包含链接或异常文件，已停止清空")
-            plans.append((directory, source, remaining, reviews, files))
+        if not selected:
+            return 0
+        sessions: dict[str, list[str]] = {}
+        for sample in selected:
+            sessions.setdefault(sample.directory.name, []).append(sample.name)
+        plans = _sample_deletion_plans(root, sessions)
         prior_entries = read_library(root)
-        removed_ids = {entry["id"] for entry in prior_entries if keys.intersection(entry["sources"])}
-        entries = [entry for entry in prior_entries if entry["id"] not in removed_ids]
-        match_stats = {key: value for key, value in read_match_stats(root).items() if key not in removed_ids}
-        if selected:
-            _write_library(root, entries)
-            if sample_file(root, "runtime-matches.json").exists():
-                atomic_json(sample_file(root, "runtime-matches.json"), {"entries": match_stats})
-        for directory, source, remaining, reviews, files in plans:
-            if directory.is_symlink() or directory.is_junction() or directory.resolve().parent != base:
-                raise ValueError("样本目录已变化，已停止清空")
-            # The collector cannot run while the UI clears. Replace the manifest atomically.
+        keys = {sample.key for sample in selected}
+        removed_ids = sorted(entry["id"] for entry in prior_entries if keys.intersection(entry["sources"]))
+        journal = sample_file(root, _SAMPLE_DELETION)
+        atomic_json(journal, {"sessions": sessions, "legacy_ids": removed_ids})
+        _finish_sample_deletion(root, plans, set(removed_ids))
+        journal.unlink()
+        return len(selected)
+
+
+def _sample_deletion_plans(root, sessions):
+    plans = []
+    for session, names in sessions.items():
+        directory = sample_file(root, session)
+        if directory.is_symlink() or directory.is_junction():
+            raise ValueError("样本目录包含链接，已停止清空")
+        if not directory.exists():
+            continue
+        if not directory.is_dir():
+            raise ValueError("样本目录已变化，已停止清空")
+        selected = set(names)
+        source = sample_file(directory, "samples.jsonl")
+        files = [
+            sample_file(directory, f"{name}-{kind}.{extension}")
+            for name in selected
+            for kind, extension in (("card", "png"), ("hand", "png"), ("frame", "png"), ("candidate", "json"))
+        ]
+        images = {path.name for path in files}
+        remaining = []
+        reviews = [sample_file(directory, filename) for filename in ("review.json", "annotations.json")]
+        files.extend(sample_file(directory, filename) for filename in ("index.html", "summary.json"))
+        if any(
+            path.is_symlink() or path.is_junction() or (path.exists() and not path.is_file())
+            for path in [source, *reviews, *files]
+        ):
+            raise ValueError("样本包含链接或异常文件，已停止清空")
+        if source.exists():
+            for line in source.read_text(encoding="utf-8").splitlines():
+                record_files = json.loads(line)["files"]
+                name = record_files["card"].removesuffix("-card.png")
+                if name in selected:
+                    if any(record_files[kind] != f"{name}-{kind}.png" for kind in ("card", "hand", "frame")):
+                        raise ValueError("样本图片命名异常，已停止清空")
+                else:
+                    if any(record_files[kind] in images for kind in ("card", "hand", "frame")):
+                        raise ValueError("样本图片仍被其他记录引用，已停止清空")
+                    remaining.append(line)
+        filtered = {
+            path: {name: review for name, review in read_json(path).items() if name not in selected}
+            for path in reviews
+            if path.exists()
+        }
+        plans.append((directory, source, remaining, filtered, files))
+    return plans
+
+
+def _finish_sample_deletion(root, plans, legacy_ids):
+    if legacy_ids:
+        entries = [entry for entry in read_library(root) if entry["id"] not in legacy_ids]
+        _write_library(root, entries)
+        matches = sample_file(root, "runtime-matches.json")
+        if matches.exists():
+            records = {key: value for key, value in read_match_stats(root).items() if key not in legacy_ids}
+            atomic_json(matches, {"entries": records})
+    base = root.resolve(strict=True)
+    for directory, source, remaining, reviews, files in plans:
+        if directory.is_symlink() or directory.is_junction() or directory.resolve().parent != base:
+            raise ValueError("样本目录已变化，已停止清空")
+        if any(
+            path.is_symlink() or path.is_junction() or path.resolve().parent != directory.resolve()
+            for path in [source, *reviews, *files]
+        ):
+            raise ValueError("样本文件已变化，已停止清空")
+        for path in files:
+            path.unlink(missing_ok=True)
+        for path, reviews_left in reviews.items():
+            if reviews_left:
+                atomic_json(path, reviews_left)
+            else:
+                path.unlink(missing_ok=True)
+        if remaining:
             descriptor, temporary = tempfile.mkstemp(prefix="samples-", suffix=".tmp", dir=directory)
             try:
                 with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-                    stream.write("\n".join(remaining) + ("\n" if remaining else ""))
+                    stream.write("\n".join(remaining) + "\n")
                 os.replace(temporary, source)
             finally:
                 Path(temporary).unlink(missing_ok=True)
-            for path, reviews_left in reviews.items():
-                atomic_json(path, reviews_left)
-            for path in files:
-                if path.is_symlink() or path.resolve().parent != directory.resolve():
-                    raise ValueError("样本文件已变化，已停止清空")
-                path.unlink(missing_ok=True)
-            if not remaining:
-                source.unlink()
-                for path, reviews_left in reviews.items():
-                    if not reviews_left:
-                        path.unlink()
-                if not any(directory.iterdir()):
-                    directory.rmdir()
-        return len(selected)
+        else:
+            source.unlink(missing_ok=True)
+            if not any(directory.iterdir()):
+                directory.rmdir()
+
+
+def _resume_sample_deletion(root):
+    # Keep the approved selection until images, manifest and annotations are all removed.
+    if root.is_symlink() or root.is_junction():
+        raise ValueError("样本目录不能是链接")
+    journal = sample_file(root, _SAMPLE_DELETION)
+    if journal.is_symlink() or journal.is_junction() or (journal.exists() and not journal.is_file()):
+        raise ValueError("样本删除记录包含链接")
+    if not journal.exists():
+        return False
+    document = read_json(journal)
+    sessions, legacy_ids = document.get("sessions"), document.get("legacy_ids")
+    if (
+        not isinstance(sessions, dict)
+        or any(
+            not isinstance(names, list)
+            or any(not isinstance(name, str) or not SAMPLE_NAME.fullmatch(name) for name in names)
+            for names in sessions.values()
+        )
+        or not isinstance(legacy_ids, list)
+        or any(not isinstance(identifier, str) for identifier in legacy_ids)
+    ):
+        raise ValueError("样本删除记录格式无效")
+    _finish_sample_deletion(root, _sample_deletion_plans(root, sessions), set(legacy_ids))
+    journal.unlink()
+    return True
+
+
+def resume_sample_deletion(root: Path) -> bool:
+    with _LOCK:
+        return _resume_sample_deletion(root)
 
 
 def sample_fingerprint(sample) -> np.ndarray:

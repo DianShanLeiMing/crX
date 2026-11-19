@@ -294,81 +294,52 @@ def _reassess_history(samples, entries, candidates, updates):
     return remaining
 
 
-def _cleanup_uploaded_images(root, samples, entries):
-    """Caller holds the review lock; retain manifests, fingerprints and notes."""
-    by_id = {entry["id"]: entry for entry in entries}
-    plans = []
+def _delete_processed_samples(root, samples, entries):
+    references = {(entry["id"], entry["card_id"]) for entry in entries}
+    keys = set()
     for sample in samples:
-        entry = by_id.get(sample.review.get("formal_id"))
-        if (
-            not sample.uploaded
-            or sample.review.get("images_cleaned") is True
-            or entry is None
-            or entry["card_id"] != sample.card_id
-        ):
-            continue
-        directory = _session(root, sample.directory.name)
-        if directory.resolve() != sample.directory.resolve():
-            raise ValueError("样本来源已变化，已停止图片清理")
-        paths = []
-        for kind in ("card", "hand", "frame"):
-            name = f"{sample.name}-{kind}.png"
-            if not SAMPLE_NAME.fullmatch(sample.name) or sample.record["files"].get(kind) != name:
-                raise ValueError("样本图片命名异常，已停止图片清理")
-            path = sample_file(directory, name)
-            if path.is_symlink() or path.is_junction() or (path.exists() and not path.is_file()):
-                raise ValueError("样本图片包含链接或异常文件，已停止清理")
-            paths.append(path)
-        plans.append((sample, paths))
-    selected = {sample.key for sample, _paths in plans}
-    protected = {
-        sample.file(kind).resolve()
-        for sample in samples
-        if sample.key not in selected
-        for kind in ("card", "hand", "frame")
-    }
-    if any(path.resolve() in protected for _sample, paths in plans for path in paths):
-        raise ValueError("图片仍被其他样本引用，已保留图片，请检查样本记录")
-    for start in range(0, len(plans), formal.MAX_BATCH):
-        updates = []
-        for sample, paths in plans[start : start + formal.MAX_BATCH]:
-            directory = _session(root, sample.directory.name)
-            for path in paths:
-                if (
-                    path.is_symlink()
-                    or path.is_junction()
-                    or path.resolve().parent != directory.resolve()
-                    or (path.exists() and not path.is_file())
-                ):
-                    raise ValueError("样本图片路径已变化，已停止清理")
-                path.unlink(missing_ok=True)
-            updates.append((sample, {"images_cleaned": True}))
-        _commit(root, entries, entries, updates)
+        identifier = sample.review.get("formal_id", "")
+        valid_reference = (identifier, sample.card_id) in references
+        covered = sample.review.get("work_result") == "covered" and sample.card_id in CARD_NAMES_ZH
+        if (valid_reference and (sample.uploaded or covered)) or (covered and identifier == ""):
+            keys.add(sample.key)
+    return local.clear_filtered_samples(root, keys)
 
 
-def scan_review(root, *, refresh_library=False, reassess_history=True, cleanup_uploaded=None):
+def scan_review(root, *, refresh_library=False, reassess_history=True, cleanup_processed=None):
     """Migrate old approvals once using the same coverage rule as new approvals."""
     if not root.exists():
         return [], 0, {}
+    if cleanup_processed is None:
+        cleanup_processed = reassess_history
     with _locked(root):
+        if cleanup_processed:
+            local.resume_sample_deletion(root)
         samples, errors = scan_samples(root)
         if errors:
             return samples, errors, group_review_samples(samples)
         entries = formal._read_entries(formal.formal_path())
         references = _references(entries)
+        from crX.utils.card_upload import published_reference_ids
+
+        published = published_reference_ids()
         updates = {}
         protected = {
             sample.review.get("formal_id")
             for sample in samples
-            if sample.review.get("work_reason") == "历史参考已加入正式库"
+            if sample.uploaded or sample.review.get("work_reason") == "历史参考已加入正式库"
         }
-        candidates = {
-            sample.review.get("formal_id")
-            for sample in samples
-            if sample.review.get("coverage_policy") != COVERAGE_POLICY
-            and sample.review.get("work_result") == "included"
-            and sample.review.get("owns_reference") is True
-        } - protected
+        candidates = (
+            {
+                sample.review.get("formal_id")
+                for sample in samples
+                if sample.review.get("coverage_policy") != COVERAGE_POLICY
+                and sample.review.get("work_result") == "included"
+                and sample.review.get("owns_reference") is True
+            }
+            - protected
+            - published.keys()
+        )
         for sample in samples:
             if sample.review.get("work_result") in {"pending", "included", "covered", "ignored"}:
                 identifier = sample.review.get("formal_id")
@@ -435,9 +406,6 @@ def scan_review(root, *, refresh_library=False, reassess_history=True, cleanup_u
         for sample in samples:
             if sample.status == "included" and sample.review.get("work_reason") != "已加入正式库":
                 _remember(updates, sample, {"work_reason": "已加入正式库"})
-        from crX.utils.card_upload import published_reference_ids
-
-        published = published_reference_ids()
         for sample in samples:
             identifier = sample.review.get("formal_id")
             if sample.status == "included" and not sample.uploaded and identifier in published:
@@ -449,15 +417,12 @@ def scan_review(root, *, refresh_library=False, reassess_history=True, cleanup_u
             if remaining != entries and not backup.exists():
                 atomic_json(backup, {"version": 1, "entries": entries})
             _commit(root, entries, remaining, list(updates.values()))
-        if cleanup_uploaded is None:
-            cleanup_uploaded = reassess_history
-        if cleanup_uploaded:
-            _cleanup_uploaded_images(root, _scan(root), remaining)
+        deleted = cleanup_processed and _delete_processed_samples(root, samples, remaining)
         if refresh_library:
             local.sync_library(root)
         # Writes and legacy-library synchronization can change the annotations.
         # A read-only refresh already has a validated, current snapshot.
-        if updates or cleanup_uploaded or (refresh_library and local.library_path(root).exists()):
+        if updates or deleted or (refresh_library and local.library_path(root).exists()):
             samples, errors = scan_samples(root)
         return samples, errors, group_review_samples(samples)
 
