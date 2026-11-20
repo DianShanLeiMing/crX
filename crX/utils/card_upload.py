@@ -8,8 +8,8 @@ import os
 import shutil
 import subprocess
 import tempfile
-from collections import Counter
 from copy import deepcopy
+from dataclasses import replace
 from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
@@ -345,56 +345,67 @@ def _record_upload(root, deleted_ids):
 
 
 def _describe_upload(repo, directory, revision, payloads):
-    from crX.utils.card_catalog import _catalog_references
+    from crX.utils.card_catalog import CatalogReference, _catalog_references
 
+    previous = _base_entries(repo, directory, revision)
+    incoming = json.loads(payloads[LIBRARY_FILE])["entries"] if LIBRARY_FILE in payloads else previous
+    catalog = {card: {ref.identifier: ref for ref in refs} for card, refs in _catalog_references().items()}
+    for entry in (*previous, *incoming):
+        card, identifier = entry["card_id"], entry["id"]
+        catalog[card].setdefault(identifier, CatalogReference(identifier, card))
+    old_order = _base_document(repo, directory, PREFERENCES_FILE, preferences.read_document, revision)["cards"]
+    new_order = json.loads(payloads[PREFERENCES_FILE])["cards"] if PREFERENCES_FILE in payloads else old_order
+    local_order = preferences.read_document(preferences.preferences_path())["cards"]
+
+    def reference_names(saved):
+        names = {}
+        for card, refs in catalog.items():
+            value = preferences.card_preferences(list(refs.values()), saved.get(card) or local_order.get(card))
+            for identifier, ref in refs.items():
+                names[identifier] = replace(
+                    ref, preferred=identifier == value["preferred"], number=value["numbers"][identifier]
+                ).name
+        return names
+
+    old_names, new_names = reference_names(old_order), reference_names(new_order)
     details = []
     if LIBRARY_FILE in payloads:
-        previous = _base_entries(repo, directory, revision)
         known = {entry["id"] for entry in previous}
-        incoming = json.loads(payloads[LIBRARY_FILE])["entries"]
-        added = Counter(entry["card_id"] for entry in incoming if entry["id"] not in known)
-        for card, count in sorted(added.items()):
-            suffix = f"（{count} 份）" if count > 1 else ""
-            identifiers = "、".join(
-                entry["id"] for entry in incoming if entry["card_id"] == card and entry["id"] not in known
-            )
-            details.append(f"新增{formal.CARD_NAMES_ZH[card]}参考样本{suffix}（参考 {identifiers}）")
+        for entry in incoming:
+            if entry["id"] not in known:
+                details.append(f"新增{formal.CARD_NAMES_ZH[entry['card_id']]}参考样本（{new_names[entry['id']]}）")
         retained = {entry["id"] for entry in incoming}
         for entry in previous:
             if entry["id"] not in retained:
-                details.append(f"删除{formal.CARD_NAMES_ZH[entry['card_id']]}参考样本（参考 {entry['id']}）")
+                details.append(f"删除{formal.CARD_NAMES_ZH[entry['card_id']]}参考样本（{old_names[entry['id']]}）")
     if PREFERENCES_FILE in payloads:
-        old = _base_document(repo, directory, PREFERENCES_FILE, preferences.read_document, revision)["cards"]
-        new = json.loads(payloads[PREFERENCES_FILE])["cards"]
-        for card in sorted(old.keys() | new.keys()):
-            if old.get(card) != new.get(card):
-                before, after = old.get(card, {}), new.get(card, {})
+        for card in sorted(old_order.keys() | new_order.keys()):
+            if old_order.get(card) != new_order.get(card):
+                before, after = old_order.get(card, {}), new_order.get(card, {})
                 changes = []
-                if before.get("order") != after.get("order"):
-                    original = " → ".join(before.get("order", ())) or "空"
-                    current = " → ".join(after.get("order", ())) or "空"
-                    changes.append(f"顺序 {original} 改为 {current}")
+                positions = {key: position for position, key in enumerate(before.get("order", ()), 1)}
+                for position, key in enumerate(after.get("order", ()), 1):
+                    if key in positions and positions[key] != position:
+                        changes.append(f"{old_names.get(key, '参考')}由第 {positions[key]} 位 → 第 {position} 位")
                 if before.get("preferred") != after.get("preferred"):
-                    changes.append(f"首选 {before.get('preferred') or '无'} → {after.get('preferred') or '无'}")
-                numbers_before, numbers_after = before.get("numbers", {}), after.get("numbers", {})
-                for identifier in sorted(numbers_before.keys() | numbers_after.keys()):
-                    if numbers_before.get(identifier) != numbers_after.get(identifier):
-                        changes.append(
-                            f"参考 {identifier} 编号 {numbers_before.get(identifier, '无')} → {numbers_after.get(identifier, '无')}"
-                        )
-                details.append(f"更新{formal.CARD_NAMES_ZH[card]}参考顺序及编号配置（{'；'.join(changes)}）")
+                    preferred = after.get("preferred")
+                    if preferred:
+                        changes.append(f"{old_names.get(preferred, '参考')}设为首选")
+                if changes:
+                    details.append(f"更新{formal.CARD_NAMES_ZH[card]}参考顺序（{'，'.join(changes)}）")
     if HITS_FILE in payloads:
         old = _base_document(repo, directory, HITS_FILE, hits.read_shared, revision)
         new = json.loads(payloads[HITS_FILE])
-        owners = {ref.identifier: card for card, refs in _catalog_references().items() for ref in refs}
+        owners = {identifier: card for card, refs in catalog.items() for identifier in refs}
         before, after = hits._displayed(old, {}), hits._displayed(new, {})
         old_resets, new_resets = old.get("resets", {}), new.get("resets", {})
         for key in sorted(before.keys() | after.keys() | new_resets.keys()):
             name = formal.CARD_NAMES_ZH.get(owners.get(key, ""), "未知卡牌")
+            reference = new_names.get(key, "参考名称未知")
             if key in new_resets and new_resets[key] != old_resets.get(key):
-                details.append(f"清空{name}线上命中次数（参考 {key}）")
+                details.append(f"清空{name}线上命中次数（{reference}）")
             elif before.get(key, 0) != after.get(key, 0):
-                details.append(f"更新{name}命中次数（参考 {key}，{before.get(key, 0)} → {after.get(key, 0)}）")
+                details.append(f"更新{name}命中次数（{reference}，{before.get(key, 0)} → {after.get(key, 0)}）")
     return details
 
 

@@ -169,11 +169,11 @@ def _upload_result_rows(result):
         operation = {"新增": "参考新增", "删除": "删除", "清空": "次数清空"}.get(verb)
         if operation is None:
             operation = "次数更新" if content.startswith("命中次数") else "顺序调整"
-        for prefix in ("参考顺序及编号配置", "参考样本", "线上命中次数", "命中次数"):
+        for prefix in ("参考顺序及编号配置", "参考顺序", "参考样本", "线上命中次数", "命中次数"):
             if content.startswith(prefix):
                 content = content.removeprefix(prefix)
                 break
-        rows.append((name, operation, content.strip("（）") or "已同步", line))
+        rows.append((name, operation, content.removeprefix("（").removesuffix("）") or "已同步", line))
     return sorted(rows, key=lambda row: row[0])
 
 
