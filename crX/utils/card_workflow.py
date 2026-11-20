@@ -563,7 +563,7 @@ def delete_samples(root, selected):
 
 
 def delete_formal_references(root, card_id, identifiers):
-    """Remove selected supplemental fingerprints and clean up their local sources."""
+    """Retain fingerprints locally so removing a reference can be undone."""
     requested = set(identifiers)
     if not requested or card_id not in CARD_NAMES_ZH:
         raise ValueError("请选择要删除的正式参考")
@@ -583,19 +583,43 @@ def delete_formal_references(root, card_id, identifiers):
             and sample.review.get("formal_id") in requested
         ]
         remaining = [entry for entry in entries if entry["id"] not in requested]
-        reason = "正式参考已删除，正在清理来源样本"
-        # Persist the cleanup intent in the same recoverable write as the library edit.
+        archive_path = sample_file(root, "deleted-references.json")
+        archive = formal._read_entries(archive_path)
+        saved = {entry["id"]: entry for entry in archive}
+        saved.update({entry["id"]: entry for entry in entries if entry["id"] in requested})
+        # Save the restore data before the recoverable library edit.
+        formal._write_entries(archive_path, list(saved.values()), archive)
         _commit(
             root,
             entries,
             remaining,
-            [(sample, {**_result("ignored", card_id, reason), "pending_deletion": True}) for sample in sources],
+            [(sample, {"work_result": "ignored", "deleted_reference": sample.status}) for sample in sources],
         )
-        try:
-            local.clear_filtered_samples(root, {sample.key for sample in sources})
-        except (OSError, ValueError) as error:
-            raise ValueError(f"正式参考已删除，来源样本清理未完成，可刷新后重试。{error}") from error
-        return f"已删除{CARD_NAMES_ZH[card_id]}的 {len(requested)} 份本机正式参考"
+        return f"已标记删除{CARD_NAMES_ZH[card_id]}的 {len(requested)} 份参考，可选中 delete 条目还原"
+
+
+def restore_formal_references(root, card_id, identifiers):
+    requested = set(identifiers)
+    if not requested or card_id not in CARD_NAMES_ZH:
+        raise ValueError("请选择要还原的参考")
+    if not formal.source_checkout():
+        raise ValueError("还原参考需要可写的源码项目")
+    with _locked(root):
+        entries = formal._read_entries(formal.formal_path())
+        archive = formal._read_entries(sample_file(root, "deleted-references.json"))
+        active = {entry["id"] for entry in entries}
+        selected = [entry for entry in archive if entry["card_id"] == card_id and entry["id"] in requested - active]
+        if {entry["id"] for entry in selected} != requested:
+            raise ValueError("所选删除记录已变化，请刷新后重新选择")
+        updates = [
+            (sample, {"work_result": sample.review["deleted_reference"], "deleted_reference": ""})
+            for sample in _scan(root)
+            if sample.card_id == card_id
+            and sample.review.get("formal_id") in requested
+            and sample.review.get("deleted_reference") in ("included", "covered")
+        ]
+        _commit(root, entries, entries + selected, updates)
+        return f"已还原{CARD_NAMES_ZH[card_id]}的 {len(requested)} 份正式参考"
 
 
 def reference_details(root, sample):

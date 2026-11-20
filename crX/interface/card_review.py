@@ -36,6 +36,7 @@ from crX.utils.card_workflow import (
     delete_samples,
     edit_formal_reference,
     reference_details,
+    restore_formal_references,
     scan_review,
 )
 from crX.utils.open_folder import open_folder
@@ -66,13 +67,17 @@ class _UploadFooter(ttk.Frame):
         self.row = row
         self.status = tk.StringVar(master=self)
         self.result = ""
+        self.card_count = 0
+        self.card_ids = ()
         self.columnconfigure(0, weight=1)
         ttk.Label(self, textvariable=self.status).grid(row=0, column=0, sticky="w")
         self.details_button = ttk.Button(self, text="查看上传结果", bootstyle="secondary", command=self._show_result)
         self.progress = ttk.Progressbar(self, mode="indeterminate")
 
-    def start(self):
+    def start(self, *, cards=()):
         self.result = ""
+        self.card_ids = tuple(cards)
+        self.card_count = len(self.card_ids)
         self.details_button.grid_remove()
         self.status.set("正在准备上传……")
         self.grid(row=self.row, column=0, sticky="ew", pady=(4, 0))
@@ -82,8 +87,32 @@ class _UploadFooter(ttk.Frame):
     def finish(self, result, *, failed):
         self.progress.stop()
         self.progress.grid_remove()
-        self.status.set("上传失败" if failed else "上传完成")
+        completed = f"上传完成 · 已上传 {self.card_count} 种卡牌" if self.card_count else "上传完成"
+        self.status.set("上传失败" if failed else completed)
         self.result = str(result) if result else ""
+        if not failed and self.result:
+            names = sorted({CARD_NAMES_ZH.get(card, card) for card in self.card_ids}, key=len, reverse=True)
+            grouped = {}
+            other = []
+            for line in self.result.splitlines():
+                owner = next(
+                    (
+                        name
+                        for name in names
+                        if any(line.startswith(f"{verb}{name}") for verb in ("新增", "删除", "更新", "清空"))
+                    ),
+                    None,
+                )
+                if owner is None:
+                    other.append(line)
+                else:
+                    grouped.setdefault(owner, []).append(line)
+            sections = [
+                f"{name}\n" + "\n".join(f"  • {line}" for line in lines) for name, lines in sorted(grouped.items())
+            ]
+            if other:
+                sections.append("\n".join(other))
+            self.result = completed + "\n\n" + "\n\n".join(sections)
         if self.result:
             self.details_button.grid(row=0, column=1, sticky="e")
 
@@ -95,6 +124,7 @@ class _UploadFooter(ttk.Frame):
         text = ScrolledText(window, width=60, height=14, wrap="word", bg=colors.inputbg, fg=colors.inputfg)
         text.pack(fill="both", expand=True, padx=12, pady=12)
         text.insert("1.0", self.result)
+        text.see("1.0")
         text.configure(state="disabled")
 
 
@@ -877,7 +907,9 @@ class CardReviewTab(ttk.Frame):
         if operation in ("clear", "clear_cards"):
             selected = view.selected_card_references() if operation == "clear_cards" else view.references.selection()
             visible = {ref.identifier: ref for refs in view.data.values() for ref in refs}
-            identifiers = tuple(key for key in selected if key in visible and visible[key].hits > 0)
+            identifiers = tuple(
+                key for key in selected if key in visible and not visible[key].deleted and visible[key].hits > 0
+            )
             if selected and not identifiers:
                 messagebox.showinfo("无需清空", "所选参考的命中次数均为 0，无需清空。", parent=view.winfo_toplevel())
                 return
@@ -889,7 +921,7 @@ class CardReviewTab(ttk.Frame):
                         names += "等"
                     prompt = (
                         f"将勾选的 {len(cards)} 种卡牌（{names}）中 {len(identifiers)} 份参考的本机显示次数归零？\n\n"
-                        "清空先在本机生效，之后点击「上传顺序与次数」才会将所选清空记录同步到线上。"
+                        "清空先在本机生效，之后点击「上传所选修改」才会将所选清空记录同步到线上。"
                     )
                 else:
                     prompt = f"清空右侧选中的 {len(identifiers)} 份参考的本机贡献次数？\n\n清空结果仅在本机生效，其他电脑的贡献仍计入显示。"
@@ -912,12 +944,22 @@ class CardReviewTab(ttk.Frame):
                 self.message_var.set("")
         elif operation == "delete_references":
             self._delete_catalog_references()
+        elif operation == "restore_references":
+            refs = view.selected_deleted_references()
+            if refs:
+                card = refs[0].card_id
+                identifiers = {ref.identifier for ref in refs}
+                self._start_action(lambda: restore_formal_references(root, card, identifiers), clearing=True)
         elif operation == "upload":
             selected = view.selected_cards()
             if not selected:
-                self.message_var.set("请先在左侧勾选要上传顺序与次数的卡牌。")
+                self.message_var.set("请先在左侧勾选要上传修改的卡牌。")
                 return
-            self._start_upload(self.library_upload, [], metadata_only=True, update_hits=True, metadata_cards=selected)
+            self._start_upload(self.library_upload, [], sync_cards=selected, update_hits=True)
+        elif operation == "select_modified":
+            cards = view.check_modified_cards()
+            if cards:
+                self.message_var.set(f"已选择 {len(cards)} 种有修改的卡牌，点击「上传所选修改」提交。")
         elif operation == "reset_cards":
             cards = view.selected_cards()
             if not cards or not messagebox.askyesno(
@@ -940,21 +982,6 @@ class CardReviewTab(ttk.Frame):
             return
         card = refs[0].card_id
         identifiers = {ref.identifier for ref in refs}
-        names = "\n".join(f"{ref.name}（{ref.identifier}）" for ref in refs[:5])
-        if len(refs) > 5:
-            names += f"\n另有 {len(refs) - 5} 份"
-        if not messagebox.askyesno(
-            "删除正式参考",
-            f"删除{CARD_NAMES_ZH[card]}的 {len(refs)} 份正式参考？\n\n{names}\n\n"
-            "本机识别会停用这些参考，仍保留的来源截图、记录和标注也会删除。远端版本保留。",
-            parent=view.winfo_toplevel(),
-            default=messagebox.NO,
-        ):
-            return
-        if self._refresh_result is not None or identifiers != {
-            ref.identifier for ref in view.selected_deletable_references() if ref.card_id == card
-        }:
-            return
         self._start_action(lambda: delete_formal_references(root, card, identifiers), clearing=True)
 
     def _reorder_catalog(self, card, ordered, expected):
@@ -980,7 +1007,8 @@ class CardReviewTab(ttk.Frame):
             results.put(("progress", "upload", message, None))
 
         self._active_upload = footer
-        footer.start()
+        cards = options.get("sync_cards") or options.get("metadata_cards") or {sample.card_id for sample in samples}
+        footer.start(cards=cards)
         self._start_action(lambda: upload_references(root, samples, progress=progress, **options), kind="upload")
 
     def _clear_selection(self):
@@ -1086,6 +1114,8 @@ class CardReviewTab(ttk.Frame):
                 if kind == "reorder":
                     self.library_view.finish_reorder(error is None)
                 if kind == "upload" and self._active_upload is not None:
+                    if error is None and self._active_upload is self.library_upload:
+                        self.library_view.clear_uploaded_cards(self._active_upload.card_ids)
                     self._active_upload.finish(error or result, failed=error is not None)
                     self._active_upload = None
                 if kind == "clear_hits" and error is None:

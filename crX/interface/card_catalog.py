@@ -43,6 +43,8 @@ class CardCatalogView(ttk.Frame):
         self._check_images = {}
         self._card_images = {}
         self._new_image = ""
+        self._deleted_image = ""
+        self._both_image = ""
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
         # Keep the viewport steady when drag feedback wraps to a different number of lines.
@@ -52,8 +54,12 @@ class CardCatalogView(ttk.Frame):
         ttk.Label(search, text="搜索卡名 / 英文 ID").pack(side="left")
         self.query = tk.StringVar()
         ttk.Entry(search, textvariable=self.query, width=24).pack(side="left", padx=6)
-        self.upload_button = ttk.Button(search, text="上传顺序与次数", command=lambda: action("upload"))
+        self.upload_button = ttk.Button(search, text="上传所选修改", command=lambda: action("upload"))
         self.upload_button.pack(side="right", padx=(0, 6))
+        self.select_modified_button = ttk.Button(
+            search, text="选择所有修改项", command=lambda: action("select_modified")
+        )
+        self.select_modified_button.pack(side="right", padx=(0, 8))
         self.query.trace_add("write", lambda *_: self.render_cards())
         self.panes = tk.PanedWindow(self, orient="horizontal", sashwidth=6, opaqueresize=True, borderwidth=0)
         self.panes.grid(row=1, column=0, sticky="nsew")
@@ -117,7 +123,7 @@ class CardCatalogView(ttk.Frame):
             style="CardReferences.Treeview",
         )
         self.references.heading("sort", text="排序")
-        self.references.column("#0", width=38, minwidth=38, stretch=False, anchor="center")
+        self.references.column("#0", width=60, minwidth=60, stretch=False, anchor="center")
         self.references.column("sort", width=58, minwidth=58, stretch=False, anchor="center")
         self.references.heading("name", text="参考")
         self.references.column("name", width=120, minwidth=60)
@@ -143,14 +149,24 @@ class CardCatalogView(ttk.Frame):
         reference_horizontal.grid(row=1, column=0, sticky="ew")
         self.references.configure(xscrollcommand=reference_horizontal.set)
         gallery.grid(row=2, column=0, sticky="nsew", padx=(6, 0))
+        reference_tools = ttk.Frame(right)
+        reference_tools.grid(row=3, column=0, sticky="ew", padx=6, pady=(8, 0))
         self.delete_button = ttk.Button(
-            right,
+            reference_tools,
             text="删除参考",
             bootstyle="danger",
             state="disabled",
             command=lambda: action("delete_references"),
         )
-        self.delete_button.grid(row=3, column=0, sticky="e", padx=6, pady=(8, 0))
+        self.delete_button.pack(side="right")
+        self.restore_button = ttk.Button(
+            reference_tools,
+            text="还原参考",
+            bootstyle="secondary",
+            state="disabled",
+            command=lambda: action("restore_references"),
+        )
+        self.restore_button.pack(side="right", padx=(0, 8))
         self.message = tk.StringVar()
         self._update_message()
         ttk.Label(self, textvariable=self.message, wraplength=680).grid(row=2, column=0, sticky="ew", pady=(6, 0))
@@ -194,6 +210,23 @@ class CardCatalogView(ttk.Frame):
         self._new_image = ImageTk.PhotoImage(
             badge.resize((badge_width // 3, size), Image.Resampling.LANCZOS), master=self
         )
+        deleted_width = int(font.getlength("delete")) + 24
+        deleted_badge = Image.new("RGBA", (deleted_width, size * 3))
+        deleted_draw = ImageDraw.Draw(deleted_badge)
+        deleted_draw.rounded_rectangle((0, 3, deleted_width - 1, size * 3 - 4), radius=9, fill="#fb7185")
+        deleted_draw.text((12, size * 1.5), "delete", font=font, fill="#1f2937", anchor="lm")
+        self._deleted_image = ImageTk.PhotoImage(
+            deleted_badge.resize((deleted_width // 3, size), Image.Resampling.LANCZOS), master=self
+        )
+        both_badges = Image.new("RGBA", (badge_width + 12 + deleted_width, size * 3))
+        both_badges.alpha_composite(badge)
+        both_badges.alpha_composite(deleted_badge, (badge_width + 12, 0))
+        self._both_image = ImageTk.PhotoImage(
+            both_badges.resize((both_badges.width // 3, size), Image.Resampling.LANCZOS), master=self
+        )
+        self.references.column("#0", width=self._both_image.width() + 12, minwidth=self._both_image.width() + 12)
+        checkbox_width = size + 4 + self._both_image.width() + 8
+        self.cards.column("#0", width=checkbox_width, minwidth=checkbox_width)
         for checked in (False, True, None):
             for disabled in (False, True):
                 color = style.colors.secondary if disabled else style.colors.primary
@@ -219,11 +252,12 @@ class CardCatalogView(ttk.Frame):
                 self._check_images[checked, disabled] = ImageTk.PhotoImage(
                     picture.resize((size, size), Image.Resampling.LANCZOS), master=self
                 )
-                for changed in (False, True):
-                    combined = Image.new("RGBA", (size * 3 + 12 + badge_width, size * 3))
+                for changed in (False, True, "delete", "both"):
+                    combined = Image.new("RGBA", (size * 3 + 12 + both_badges.width, size * 3))
                     combined.alpha_composite(picture)
                     if changed:
-                        combined.alpha_composite(badge, (size * 3 + 12, 0))
+                        marker = {"delete": deleted_badge, "both": both_badges}.get(changed, badge)
+                        combined.alpha_composite(marker, (size * 3 + 12, 0))
                     self._card_images[checked, disabled, changed] = ImageTk.PhotoImage(
                         combined.resize((combined.width // 3, size), Image.Resampling.LANCZOS), master=self
                     )
@@ -247,6 +281,8 @@ class CardCatalogView(ttk.Frame):
                         ref.identifier,
                         ref.uploaded,
                         ref.deletable,
+                        ref.deleted,
+                        ref.reference_changed,
                         ref.name,
                         ref.hits,
                         ref.order_changed,
@@ -380,7 +416,7 @@ class CardCatalogView(ttk.Frame):
                 CARD_NAMES_ZH.get(card, card),
             ),
         )
-        cards.sort(key=lambda card: not any(ref.order_changed or ref.hits_changed for ref in self.data[card]))
+        cards.sort(key=lambda card: not any(ref.deleted or ref.changed for ref in self.data[card]))
         for index, card in enumerate(cards):
             self.cards.move(card, "", index)
 
@@ -403,15 +439,19 @@ class CardCatalogView(ttk.Frame):
         self._card = card
         refs = self.data.get(card, [])
         self._clear_references("暂无正式参考" if not refs else "请选择参考")
-        self.title.set(f"{CARD_NAMES_ZH.get(card, card)} · {len(refs)} 份正式参考")
+        deleted_count = sum(ref.deleted for ref in refs)
+        title = f"{CARD_NAMES_ZH.get(card, card)} · {len(refs) - deleted_count} 份正式参考"
+        if deleted_count:
+            title += f" · {deleted_count} 份已删除，可还原"
+        self.title.set(title)
         for index, ref in enumerate(refs, 1):
             self._references[ref.identifier] = ref
             self.references.insert(
                 "",
                 "end",
                 iid=ref.identifier,
-                values=(f"≡ {index}", ref.name, ref.identifier, ref.hits),
-                image=self._new_image if ref.order_changed or ref.hits_changed else "",
+                values=("" if ref.deleted else f"≡ {index}", ref.name, ref.identifier, ref.hits),
+                image=self._reference_image(ref),
             )
         if refs:
             selected = tuple(key for key in previous if key in self._references) or (refs[0].identifier,)
@@ -427,10 +467,11 @@ class CardCatalogView(ttk.Frame):
         self.message.set(
             "按住排序列的 ≡ 上下拖动，第一行是首选。琥珀色 new 标签表示顺序或命中次数有变化。"
             "勾选卡牌后可清空次数或重置为远端。清空后线上数据保留，上传所选清空记录后同步线上。"
+            "delete 表示本机已删除，可选中后还原。"
         )
 
     def _card_values(self, card):
-        return self._card_name(card), len(self.data[card])
+        return self._card_name(card), sum(not ref.deleted for ref in self.data[card])
 
     def _check_card(self, event):
         if event.keysym == "space":
@@ -465,14 +506,40 @@ class CardCatalogView(ttk.Frame):
     def selected_cards(self):
         return tuple(card for card in self.cards.get_children() if card in self._checked_cards)
 
+    def clear_uploaded_cards(self, cards):
+        self._checked_cards.difference_update(cards)
+        self._refresh_checks()
+
+    def modified_cards(self):
+        return tuple(card for card, refs in self.data.items() if any(ref.changed for ref in refs))
+
+    def check_modified_cards(self):
+        cards = self.modified_cards()
+        if cards:
+            self.query.set("")
+            self._checked_cards = set(cards)
+            self._refresh_checks()
+        return cards
+
     def selected_card_references(self):
-        return tuple(ref.identifier for card in self.selected_cards() for ref in self.data[card])
+        return tuple(ref.identifier for card in self.selected_cards() for ref in self.data[card] if not ref.deleted)
 
     def selected_deletable_references(self):
         refs = tuple(self._references.get(key) for key in self.references.selection())
         if any(ref is None or not ref.deletable for ref in refs):
             return ()
         return refs
+
+    def selected_deleted_references(self):
+        refs = tuple(self._references.get(key) for key in self.references.selection())
+        return refs if refs and all(ref is not None and ref.deleted for ref in refs) else ()
+
+    def _reference_image(self, ref):
+        if ref.deleted:
+            return self._both_image if ref.order_changed or ref.hits_changed else self._deleted_image
+        if ref.changed:
+            return self._new_image
+        return ""
 
     def set_disabled(self, disabled):
         self._disabled = disabled
@@ -484,17 +551,29 @@ class CardCatalogView(ttk.Frame):
         header_state = True if all_checked else None if visible & self._checked_cards else False
         self.cards.heading("#0", text="全选", image=self._check_images[header_state, disabled])
         for card in self.cards.get_children():
-            changed = any(ref.order_changed or ref.hits_changed for ref in self.data[card])
+            has_new = any(
+                ref.order_changed or ref.hits_changed or (ref.reference_changed and not ref.deleted)
+                for ref in self.data[card]
+            )
+            has_deleted = any(ref.deleted for ref in self.data[card])
+            changed = "both" if has_new and has_deleted else "delete" if has_deleted else has_new
             self.cards.item(
                 card, image=self._card_images[card in self._checked_cards, disabled or not self.data[card], changed]
             )
         if disabled:
             self._cancel_drag()
         checked = self.selected_card_references()
-        self.upload_button.configure(state="disabled" if disabled or not checked else "normal")
-        self.clear_button.configure(state="disabled" if disabled or not self.references.selection() else "normal")
+        self.upload_button.configure(state="disabled" if disabled or not checked_cards else "normal")
+        self.select_modified_button.configure(state="disabled" if disabled or not self.modified_cards() else "normal")
+        selected_active = any(
+            key in self._references and not self._references[key].deleted for key in self.references.selection()
+        )
+        self.clear_button.configure(state="disabled" if disabled or not selected_active else "normal")
         self.delete_button.configure(
             state="disabled" if disabled or not self.selected_deletable_references() else "normal"
+        )
+        self.restore_button.configure(
+            state="disabled" if disabled or not self.selected_deleted_references() else "normal"
         )
         self.clear_cards_button.configure(state="disabled" if disabled or not checked else "normal")
         self.reset_cards_button.configure(state="disabled" if disabled or self._refreshing or not checked else "normal")
@@ -504,8 +583,8 @@ class CardCatalogView(ttk.Frame):
             ref = self._references[key]
             self.references.item(
                 key,
-                values=(f"≡ {index}", ref.name, key, ref.hits),
-                image=self._new_image if ref.order_changed or ref.hits_changed else "",
+                values=("" if ref.deleted else f"≡ {index}", ref.name, key, ref.hits),
+                image=self._reference_image(ref),
             )
 
     def _is_handle(self, event):
@@ -513,6 +592,7 @@ class CardCatalogView(ttk.Frame):
             self.references.identify_region(event.x, event.y) == "cell"
             and self.references.identify_column(event.x) == "#1"
             and bool(self.references.identify_row(event.y))
+            and not self._references[self.references.identify_row(event.y)].deleted
         )
 
     def _hover_handle(self, event):
@@ -574,7 +654,7 @@ class CardCatalogView(ttk.Frame):
                 target = visible[0]
             elif visible and self._drag_y > self.references.winfo_height() - 20:
                 target = visible[-1]
-        if target and target != drag.identifier:
+        if target and target != drag.identifier and not self._references[target].deleted:
             box = self.references.bbox(target)
             source_index, target_index = self.references.index(drag.identifier), self.references.index(target)
             if not box or (
@@ -622,7 +702,11 @@ class CardCatalogView(ttk.Frame):
             self._references = refs
             self._refresh_reference_rows()
             self.message.set("正在保存顺序……第一行是首选。")
-            self._reorder(drag.card, ordered, drag.original)
+            self._reorder(
+                drag.card,
+                tuple(key for key in ordered if not refs[key].deleted),
+                tuple(key for key in drag.original if not refs[key].deleted),
+            )
         else:
             self._update_message()
         return "break"

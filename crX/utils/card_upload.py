@@ -12,7 +12,7 @@ from collections import Counter
 from copy import deepcopy
 from functools import lru_cache
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 if TYPE_CHECKING:
     from threading import Event
@@ -21,7 +21,7 @@ from crX.utils import card_workflow as workflow
 from crX.utils import formal_library as formal
 from crX.utils import reference_hits as hits
 from crX.utils import reference_preferences as preferences
-from crX.utils.card_review import atomic_json
+from crX.utils.card_review import atomic_json, sample_file
 
 LIBRARY_FILE = "crX/bot/card_reference_library.json"
 PREFERENCES_FILE = "crX/bot/card_reference_preferences.json"
@@ -224,7 +224,7 @@ def _tracking(repo, head, *, update_hits=False):
     for commit in ahead:
         title = _text(repo, "show", "-s", "--format=%s", commit)
         paths = _text(repo, "diff-tree", "--no-commit-id", "--name-only", "-r", commit).splitlines()
-        detailed = title.startswith(tuple(DETAIL_PREFIX + verb for verb in ("新增", "更新", "清空")))
+        detailed = title.startswith(tuple(DETAIL_PREFIX + verb for verb in ("新增", "更新", "清空", "删除")))
         if (
             title not in (COMMIT_TITLE, LEGACY_COMMIT_TITLE)
             and not detailed
@@ -233,7 +233,7 @@ def _tracking(repo, head, *, update_hits=False):
         ):
             raise ValueError("当前分支有未推送的其他提交，请先处理这些提交后再上传参考")
         if HITS_FILE in paths and not update_hits:
-            raise ValueError("上次命中数提交尚未推送，请回到样本库点击「上传顺序与次数」重试")
+            raise ValueError("上次命中数提交尚未推送，请回到样本库点击「上传所选修改」重试")
     return remote, target, bool(ahead), head
 
 
@@ -323,24 +323,66 @@ def _archive_published(root, identifiers, revision):
     workflow._delete_processed_samples(root, workflow._scan(root), entries)
 
 
+class UploadReceipt(TypedDict):
+    deleted: list[str]
+
+
+def upload_receipt(root) -> UploadReceipt:
+    document = workflow._read_state(sample_file(root, "upload-receipt.json"))
+    deleted = document.get("deleted", [])
+    if not isinstance(deleted, list) or any(
+        not isinstance(key, str) or not preferences.IDENTIFIER.fullmatch(key) for key in deleted
+    ):
+        raise ValueError("本机上传状态记录无效")
+    return {"deleted": deleted}
+
+
+def _record_upload(root, deleted_ids):
+    receipt = upload_receipt(root)
+    active = {entry["id"] for entry in formal._read_entries(formal.formal_path())}
+    receipt["deleted"] = sorted((set(receipt["deleted"]) | set(deleted_ids)) - active)
+    atomic_json(sample_file(root, "upload-receipt.json"), dict(receipt))
+
+
 def _describe_upload(repo, directory, revision, payloads):
     from crX.utils.card_catalog import _catalog_references
 
     details = []
     if LIBRARY_FILE in payloads:
-        known = {entry["id"] for entry in _base_entries(repo, directory, revision)}
-        added = Counter(
-            entry["card_id"] for entry in json.loads(payloads[LIBRARY_FILE])["entries"] if entry["id"] not in known
-        )
+        previous = _base_entries(repo, directory, revision)
+        known = {entry["id"] for entry in previous}
+        incoming = json.loads(payloads[LIBRARY_FILE])["entries"]
+        added = Counter(entry["card_id"] for entry in incoming if entry["id"] not in known)
         for card, count in sorted(added.items()):
             suffix = f"（{count} 份）" if count > 1 else ""
-            details.append(f"新增{formal.CARD_NAMES_ZH[card]}参考样本{suffix}")
+            identifiers = "、".join(
+                entry["id"] for entry in incoming if entry["card_id"] == card and entry["id"] not in known
+            )
+            details.append(f"新增{formal.CARD_NAMES_ZH[card]}参考样本{suffix}（参考 {identifiers}）")
+        retained = {entry["id"] for entry in incoming}
+        for entry in previous:
+            if entry["id"] not in retained:
+                details.append(f"删除{formal.CARD_NAMES_ZH[entry['card_id']]}参考样本（参考 {entry['id']}）")
     if PREFERENCES_FILE in payloads:
         old = _base_document(repo, directory, PREFERENCES_FILE, preferences.read_document, revision)["cards"]
         new = json.loads(payloads[PREFERENCES_FILE])["cards"]
         for card in sorted(old.keys() | new.keys()):
             if old.get(card) != new.get(card):
-                details.append(f"更新{formal.CARD_NAMES_ZH[card]}参考顺序及编号配置")
+                before, after = old.get(card, {}), new.get(card, {})
+                changes = []
+                if before.get("order") != after.get("order"):
+                    original = " → ".join(before.get("order", ())) or "空"
+                    current = " → ".join(after.get("order", ())) or "空"
+                    changes.append(f"顺序 {original} 改为 {current}")
+                if before.get("preferred") != after.get("preferred"):
+                    changes.append(f"首选 {before.get('preferred') or '无'} → {after.get('preferred') or '无'}")
+                numbers_before, numbers_after = before.get("numbers", {}), after.get("numbers", {})
+                for identifier in sorted(numbers_before.keys() | numbers_after.keys()):
+                    if numbers_before.get(identifier) != numbers_after.get(identifier):
+                        changes.append(
+                            f"参考 {identifier} 编号 {numbers_before.get(identifier, '无')} → {numbers_after.get(identifier, '无')}"
+                        )
+                details.append(f"更新{formal.CARD_NAMES_ZH[card]}参考顺序及编号配置（{'；'.join(changes)}）")
     if HITS_FILE in payloads:
         old = _base_document(repo, directory, HITS_FILE, hits.read_shared, revision)
         new = json.loads(payloads[HITS_FILE])
@@ -450,6 +492,7 @@ def upload_references(
     update_hits=False,
     metadata_only=False,
     metadata_cards=None,
+    sync_cards=None,
     selected_resets=(),
     progress=lambda _message: None,
 ):
@@ -467,14 +510,25 @@ def upload_references(
     if metadata_cards is not None and (
         not metadata_only or not metadata_cards or not set(metadata_cards).issubset(formal.CARD_NAMES_ZH)
     ):
-        raise ValueError("请先勾选要上传顺序与次数的卡牌")
+        raise ValueError("请先勾选要上传修改的卡牌")
     if cards is not None and (
         not cards or len(cards) > formal.MAX_BATCH or not set(cards).issubset(formal.CARD_NAMES_ZH)
     ):
         raise ValueError("请选择有效卡牌，一次最多上传64种")
+    if sync_cards is not None and (
+        not sync_cards
+        or not set(sync_cards).issubset(formal.CARD_NAMES_ZH)
+        or selected
+        or cards
+        or metadata_only
+        or metadata_cards is not None
+        or selected_resets
+        or not update_hits
+    ):
+        raise ValueError("请选择需要上传全部修改的有效卡牌")
     with workflow._locked(root):
         selected_identifiers = None
-        if metadata_only:
+        if metadata_only or sync_cards is not None:
             from crX.utils.card_catalog import build_catalog
 
             # Freeze labels/order for newly included references before taking the
@@ -484,16 +538,19 @@ def upload_references(
                 selected_identifiers = {ref.identifier for card in metadata_cards for ref in catalog.get(card, ())}
                 if not selected_identifiers:
                     raise ValueError("所选卡牌没有可上传的参考")
+            if sync_cards is not None:
+                selected_identifiers = {ref.identifier for card in sync_cards for ref in catalog.get(card, ())}
         samples = workflow._fresh(root, selected) if selected else []
         if (
             not metadata_only
+            and sync_cards is None
             and not samples
             and (not cards or len(cards) > formal.MAX_BATCH or not set(cards).issubset(formal.CARD_NAMES_ZH))
         ):
             raise ValueError("请选择需要上传的卡牌")
         entries = {entry["id"]: entry for entry in formal._read_entries(formal.formal_path())}
         chosen = {}
-        chosen_cards = set(cards or ())
+        chosen_cards = set(sync_cards or cards or ())
         for sample in samples:
             entry = entries.get(sample.review.get("formal_id"))
             if sample.status != "included" or entry is None or sample.card_id != entry["card_id"]:
@@ -502,6 +559,14 @@ def upload_references(
             chosen_cards.add(entry["card_id"])
         if cards:
             chosen.update({key: entry for key, entry in entries.items() if entry["card_id"] in cards})
+        deleted_ids = set()
+        if sync_cards is not None:
+            chosen.update({key: entry for key, entry in entries.items() if entry["card_id"] in sync_cards})
+            deleted_ids = {
+                entry["id"]
+                for entry in formal._read_entries(sample_file(root, "deleted-references.json"))
+                if entry["card_id"] in sync_cards and entry["id"] not in entries
+            }
         head = _text(repo, "rev-parse", "--verify", "HEAD")
         progress("正在检查远端分支……")
         remote, target, pending_push, base = _tracking(repo, head, update_hits=update_hits)
@@ -513,7 +578,7 @@ def upload_references(
             if pending_push and metadata_cards is not None:
                 _check_pending_metadata(repo, directory, upstream, base, set(metadata_cards), selected_identifiers)
             before = _base_entries(repo, directory, base)
-            merged = {entry["id"]: entry for entry in before}
+            merged = {entry["id"]: entry for entry in before if entry["id"] not in deleted_ids}
             merged.update(chosen)
             payloads = {}
             if list(merged.values()) != before:
@@ -561,6 +626,7 @@ def upload_references(
                     hits.acknowledge_upload(root, uploaded_stats)
                 if not metadata_only:
                     _archive_published(root, chosen, base)
+                _record_upload(root, deleted_ids)
                 if selected_resets:
                     return "所选线上清空记录已同步"
                 return "顺序与命中次数已同步，无需重复提交" if metadata_only else "所选正式参考已上传，无需重复提交"
@@ -585,6 +651,7 @@ def upload_references(
                 _archive_published(root, chosen, head)
             if detached:
                 _git(repo, "update-ref", _baseline_ref(remote, target), head)
+            _record_upload(root, deleted_ids)
         except (OSError, ValueError) as error:
             raise ValueError("远端已上传，本机来源样本清理未完成；刷新后可重试，正式参考保留") from error
         if details:

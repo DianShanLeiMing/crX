@@ -29,10 +29,18 @@ class CatalogReference:
     hits_changed: bool = False
     last_used: int = 0
     deletable: bool = False
+    deleted: bool = False
+    reference_changed: bool = False
+
+    @property
+    def changed(self):
+        return self.order_changed or self.hits_changed or self.reference_changed
 
     @property
     def markers(self):
-        return " new" if self.order_changed or self.hits_changed else ""
+        if self.deleted:
+            return " delete"
+        return " new" if self.changed else ""
 
     @property
     def display_name(self):
@@ -44,6 +52,8 @@ class CatalogReference:
 
     @property
     def status(self):
+        if self.deleted:
+            return "已删除，可还原"
         if self.builtin:
             return "内置正式参考"
         if self.uploaded:
@@ -65,7 +75,17 @@ def _catalog_references():
 
 
 def build_catalog(samples, *, root=None, completed_usage_only=False):
+    from crX.utils.card_upload import UploadReceipt, upload_receipt
+
+    receipt: UploadReceipt = upload_receipt(root) if root is not None else {"deleted": []}
     cards = {card: {ref.identifier: ref for ref in refs} for card, refs in _catalog_references().items()}
+    if root is not None:
+        from crX.utils.card_review import sample_file
+
+        for entry in formal._read_entries(sample_file(root, "deleted-references.json")):
+            card, identifier = entry["card_id"], entry["id"]
+            if identifier not in receipt["deleted"]:
+                cards[card].setdefault(identifier, CatalogReference(identifier, card, deleted=True))
     for sample in samples:
         reference = cards.get(sample.card_id, {}).get(sample.review.get("formal_id"))
         if reference is not None and sample.status in ("included", "covered"):
@@ -78,6 +98,11 @@ def build_catalog(samples, *, root=None, completed_usage_only=False):
     for references in cards.values():
         for reference in references.values():
             reference.uploaded |= reference.identifier in published or not formal.source_checkout()
+            reference.reference_changed = (
+                formal.source_checkout()
+                and not reference.builtin
+                and (reference.identifier in published if reference.deleted else reference.identifier not in published)
+            )
     cards = {card: list(references.values()) for card, references in cards.items()}
     hits, changed_hits = reference_hits.snapshot(root) if root is not None else ({}, set())
     usage = reference_hits.recent_usage(root, completed_only=completed_usage_only) if root is not None else {}
@@ -107,7 +132,9 @@ def build_catalog(samples, *, root=None, completed_usage_only=False):
             reference.order_changed = baseline is not None and (
                 positions[reference.identifier] != index
                 or reference.preferred != (old["preferred"] == reference.identifier)
+                or reference.number != old["numbers"][reference.identifier]
             )
+        references.sort(key=lambda ref: ref.deleted)
     return cards
 
 
@@ -116,7 +143,9 @@ def set_preferred_reference(root, card, identifier):
 
     with _locked(root):
         data = build_catalog(_scan(root), root=root)
-        return reference_preferences.set_preferred(card, identifier, data.get(card, []))
+        return reference_preferences.set_preferred(
+            card, identifier, [ref for ref in data.get(card, []) if not ref.deleted]
+        )
 
 
 def reorder_references(root, card, ordered, expected):
