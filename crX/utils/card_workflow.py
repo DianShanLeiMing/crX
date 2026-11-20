@@ -301,7 +301,11 @@ def _delete_processed_samples(root, samples, entries):
         identifier = sample.review.get("formal_id", "")
         valid_reference = (identifier, sample.card_id) in references
         covered = sample.review.get("work_result") == "covered" and sample.card_id in CARD_NAMES_ZH
-        if (valid_reference and (sample.uploaded or covered)) or (covered and identifier == ""):
+        if (
+            (valid_reference and (sample.uploaded or covered))
+            or (covered and identifier == "")
+            or (sample.status == "ignored" and sample.review.get("pending_deletion") is True)
+        ):
             keys.add(sample.key)
     return local.clear_filtered_samples(root, keys)
 
@@ -556,6 +560,42 @@ def delete_samples(root, selected):
     with _locked(root):
         samples = _fresh(root, selected)
         return local.clear_filtered_samples(root, {sample.key for sample in samples})
+
+
+def delete_formal_references(root, card_id, identifiers):
+    """Remove selected supplemental fingerprints and clean up their local sources."""
+    requested = set(identifiers)
+    if not requested or card_id not in CARD_NAMES_ZH:
+        raise ValueError("请选择要删除的正式参考")
+    if not formal.source_checkout():
+        raise ValueError("删除参考需要可写的源码项目")
+    with _locked(root):
+        entries = formal._read_entries(formal.formal_path())
+        builtin = {formal._signature(card, value) for card, value, _ in _references([]) if card == card_id}
+        available = {entry["id"] for entry in entries if entry["card_id"] == card_id}
+        if not requested <= available - builtin:
+            raise ValueError("所选参考已变化或包含内置参考，请刷新后重新选择")
+        sources = [
+            sample
+            for sample in _scan(root)
+            if sample.card_id == card_id
+            and sample.status in ("included", "covered")
+            and sample.review.get("formal_id") in requested
+        ]
+        remaining = [entry for entry in entries if entry["id"] not in requested]
+        reason = "正式参考已删除，正在清理来源样本"
+        # Persist the cleanup intent in the same recoverable write as the library edit.
+        _commit(
+            root,
+            entries,
+            remaining,
+            [(sample, {**_result("ignored", card_id, reason), "pending_deletion": True}) for sample in sources],
+        )
+        try:
+            local.clear_filtered_samples(root, {sample.key for sample in sources})
+        except (OSError, ValueError) as error:
+            raise ValueError(f"正式参考已删除，来源样本清理未完成，可刷新后重试。{error}") from error
+        return f"已删除{CARD_NAMES_ZH[card_id]}的 {len(requested)} 份本机正式参考"
 
 
 def reference_details(root, sample):

@@ -299,6 +299,7 @@ def scan_samples(root: Path) -> tuple[list[ReviewSample], int]:
                     or not isinstance(review.get("published_commit", ""), str)
                     or len(review.get("published_commit", "")) > 128
                     or type(review.get("images_cleaned", False)) is not bool
+                    or type(review.get("pending_deletion", False)) is not bool
                 ):
                     raise ValueError("样本处理结果无效")
                 samples.append(ReviewSample(directory, name, record, review))

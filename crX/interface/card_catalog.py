@@ -143,6 +143,14 @@ class CardCatalogView(ttk.Frame):
         reference_horizontal.grid(row=1, column=0, sticky="ew")
         self.references.configure(xscrollcommand=reference_horizontal.set)
         gallery.grid(row=2, column=0, sticky="nsew", padx=(6, 0))
+        self.delete_button = ttk.Button(
+            right,
+            text="删除参考",
+            bootstyle="danger",
+            state="disabled",
+            command=lambda: action("delete_references"),
+        )
+        self.delete_button.grid(row=3, column=0, sticky="e", padx=6, pady=(8, 0))
         self.message = tk.StringVar()
         self._update_message()
         ttk.Label(self, textvariable=self.message, wraplength=680).grid(row=2, column=0, sticky="ew", pady=(6, 0))
@@ -238,6 +246,7 @@ class CardCatalogView(ttk.Frame):
                     (
                         ref.identifier,
                         ref.uploaded,
+                        ref.deletable,
                         ref.name,
                         ref.hits,
                         ref.order_changed,
@@ -459,6 +468,12 @@ class CardCatalogView(ttk.Frame):
     def selected_card_references(self):
         return tuple(ref.identifier for card in self.selected_cards() for ref in self.data[card])
 
+    def selected_deletable_references(self):
+        refs = tuple(self._references.get(key) for key in self.references.selection())
+        if any(ref is None or not ref.deletable for ref in refs):
+            return ()
+        return refs
+
     def set_disabled(self, disabled):
         self._disabled = disabled
         visible = {card for card in self.cards.get_children() if self.data[card]}
@@ -478,6 +493,9 @@ class CardCatalogView(ttk.Frame):
         checked = self.selected_card_references()
         self.upload_button.configure(state="disabled" if disabled or not checked else "normal")
         self.clear_button.configure(state="disabled" if disabled or not self.references.selection() else "normal")
+        self.delete_button.configure(
+            state="disabled" if disabled or not self.selected_deletable_references() else "normal"
+        )
         self.clear_cards_button.configure(state="disabled" if disabled or not checked else "normal")
         self.reset_cards_button.configure(state="disabled" if disabled or self._refreshing or not checked else "normal")
 

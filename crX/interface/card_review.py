@@ -32,6 +32,7 @@ from crX.utils.card_upload import update_from_remote, upload_references
 from crX.utils.card_workflow import (
     REVIEW_TABS,
     confirm_samples,
+    delete_formal_references,
     delete_samples,
     edit_formal_reference,
     reference_details,
@@ -793,7 +794,9 @@ class CardReviewTab(ttk.Frame):
             self._scan_busy = True
             history = self._history_pending and not self._running
             maintenance = not self._running and (
-                history or self._cleanup_pending or any(sample.uploaded for sample in self.samples.values())
+                history
+                or self._cleanup_pending
+                or any(sample.uploaded or sample.review.get("pending_deletion") for sample in self.samples.values())
             )
             self._maintenance_scan = maintenance
             if maintenance:
@@ -907,6 +910,8 @@ class CardReviewTab(ttk.Frame):
 
                 self._start_action(clear_hits, kind="clear_hits")
                 self.message_var.set("")
+        elif operation == "delete_references":
+            self._delete_catalog_references()
         elif operation == "upload":
             selected = view.selected_cards()
             if not selected:
@@ -927,6 +932,30 @@ class CardReviewTab(ttk.Frame):
             view.start_refresh("正在读取远端卡牌数据……")
             self._start_action(lambda: update_from_remote(root, reset_cards=cards), kind="reset_cards")
             self.message_var.set("")
+
+    def _delete_catalog_references(self):
+        view, root = self.library_view, self.root
+        refs = view.selected_deletable_references()
+        if not refs:
+            return
+        card = refs[0].card_id
+        identifiers = {ref.identifier for ref in refs}
+        names = "\n".join(f"{ref.name}（{ref.identifier}）" for ref in refs[:5])
+        if len(refs) > 5:
+            names += f"\n另有 {len(refs) - 5} 份"
+        if not messagebox.askyesno(
+            "删除正式参考",
+            f"删除{CARD_NAMES_ZH[card]}的 {len(refs)} 份正式参考？\n\n{names}\n\n"
+            "本机识别会停用这些参考，仍保留的来源截图、记录和标注也会删除。远端版本保留。",
+            parent=view.winfo_toplevel(),
+            default=messagebox.NO,
+        ):
+            return
+        if self._refresh_result is not None or identifiers != {
+            ref.identifier for ref in view.selected_deletable_references() if ref.card_id == card
+        }:
+            return
+        self._start_action(lambda: delete_formal_references(root, card, identifiers), clearing=True)
 
     def _reorder_catalog(self, card, ordered, expected):
         if self._running or self._action_busy:

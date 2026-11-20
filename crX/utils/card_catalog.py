@@ -28,6 +28,7 @@ class CatalogReference:
     order_changed: bool = False
     hits_changed: bool = False
     last_used: int = 0
+    deletable: bool = False
 
     @property
     def markers(self):
@@ -56,8 +57,10 @@ def _catalog_references():
         card = detection.CARD_DETECTION_ALIASES.get(name, name)
         identifier = formal._signature(card, value.tolist())
         cards.setdefault(card, {})[identifier] = CatalogReference(identifier, card, builtin=True, uploaded=True)
+    writable = formal.source_checkout()
     for entry in formal._read_entries(formal.formal_path()):
-        cards.setdefault(entry["card_id"], {}).setdefault(entry["id"], CatalogReference(entry["id"], entry["card_id"]))
+        card, identifier = entry["card_id"], entry["id"]
+        cards.setdefault(card, {}).setdefault(identifier, CatalogReference(identifier, card, deletable=writable))
     return {card: list(refs.values()) for card, refs in cards.items()}
 
 
