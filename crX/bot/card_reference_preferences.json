@@ -730,12 +730,18 @@
       "numbers": {
         "06253f8f156a9721": 0,
         "c8c82a5f98641eda": 1,
-        "f70a5ee1dca4e152": 2
+        "f70a5ee1dca4e152": 2,
+        "790bfa9a4ad1d3d6": 3,
+        "2fdeb4cf3d888cd2": 4,
+        "6f3f72d375f2ddf7": 5
       },
       "order": [
         "06253f8f156a9721",
         "c8c82a5f98641eda",
-        "f70a5ee1dca4e152"
+        "f70a5ee1dca4e152",
+        "790bfa9a4ad1d3d6",
+        "2fdeb4cf3d888cd2",
+        "6f3f72d375f2ddf7"
       ]
     },
     "golem": {
