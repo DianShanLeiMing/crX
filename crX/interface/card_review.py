@@ -69,6 +69,7 @@ class _UploadFooter(ttk.Frame):
         self.result = ""
         self.card_count = 0
         self.card_ids = ()
+        self.failed = False
         self.columnconfigure(0, weight=1)
         ttk.Label(self, textvariable=self.status).grid(row=0, column=0, sticky="w")
         self.details_button = ttk.Button(self, text="查看上传结果", bootstyle="secondary", command=self._show_result)
@@ -89,30 +90,8 @@ class _UploadFooter(ttk.Frame):
         self.progress.grid_remove()
         completed = f"上传完成 · 已上传 {self.card_count} 种卡牌" if self.card_count else "上传完成"
         self.status.set("上传失败" if failed else completed)
+        self.failed = failed
         self.result = str(result) if result else ""
-        if not failed and self.result:
-            names = sorted({CARD_NAMES_ZH.get(card, card) for card in self.card_ids}, key=len, reverse=True)
-            grouped = {}
-            other = []
-            for line in self.result.splitlines():
-                owner = next(
-                    (
-                        name
-                        for name in names
-                        if any(line.startswith(f"{verb}{name}") for verb in ("新增", "删除", "更新", "清空"))
-                    ),
-                    None,
-                )
-                if owner is None:
-                    other.append(line)
-                else:
-                    grouped.setdefault(owner, []).append(line)
-            sections = [
-                f"{name}\n" + "\n".join(f"  • {line}" for line in lines) for name, lines in sorted(grouped.items())
-            ]
-            if other:
-                sections.append("\n".join(other))
-            self.result = completed + "\n\n" + "\n\n".join(sections)
         if self.result:
             self.details_button.grid(row=0, column=1, sticky="e")
 
@@ -121,11 +100,81 @@ class _UploadFooter(ttk.Frame):
         window.title(self.status.get())
         window.transient(self.winfo_toplevel())
         colors = ttk.Style().colors
-        text = ScrolledText(window, width=60, height=14, wrap="word", bg=colors.inputbg, fg=colors.inputfg)
-        text.pack(fill="both", expand=True, padx=12, pady=12)
-        text.insert("1.0", self.result)
-        text.see("1.0")
-        text.configure(state="disabled")
+        if self.failed:
+            text = ScrolledText(window, width=60, height=14, wrap="word", bg=colors.inputbg, fg=colors.inputfg)
+            text.pack(fill="both", expand=True, padx=12, pady=12)
+            text.insert("1.0", self.result)
+            text.see("1.0")
+            text.configure(state="disabled")
+            return
+        window.minsize(660, 400)
+        window.geometry("860x520")
+        window.columnconfigure(0, weight=1)
+        window.rowconfigure(1, weight=1)
+        rows = _upload_result_rows(self.result)
+        counts = Counter(row[1] for row in rows if row[1] != "说明")
+        summary = " · ".join(f"{operation} {count} 项" for operation, count in counts.items())
+        ttk.Label(window, text=self.status.get() + ("\n" + summary if summary else "")).grid(
+            row=0, column=0, sticky="w", padx=12, pady=(12, 8)
+        )
+        table = ttk.Frame(window)
+        table.grid(row=1, column=0, sticky="nsew", padx=12)
+        table.columnconfigure(0, weight=1)
+        table.rowconfigure(0, weight=1)
+        tree = ttk.Treeview(table, columns=("card", "operation", "content"), show="headings", selectmode="browse")
+        for column, title, width in (("card", "卡牌", 140), ("operation", "操作", 100), ("content", "变更内容", 520)):
+            tree.heading(column, text=title, anchor="w")
+            tree.column(column, width=width, minwidth=80, stretch=column == "content", anchor="w")
+        tree.grid(row=0, column=0, sticky="nsew")
+        vertical = ttk.Scrollbar(table, orient="vertical", command=tree.yview)
+        vertical.grid(row=0, column=1, sticky="ns")
+        horizontal = ttk.Scrollbar(table, orient="horizontal", command=tree.xview)
+        horizontal.grid(row=1, column=0, sticky="ew")
+        tree.configure(yscrollcommand=vertical.set, xscrollcommand=horizontal.set)
+        for index, row in enumerate(rows):
+            tree.insert("", "end", iid=str(index), values=row[:3])
+        ttk.Label(window, text="完整明细").grid(row=2, column=0, sticky="w", padx=12, pady=(10, 4))
+        details = ScrolledText(window, height=5, wrap="word", bg=colors.inputbg, fg=colors.inputfg)
+        details.grid(row=3, column=0, sticky="ew", padx=12, pady=(0, 12))
+        details.configure(state="disabled")
+
+        def show_details(_event=None):
+            selected = tree.selection()
+            if selected:
+                details.configure(state="normal")
+                details.delete("1.0", "end")
+                details.insert("1.0", rows[int(selected[0])][3].replace("；", "\n"))
+                details.see("1.0")
+                details.configure(state="disabled")
+
+        tree.bind("<<TreeviewSelect>>", show_details)
+        if rows:
+            tree.selection_set("0")
+            tree.focus("0")
+            show_details()
+
+
+def _upload_result_rows(result):
+    names = sorted(set(CARD_NAMES_ZH.values()) | {"未知卡牌"}, key=len, reverse=True)
+    rows = []
+    for line in result.splitlines():
+        if not line.strip():
+            continue
+        verb, rest = line[:2], line[2:]
+        name = next((name for name in names if rest.startswith(name)), None)
+        if verb not in ("新增", "删除", "更新", "清空") or name is None:
+            rows.append(("—", "说明", line, line))
+            continue
+        content = rest[len(name) :]
+        operation = {"新增": "参考新增", "删除": "删除", "清空": "次数清空"}.get(verb)
+        if operation is None:
+            operation = "次数更新" if content.startswith("命中次数") else "顺序调整"
+        for prefix in ("参考顺序及编号配置", "参考样本", "线上命中次数", "命中次数"):
+            if content.startswith(prefix):
+                content = content.removeprefix(prefix)
+                break
+        rows.append((name, operation, content.strip("（）") or "已同步", line))
+    return sorted(rows, key=lambda row: row[0])
 
 
 def search_card_choices(choices: dict[str, str], query: str) -> list[str]:
