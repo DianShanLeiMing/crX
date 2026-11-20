@@ -133,9 +133,31 @@ def test_missing_game_does_not_modify_display(monkeypatch):
 
 def test_rotated_screenshot_is_rejected(monkeypatch):
     device = AdbController(Logger(), "127.0.0.1:16417")
+    elapsed = [0.0]
+    monkeypatch.setattr("crX.emulators.adb.time.monotonic", lambda: elapsed[0])
+    monkeypatch.setattr("crX.emulators.adb.time.sleep", lambda delay: elapsed.__setitem__(0, elapsed[0] + delay))
     monkeypatch.setattr(device, "screenshot_native", lambda: np.zeros((720, 1280, 3), dtype=np.uint8))
     with pytest.raises(EmulatorNotReadyError, match="720x1280"):
         device.verify_screen()
+    assert elapsed[0] == 10
+    evidence = device.logger.failure_frame
+    assert evidence is not None
+    assert evidence["details"]["actual_shape"] == [720, 1280, 3]
+
+
+def test_startup_geometry_waits_for_portrait_without_relaunching(monkeypatch):
+    device = AdbController(Logger(), "127.0.0.1:16417")
+    frames = iter([np.zeros((720, 1280, 3), dtype=np.uint8), np.zeros((1280, 720, 3), dtype=np.uint8)])
+    monkeypatch.setattr(device, "screenshot_native", lambda: next(frames))
+    monkeypatch.setattr("crX.emulators.adb.time.sleep", lambda _: None)
+    commands = []
+    monkeypatch.setattr(
+        device,
+        "adb",
+        lambda command: commands.append(command) or subprocess.CompletedProcess(command, 0, "Override density: 320"),
+    )
+    device.verify_screen()
+    assert commands == [["shell", "wm", "density"]]
 
 
 def test_mumu_waits_for_adb_after_android_ready_and_rechecks_port(monkeypatch):

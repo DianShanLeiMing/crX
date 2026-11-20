@@ -37,6 +37,27 @@ def image(name):
     return native_replay(cv2.imread(str(FIXTURES / name)))
 
 
+@pytest.mark.parametrize("entry", ["startup", "post_battle"])
+def test_captured_main_menu_returns_without_wait_diagnostic_or_click(clock, entry):
+    frame = image("failure-main-native-20261120.png")
+    assert is_clash_main_menu_image(frame)
+    screen = RewardSequence(clock, [(frame, None)])
+    logger = Logger()
+    reports = []
+    logger.navigation_stall_handler = lambda *args, **kwargs: reports.append(kwargs)
+    navigate = nav.wait_for_clash_main_menu if entry == "startup" else nav.get_to_main_after_fight
+    assert navigate(screen, logger, timeout=10)
+    assert not reports and not screen.clicks
+
+
+@pytest.mark.parametrize("region", [(230, 920, 490, 1080), (636, 90, 704, 182), (300, 1150, 420, 1280)])
+def test_captured_main_requires_every_native_anchor(region):
+    frame = image("failure-main-native-20261120.png")
+    x1, y1, x2, y2 = region
+    frame[y1:y2, x1:x2] = 0
+    assert not is_clash_main_menu_image(frame)
+
+
 @pytest.fixture
 def clock(monkeypatch):
     elapsed = [0.0]
