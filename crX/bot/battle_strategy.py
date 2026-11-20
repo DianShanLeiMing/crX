@@ -3,10 +3,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import dist
 from typing import TYPE_CHECKING, Literal
 
-from crX.bot.card_data import CIRCULAR_SPELL_PROFILES, PLAY_COORDS, TOWER_FINISH_SPELLS, UNRESTRICTED_SPELLS
-from crX.bot.coords import DEFENSE_LANE_POINTS, ENEMY_PRINCESS_AIM_POINTS, ENEMY_UNIT_RIVER_Y_RANGE
+from crX.bot.card_data import (
+    CIRCULAR_SPELL_PROFILES,
+    DEFENSE_FOLLOW_UP_CARDS,
+    PLAY_COORDS,
+    TOWER_FINISH_SPELLS,
+    UNRESTRICTED_SPELLS,
+)
+from crX.bot.coords import (
+    DEFENSE_LANE_POINTS,
+    DEFENSE_SUPPORT_LANE_POINTS,
+    ENEMY_PRINCESS_AIM_POINTS,
+    ENEMY_UNIT_RIVER_Y_RANGE,
+)
 from crX.bot.spell_targeting import find_circular_spell_target, low_princess_tower_target
 
 if TYPE_CHECKING:
@@ -20,6 +32,11 @@ type PlayPurpose = Literal["defend", "finish", "clear", "advance"]
 
 ADVANCE_ELIXIR = 7
 NEAR_FULL_ELIXIR = 9
+# In the paired live logs, the HUD sometimes took nearly 0.8 s to show the debit.
+ELIXIR_SETTLE_S = 0.85
+DEFENSE_FOLLOW_UP_S = 1.5
+DEFENSE_FOLLOW_UP_RADIUS_PX = 96
+DEFENSE_SUPPORT_SPACING_PX = 64
 
 SPELL_PLACEMENT_GROUPS = frozenset(
     {
@@ -101,6 +118,30 @@ class PlayOption:
         )
 
 
+@dataclass(slots=True)
+class BattlePlayState:
+    """Track the short period before a sent play is reflected in the HUD."""
+
+    elixir_remaining: int = 0
+    elixir_settles_at: float = 0.0
+    defender: Point | None = None
+    defender_until: float = 0.0
+
+    def elixir_limit(self, now: float) -> int | None:
+        return self.elixir_remaining if now < self.elixir_settles_at else None
+
+    def recent_defender(self, now: float) -> Point | None:
+        return self.defender if now < self.defender_until else None
+
+    def record_play(self, play: PlayOption, available_elixir: int, now: float) -> None:
+        cost = play.card.cost
+        self.elixir_remaining = max(0, available_elixir - (cost if cost is not None else available_elixir))
+        self.elixir_settles_at = now + ELIXIR_SETTLE_S
+        if play.purpose == "defend" and not play.card.is_spell:
+            self.defender = play.point
+            self.defender_until = now + DEFENSE_FOLLOW_UP_S
+
+
 def unit_pressure(unit: EnemyUnitLocation) -> int:
     if unit.zone == "enemy_half":
         return 0
@@ -130,6 +171,7 @@ def rank_hand_plays(
     elixir: int,
     *,
     stable_positions: frozenset[Point] | None = None,
+    recent_defender: Point | None = None,
 ) -> list[PlayOption]:
     """Return feasible options; absent stability evidence allows a preview for later revalidation."""
     threat_weights = {unit.position: unit_pressure(unit) for unit in snapshot.units}
@@ -187,6 +229,18 @@ def rank_hand_plays(
                 point = _placement_for_lane(card, lane)
             else:
                 point = min(DEFENSE_LANE_POINTS[lane], key=lambda option: abs(option[1] - urgent.position[1]))
+                if (
+                    recent_defender is not None
+                    and base_id in DEFENSE_FOLLOW_UP_CARDS
+                    and dist(point, recent_defender) < DEFENSE_FOLLOW_UP_RADIUS_PX
+                ):
+                    point = min(
+                        DEFENSE_SUPPORT_LANE_POINTS[lane],
+                        key=lambda option: (
+                            dist(option, recent_defender) < DEFENSE_SUPPORT_SPACING_PX,
+                            abs(option[1] - urgent.position[1]),
+                        ),
+                    )
             if point is not None:
                 pressure = threat_weights[urgent.position]
                 options.append(

@@ -6,7 +6,14 @@ import time
 from collections.abc import Callable
 from typing import Literal
 
-from crX.bot.battle_strategy import ADVANCE_ELIXIR, PURPOSE_LABELS, HandCard, rank_hand_plays
+from crX.bot.battle_strategy import (
+    ADVANCE_ELIXIR,
+    PURPOSE_LABELS,
+    BattlePlayState,
+    HandCard,
+    PlayOption,
+    rank_hand_plays,
+)
 from crX.bot.card_data import CIRCULAR_SPELL_PROFILES, get_card_display_name, get_card_elixir_cost
 from crX.bot.card_detection import (
     check_which_cards_are_available,
@@ -201,18 +208,23 @@ def play_random_available_card(
     *,
     enemy_monitor: EnemyUnitMonitor | None = None,
     decision_frame=None,
+    play_state: BattlePlayState | None = None,
 ) -> bool:
     """Use battle priorities, with random choice among equivalent hand slots."""
-    play = _pick_card_play(emulator, logger, elapsed_s, enemy_monitor, decision_frame=decision_frame)
-    if play is None:
+    decision = _pick_card_play(
+        emulator, logger, elapsed_s, enemy_monitor, decision_frame=decision_frame, play_state=play_state
+    )
+    if decision is None:
         return False
-    card_index, play_coord = play
-    _tap_card_and_target(emulator, card_index, play_coord, wait_between=True)
+    play, elixir = decision
+    _tap_card_and_target(emulator, play.card.slot, play.point, wait_between=True)
+    if play_state is not None:
+        play_state.record_play(play, elixir, time.monotonic())
     time.sleep(0.1)
-    _remember_played_slot(card_index)
+    _remember_played_slot(play.card.slot)
 
     if recording_flag:
-        log_play(card_index, play_coord[0], play_coord[1], elapsed_s)
+        log_play(play.card.slot, *play.point, elapsed_s)
     logger.add_card_played()
     return True
 
@@ -228,6 +240,7 @@ def wait_for_elixir(
     tower_monitor: TowerHealthMonitor | None = None,
     enemy_monitor: EnemyUnitMonitor | None = None,
     on_decision_frame=None,
+    play_state: BattlePlayState | None = None,
 ) -> Literal["restart", "no battle"] | bool:
     """Wait for a playable battle frame, sharing it across the HUD checks."""
     start_time = time.monotonic()
@@ -259,7 +272,10 @@ def wait_for_elixir(
             enemy_monitor.observe(image, force=on_decision_frame is not None)
 
         wait_time = now - start_time
-        if image_has_elixir(image, elixir_wait_amount):
+        limit = play_state.elixir_limit(now) if play_state is not None else None
+        if limit == 0:
+            continue
+        if (limit is None or limit >= elixir_wait_amount) and image_has_elixir(image, elixir_wait_amount):
             logger.change_status(f"耗时 {wait_time:.2f} 秒，已等到 {elixir_wait_amount} 点圣水。")
             break
 
@@ -283,7 +299,7 @@ def wait_for_elixir(
             last_logged_second = elapsed_second
 
         card_indices = check_which_cards_are_available(emulator, frame=image)
-        if image_has_hero_champion_ability(image):
+        if limit is None and image_has_hero_champion_ability(image):
             if ability_available_since is None:
                 ability_available_since = now
                 logger.change_status(
@@ -412,7 +428,8 @@ def _pick_card_play(
     enemy_monitor: EnemyUnitMonitor | None,
     *,
     decision_frame=None,
-) -> tuple[int, tuple[int, int]] | None:
+    play_state: BattlePlayState | None = None,
+) -> tuple[PlayOption, int] | None:
     if enemy_monitor is None:
         enemy_monitor = EnemyUnitMonitor(logger)
 
@@ -443,8 +460,27 @@ def _pick_card_play(
     snapshot = enemy_monitor.snapshot
     if snapshot is None:
         return None
-    elixir = read_battle_elixir(frame)
-    options = rank_hand_plays(hand, snapshot, read_enemy_princess_bars(frame), elixir)
+
+    def rank(frame, hand, snapshot, *, stable_positions=None):
+        elixir = read_battle_elixir(frame)
+        defender = None
+        if play_state is not None:
+            now = time.monotonic()
+            limit = play_state.elixir_limit(now)
+            if limit is not None:
+                elixir = min(elixir, limit)
+                hand = [card for card in hand if card.cost is not None]
+            defender = play_state.recent_defender(now)
+        return rank_hand_plays(
+            hand,
+            snapshot,
+            read_enemy_princess_bars(frame),
+            elixir,
+            stable_positions=stable_positions,
+            recent_defender=defender,
+        ), elixir
+
+    options, elixir = rank(frame, hand, snapshot)
     if not options:
         return None
 
@@ -478,8 +514,7 @@ def _pick_card_play(
             tuple(unit.position for unit in snapshot.units),
             fresh.sampled_at - snapshot.sampled_at,
         )
-        elixir = read_battle_elixir(fresh_frame)
-        options = rank_hand_plays(hand, fresh, read_enemy_princess_bars(fresh_frame), elixir, stable_positions=stable)
+        options, elixir = rank(fresh_frame, hand, fresh, stable_positions=stable)
         if not options:
             logger.change_status("本次法术已跳过：复核后没有合适的出牌方案")
             return None
@@ -494,7 +529,7 @@ def _pick_card_play(
     logger.change_status(
         f"已计算卡牌 {get_card_display_name(play.card.card_id)} 的出牌位置 {play.point} | {note} | {cost}"
     )
-    return play.card.slot, play.point
+    return play, elixir
 
 
 def play_a_card(
@@ -506,20 +541,28 @@ def play_a_card(
     use_emotes: bool = False,
     enemy_monitor: EnemyUnitMonitor | None = None,
     decision_frame=None,
+    play_state: BattlePlayState | None = None,
 ) -> bool:
-    play = _pick_card_play(
-        emulator, logger, battle_strategy.get_elapsed_time(), enemy_monitor, decision_frame=decision_frame
+    decision = _pick_card_play(
+        emulator,
+        logger,
+        battle_strategy.get_elapsed_time(),
+        enemy_monitor,
+        decision_frame=decision_frame,
+        play_state=play_state,
     )
-    if play is None:
+    if decision is None:
         return False
-    card_index, play_coord = play
+    play, elixir = decision
 
     click_and_play_card_start_time = time.perf_counter()
-    _tap_card_and_target(emulator, card_index, play_coord)
-    _remember_played_slot(card_index)
+    _tap_card_and_target(emulator, play.card.slot, play.point)
+    if play_state is not None:
+        play_state.record_play(play, elixir, time.monotonic())
+    _remember_played_slot(play.card.slot)
     click_and_play_card_time_taken = time.perf_counter() - click_and_play_card_start_time
     if recording_flag:
-        log_play(card_index, play_coord[0], play_coord[1], battle_strategy.get_elapsed_time())
+        log_play(play.card.slot, *play.point, battle_strategy.get_elapsed_time())
 
     logger.change_status(f"已完成出牌，耗时 {click_and_play_card_time_taken:.3f} 秒")
     logger.add_card_played()
@@ -604,6 +647,7 @@ def _fight_loop(
     is_1v1 = fight_mode in ("Classic 1v1", "Trophy Road")
     tower_monitor = TowerHealthMonitor(logger) if is_1v1 else None
     enemy_monitor = EnemyUnitMonitor(logger)
+    play_state = BattlePlayState()
 
     decision_frame = None
 
@@ -632,6 +676,7 @@ def _fight_loop(
             tower_monitor=tower_monitor,
             enemy_monitor=enemy_monitor,
             on_decision_frame=remember_decision_frame,
+            play_state=play_state,
         )
 
         if wait_output == "restart":
@@ -651,6 +696,7 @@ def _fight_loop(
                 battle_strategy.get_elapsed_time(),
                 enemy_monitor=enemy_monitor,
                 decision_frame=decision_frame,
+                play_state=play_state,
             )
             if played:
                 _maybe_send_emote(emulator, logger, use_emotes)
@@ -663,6 +709,7 @@ def _fight_loop(
                 use_emotes=use_emotes,
                 enemy_monitor=enemy_monitor,
                 decision_frame=decision_frame,
+                play_state=play_state,
             )
         if not played:
             logger.change_status("暂缓出牌，继续观察战场……")

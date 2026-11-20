@@ -323,6 +323,10 @@ def get_card_elixir_cost(card_id: str) -> int | None:
     return CARD_ELIXIR_COSTS.get(card_id) or CARD_ELIXIR_COSTS.get(card_id.removeprefix("evo_"))
 
 
+# These support cards can deploy inboard behind a recent defender.
+DEFENSE_FOLLOW_UP_CARDS = frozenset({"electro_wizard", "hero_electro_wizard", "furnace"})
+
+
 # Placement profiles: where on screen to tap (left/right), not card role in battle.
 # Shared arena zones use zone_* keys; card-named keys stay when only that card (or its evo) uses the region.
 # CARD_GROUPS maps card ids → key below (see #674 for full id list including pre-fingerprint evo/hero).

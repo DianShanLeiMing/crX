@@ -3,8 +3,8 @@
 from unittest.mock import Mock
 
 from crX.bot import fight
-from crX.bot.battle_strategy import HandCard, rank_hand_plays
-from crX.bot.coords import DEFENSE_LANE_POINTS
+from crX.bot.battle_strategy import BattlePlayState, HandCard, rank_hand_plays
+from crX.bot.coords import DEFENSE_LANE_POINTS, DEFENSE_SUPPORT_LANE_POINTS
 from crX.bot.enemy_detect import EnemyUnitLocation, EnemyUnitMonitor, EnemyUnitSnapshot
 from crX.bot.state_detect import ELIXIR_COLOR, ELIXIR_COORDS, read_battle_elixir
 from tests.test_enemy_detect import RED, battle_frame, draw_badge, mock_decision_hand
@@ -55,6 +55,49 @@ def test_defensive_troop_uses_the_deeper_threat_lane_without_advance_reserve():
     )
     assert rank_hand_plays((knight,), snapshot, FULL_TOWERS, 2) == []
     assert rank_hand_plays((knight,), snapshot, FULL_TOWERS, 3)[0].point == DEFENSE_LANE_POINTS[1][-1]
+
+
+def test_follow_up_support_uses_a_separate_point_on_the_threatened_lane():
+    unit = EnemyUnitLocation((146, 638), "left", "friendly_half")
+    snapshot = EnemyUnitSnapshot(10.0, (unit,))
+    guard = HandCard(0, "knight", "bridge_line", 3, (198, 672))
+    wizard = HandCard(1, "electro_wizard", "back_support", 4, (118, 894))
+    furnace = HandCard(2, "furnace", "back_support", 4, (118, 894))
+    first = rank_hand_plays((guard,), snapshot, FULL_TOWERS, 7)[0]
+    state = BattlePlayState()
+    state.record_play(first, 7, 10.0)
+    support = rank_hand_plays((wizard, furnace), snapshot, FULL_TOWERS, 4, recent_defender=state.recent_defender(10.4))
+    assert len(support) == 2
+    assert all(option.point in DEFENSE_SUPPORT_LANE_POINTS[0] for option in support)
+    opposite = rank_hand_plays((wizard,), snapshot, FULL_TOWERS, 4, recent_defender=DEFENSE_LANE_POINTS[1][0])
+    later = rank_hand_plays((wizard,), snapshot, FULL_TOWERS, 4, recent_defender=state.recent_defender(12.0))
+    assert opposite[0].point == later[0].point == first.point
+    follow_up = rank_hand_plays((furnace,), snapshot, FULL_TOWERS, 4, recent_defender=support[0].point)
+    assert follow_up[0].point != support[0].point
+
+
+def test_consecutive_defense_does_not_spend_elixir_still_visible_from_previous_play(monkeypatch):
+    image = battle_frame()
+    draw_badge(image, 180, 620, bar_color=RED)
+    mock_decision_hand(monkeypatch, image, slots=(0,), elixir=5)
+    cards = iter(("electro_wizard", "furnace", "furnace"))
+    monkeypatch.setattr(fight, "get_play_coords_for_card", lambda *_: (next(cards), (118, 894)))
+    emulator = Mock()
+    logger = Mock()
+    state = BattlePlayState()
+    now = 10.0
+    monkeypatch.setattr(fight.time, "monotonic", lambda: now)
+    strategy = fight.BattleStrategy()
+    assert fight.play_a_card(emulator, logger, False, strategy, decision_frame=image, play_state=state)
+    assert state.elixir_limit(now) == 1
+
+    now = 10.75
+    assert not fight.play_a_card(emulator, logger, False, strategy, decision_frame=image.copy(), play_state=state)
+    assert emulator.click.call_count == 2
+
+    now = 11.0
+    assert fight.play_a_card(emulator, logger, False, strategy, decision_frame=image.copy(), play_state=state)
+    assert emulator.click.call_args.args in DEFENSE_SUPPORT_LANE_POINTS[0]
 
 
 def test_over_river_threat_bypasses_routine_elixir_wait_and_reuses_the_frame():

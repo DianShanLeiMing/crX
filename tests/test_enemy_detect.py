@@ -289,7 +289,10 @@ def test_fast_capture_preserves_fireball_stability_without_delaying_zap(monkeypa
     monitor.observe(before)
     now += 0.05
 
-    assert fight._pick_card_play(emulator, logger, 0, monitor, decision_frame=before) == (0, (185, 638))
+    decision = fight._pick_card_play(emulator, logger, 0, monitor, decision_frame=before)
+    assert decision is not None
+    play, _ = decision
+    assert (play.card.slot, play.point) == (0, (185, 638))
     emulator.screenshot.assert_called_once_with()
     assert waits == (pytest.approx([expected_wait]) if expected_wait else [])
 
