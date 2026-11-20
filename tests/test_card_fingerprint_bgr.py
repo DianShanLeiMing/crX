@@ -77,3 +77,15 @@ def test_diagnostic_and_play_reuse_recognition_only_on_the_same_frame(monkeypatc
         assert cd.check_which_cards_are_available(None, frame=current) == [0]
         assert cd.identify_hand_cards(None, 0) == EXPECTED[0]
     assert extract.call_count == 2
+
+
+def test_golden_knight_live_fingerprint_does_not_match_prince():
+    # Held-out native frame from the match where this portrait matched Prince.
+    counts = (
+        (0, 0, 0, 1, 0, 59, 1, 0, 0, 26, 470, 0, 1, 9, 322, 2),
+        (0, 0, 0, 2, 3, 54, 0, 0, 0, 26, 499, 0, 0, 2, 304, 1),
+        (0, 0, 0, 3, 0, 143, 5, 0, 24, 122, 120, 0, 9, 16, 446, 3),
+        (0, 0, 0, 2, 0, 29, 3, 0, 43, 50, 528, 0, 6, 6, 219, 5),
+    )
+    fingerprint = [dict(zip(cd.COLORS_KEYS, corner, strict=True)) for corner in counts]
+    assert cd.recognize_card_fingerprint(fingerprint)["card_id"] == "golden_knight"

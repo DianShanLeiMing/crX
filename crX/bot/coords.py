@@ -97,6 +97,16 @@ HAND_CARDS_COORDS = [(224, 1136), (360, 1140), (484, 1136), (622, 1140)]
 # Native 720x1280 / 320 DPI hand artwork, with no screenshot or crop resizing.
 HAND_CARD_TOP_LEFTS = ((170, 1072), (304, 1072), (438, 1072), (572, 1072))
 HAND_CARD_SIZE = (108, 132)
+# The blue crown placeholder exposed when a play empties its hand slot.
+HAND_EMPTY_SLOT_SAMPLES = (
+    (15, 60, (154, 79, 7)),
+    (91, 60, (154, 78, 7)),
+    (54, 54, (127, 61, 11)),
+    (54, 67, (124, 58, 11)),
+    (54, 79, (104, 47, 7)),
+    (54, 85, (124, 60, 9)),
+    (54, 99, (136, 64, 5)),
+)
 HAND_DIAGNOSTIC_REGION = (140, 1050, 710, 1234)
 HAND_AVAILABLE_TOP_LEFTS = ((206, 1178), (338, 1180), (472, 1180), (608, 1178))
 # Outer panel edges are outside both first- and last-slot evolution glows.

@@ -3,8 +3,14 @@
 from unittest.mock import Mock
 
 from crX.bot import fight
-from crX.bot.battle_strategy import BattlePlayState, HandCard, rank_hand_plays
-from crX.bot.coords import DEFENSE_LANE_POINTS, DEFENSE_SUPPORT_LANE_POINTS
+from crX.bot.battle_strategy import BattlePlayState, HandCard, PlayOption, rank_hand_plays
+from crX.bot.card_data import get_card_elixir_cost
+from crX.bot.coords import (
+    DEFENSE_LANE_POINTS,
+    DEFENSE_SUPPORT_LANE_POINTS,
+    HAND_CARD_TOP_LEFTS,
+    HAND_EMPTY_SLOT_SAMPLES,
+)
 from crX.bot.enemy_detect import EnemyUnitLocation, EnemyUnitMonitor, EnemyUnitSnapshot
 from crX.bot.state_detect import ELIXIR_COLOR, ELIXIR_COORDS, read_battle_elixir
 from tests.test_enemy_detect import RED, battle_frame, draw_badge, mock_decision_hand
@@ -98,6 +104,53 @@ def test_consecutive_defense_does_not_spend_elixir_still_visible_from_previous_p
     now = 11.0
     assert fight.play_a_card(emulator, logger, False, strategy, decision_frame=image.copy(), play_state=state)
     assert emulator.click.call_args.args in DEFENSE_SUPPORT_LANE_POINTS[0]
+
+
+def test_defense_checks_the_verified_cost_and_holds_a_card_with_unknown_cost():
+    unit = EnemyUnitLocation((180, 620), "left", "friendly_half")
+    snapshot = EnemyUnitSnapshot(10.0, (unit,))
+    golden_knight = HandCard(0, "golden_knight", "bridge_line", get_card_elixir_cost("golden_knight"), (198, 672))
+    unknown = HandCard(1, "spirit_empress", "bridge_line", None, (198, 672))
+    assert rank_hand_plays((golden_knight, unknown), snapshot, FULL_TOWERS, 3) == []
+    assert [play.card for play in rank_hand_plays((golden_knight, unknown), snapshot, FULL_TOWERS, 4)] == [
+        golden_knight
+    ]
+
+
+def test_stale_elixir_or_unconfirmed_replacement_interrupts_settlement():
+    state = BattlePlayState()
+    state.record_play(PlayOption(HOG, (132, 568), "advance"), 7, 10.0)
+    assert not state.observe_settlement(3, "knight")
+    assert not state.observe_settlement(4, "knight")
+    assert not state.observe_settlement(0, "knight")
+    assert not state.observe_settlement(3, "knight")
+    assert not state.observe_settlement(3, HOG.card_id)
+    assert not state.observe_settlement(3, "knight")
+    assert state.elixir_limit(10.8) == 3
+    assert state.elixir_limit(10.9) is None
+
+
+def test_elixir_wait_releases_settled_budget_before_timeout_without_extra_capture(monkeypatch):
+    first, second, ready = (battle_frame() for _ in range(3))
+    left, top = HAND_CARD_TOP_LEFTS[HOG.slot]
+    for frame in (first, second):
+        for dx, dy, color in HAND_EMPTY_SLOT_SAMPLES:
+            frame[top + dy, left + dx] = color
+    y, x = ELIXIR_COORDS[0]
+    ready[y, x] = ELIXIR_COLOR
+    emulator = Mock()
+    emulator.screenshot.side_effect = [first, second, ready]
+    state = BattlePlayState()
+    state.record_play(PlayOption(HOG, (132, 568), "defend"), 4, 10.0)
+    intervals = iter([10.0, 10.2, 10.4, 10.6])
+    monkeypatch.setattr(fight.time, "monotonic", lambda: next(intervals))
+    monkeypatch.setattr(fight, "check_which_cards_are_available", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(fight, "switch_side", lambda: (0, "left"))
+    decisions = []
+
+    assert fight.wait_for_elixir(emulator, Mock(), 1, play_state=state, on_decision_frame=decisions.append)
+    assert decisions[0] is ready and emulator.screenshot.call_count == 3
+    assert state.elixir_limit(10.6) is None
 
 
 def test_over_river_threat_bypasses_routine_elixir_wait_and_reuses_the_frame():

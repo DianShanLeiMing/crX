@@ -21,6 +21,7 @@ from crX.bot.card_detection import (
     get_card_group,
     get_play_coords_for_card,
     image_has_hero_champion_ability,
+    read_hand_slot_for_settlement,
     switch_side,
     trigger_hero_champion_ability,
 )
@@ -252,6 +253,8 @@ def wait_for_elixir(
         image = emulator.screenshot()
         now = time.monotonic()
         if not image_is_in_battle(image):
+            if play_state is not None:
+                play_state.settlement_reading = None
             if image_is_battle_over(image):
                 logger.change_status("对战已结束，停止等待圣水")
                 return "no battle"
@@ -273,6 +276,13 @@ def wait_for_elixir(
 
         wait_time = now - start_time
         limit = play_state.elixir_limit(now) if play_state is not None else None
+        if play_state is not None and limit is not None and play_state.pending_card is not None:
+            observed = read_battle_elixir(image)
+            replacement = (
+                read_hand_slot_for_settlement(image, play_state.pending_card.slot) if observed == limit else None
+            )
+            if play_state.observe_settlement(observed, replacement):
+                limit = None
         if limit == 0:
             continue
         if (limit is None or limit >= elixir_wait_amount) and image_has_elixir(image, elixir_wait_amount):
@@ -469,7 +479,6 @@ def _pick_card_play(
             limit = play_state.elixir_limit(now)
             if limit is not None:
                 elixir = min(elixir, limit)
-                hand = [card for card in hand if card.cost is not None]
             defender = play_state.recent_defender(now)
         return rank_hand_plays(
             hand,

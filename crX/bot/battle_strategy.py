@@ -124,6 +124,8 @@ class BattlePlayState:
 
     elixir_remaining: int = 0
     elixir_settles_at: float = 0.0
+    pending_card: HandCard | None = None
+    settlement_reading: tuple[int, str] | None = None
     defender: Point | None = None
     defender_until: float = 0.0
 
@@ -137,9 +139,30 @@ class BattlePlayState:
         cost = play.card.cost
         self.elixir_remaining = max(0, available_elixir - (cost if cost is not None else available_elixir))
         self.elixir_settles_at = now + ELIXIR_SETTLE_S
+        self.pending_card = play.card
+        self.settlement_reading = None
         if play.purpose == "defend" and not play.card.is_spell:
             self.defender = play.point
             self.defender_until = now + DEFENSE_FOLLOW_UP_S
+
+    def observe_settlement(self, elixir: int, replacement: str | None) -> bool:
+        """Release the ceiling after two agreeing frames with a cleared or replaced slot."""
+        if (
+            self.pending_card is None
+            or replacement is None
+            or replacement == self.pending_card.card_id
+            or elixir != self.elixir_remaining
+        ):
+            self.settlement_reading = None
+            return False
+        reading = (elixir, replacement)
+        if reading != self.settlement_reading:
+            self.settlement_reading = reading
+            return False
+        self.elixir_settles_at = 0.0
+        self.pending_card = None
+        self.settlement_reading = None
+        return True
 
 
 def unit_pressure(unit: EnemyUnitLocation) -> int:
@@ -188,9 +211,9 @@ def rank_hand_plays(
     options = []
 
     for card in hand:
-        if elixir <= 0 or (card.cost is not None and card.cost > elixir):
+        if elixir <= 0 or card.cost is None or card.cost > elixir:
             continue
-        can_spend_on_offense = card.cost is not None and card.cost <= offensive_budget
+        can_spend_on_offense = card.cost <= offensive_budget
         base_id = card.card_id.removeprefix("evo_")
         pressure_card = base_id in PRESSURE_CARDS or card.group in PRESSURE_GROUPS
         if card.is_spell:

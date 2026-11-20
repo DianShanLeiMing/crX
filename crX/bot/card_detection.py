@@ -22,7 +22,7 @@ from crX.bot.coords import (
     LEGACY_SCREEN_SIZE,
     REFERENCE_SCREEN_SIZE,
 )
-from crX.bot.state_detect import image_has_elixir
+from crX.bot.state_detect import image_has_elixir, image_has_empty_hand_slot
 from crX.utils.card_library import runtime_entries
 from crX.utils.formal_library import _signature as reference_signature
 from crX.utils.formal_library import runtime_formal_entries
@@ -298,6 +298,17 @@ def _recognize_hand_slot(image, slot):
         fingerprint = extract_card_fingerprint(image, slot)
         _recognized_hand_slots[slot] = fingerprint, recognize_card_fingerprint(fingerprint)
     return _recognized_hand_slots[slot]
+
+
+def read_hand_slot_for_settlement(image, slot: int) -> str | None:
+    """Read a confident card ID or the explicit empty slot placeholder."""
+    if image_has_empty_hand_slot(image, slot):
+        return "empty"
+    _, recognition = _recognize_hand_slot(image, slot)
+    card = recognition["card_id"]
+    if card != "UNKNOWN" and recognition["candidate_margin"] >= DIAGNOSTIC_MIN_MARGIN:
+        return card
+    return None
 
 
 def image_has_hero_champion_ability(iar) -> bool:

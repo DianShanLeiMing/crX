@@ -728,10 +728,14 @@
     "golden_knight": {
       "preferred": "06253f8f156a9721",
       "numbers": {
-        "06253f8f156a9721": 0
+        "06253f8f156a9721": 0,
+        "c8c82a5f98641eda": 1,
+        "f70a5ee1dca4e152": 2
       },
       "order": [
-        "06253f8f156a9721"
+        "06253f8f156a9721",
+        "c8c82a5f98641eda",
+        "f70a5ee1dca4e152"
       ]
     },
     "golem": {

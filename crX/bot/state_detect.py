@@ -28,6 +28,8 @@ from crX.bot.coords import (
     ENEMY_PRINCESS_BAR_WIDTH,
     ENEMY_PRINCESS_RUINS_REGIONS_LTRB,
     GAME_SCREEN_SIZE,
+    HAND_CARD_TOP_LEFTS,
+    HAND_EMPTY_SLOT_SAMPLES,
     ITEM_DISTRIBUTION_COLLECT_ALL_SIZE,
     ITEM_DISTRIBUTION_INTRO_TITLE_REGION,
     ITEM_DISTRIBUTION_TITLE_REGION,
@@ -322,6 +324,13 @@ def image_has_elixir(image, elixir_count: int) -> bool:
         return False
     y, x = ELIXIR_COORDS[elixir_count - 1]
     return pixel_is_equal(image[y, x], ELIXIR_COLOR, tol=65)
+
+
+def image_has_empty_hand_slot(image, slot: int) -> bool:
+    if image is None or image.shape != (*GAME_SCREEN_SIZE[::-1], 3):
+        return False
+    left, top = HAND_CARD_TOP_LEFTS[slot]
+    return all(pixel_is_equal(image[top + dy, left + dx], color, tol=10) for dx, dy, color in HAND_EMPTY_SLOT_SAMPLES)
 
 
 def check_pixels_for_win_in_battle_log(emulator) -> bool:
