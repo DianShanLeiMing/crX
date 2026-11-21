@@ -54,6 +54,7 @@ from crX.bot.state_detect import (
 )
 from crX.bot.tower_health import TowerHealthMonitor
 from crX.interface.enums import BATTLE_MODE_LABELS
+from crX.utils.failure_samples import remember_failure_frame
 from crX.utils.logger import Logger
 from crX.utils.versioning import __version__
 
@@ -263,6 +264,13 @@ def wait_for_elixir(
                 logger.change_status("等待圣水时暂未检测到战斗画面，继续等待")
             elif now - battle_detection_lost_since >= BATTLE_DETECTION_LOSS_S:
                 logger.change_status("连续多次未检测到战斗画面，尚未确认结算，请求恢复")
+                remember_failure_frame(
+                    logger,
+                    image,
+                    reason="连续未检测到战斗画面且未确认结算",
+                    stage="battle_detection_lost",
+                    wait_s=round(now - battle_detection_lost_since, 2),
+                )
                 return "restart"
             ability_available_since = None
             time.sleep(0.5)

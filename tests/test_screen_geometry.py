@@ -159,6 +159,8 @@ def test_native_hand_availability_identities_and_full_elixir():
         "hand-360-glow-native.png",
         "hand-360-evo-glow-native.png",
         "hand-360-evo-right-glow-native.png",
+        "failure-battle-glow-native-20261114.png",
+        "failure-battle-resumed-native-20261114.png",
     ],
 )
 def test_hand_cooldown_and_card_glow_do_not_end_the_battle(filename):

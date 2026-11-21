@@ -63,6 +63,57 @@ def test_launch_scopes_selected_instance_and_queries_port(monkeypatch):
     assert connections == ["127.0.0.1:16417"]
 
 
+@pytest.mark.parametrize("boots", [True, False])
+def test_launch_timeout_observes_selected_instance_without_replaying_launch(monkeypatch, boots):
+    device = mumu.MuMuEmulatorController.__new__(mumu.MuMuEmulatorController)
+    device.manager_path = Path("MuMuManager.exe")
+    device.instance_index, device.adb_path, device.logger = "2", "adb", Logger()
+    clock = [0.0]
+    monkeypatch.setattr(mumu.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(mumu.time, "sleep", lambda seconds: clock.__setitem__(0, clock[0] + seconds))
+    monkeypatch.setattr(
+        device,
+        "_info",
+        lambda: {
+            "is_process_started": clock[0] > 0 and boots,
+            "is_android_started": clock[0] >= 32 and boots,
+            "adb_port": 16417,
+        },
+    )
+    commands, connections = [], []
+
+    def launch(args, **kwargs):
+        commands.append(args)
+        assert kwargs["timeout"] == 30
+        clock[0] += 30
+        raise subprocess.TimeoutExpired(args, 30)
+
+    monkeypatch.setattr(mumu, "run_manager", launch)
+    monkeypatch.setattr(mumu, "resolve_adb", lambda path: path)
+    monkeypatch.setattr(AdbController, "start", lambda self: connections.append(self.device_serial))
+    if boots:
+        device.start()
+        assert connections == ["127.0.0.1:16417"]
+        assert clock[0] == 32
+    else:
+        with pytest.raises(EmulatorNotReadyError, match="启动命令超时后") as caught:
+            device.start()
+        assert isinstance(caught.value.__cause__, subprocess.TimeoutExpired)
+        assert not connections and clock[0] == 120
+    assert commands == [["MuMuManager.exe", "control", "-v", "2", "launch"]]
+
+
+def test_launch_explicit_failure_is_not_treated_as_an_ambiguous_timeout(monkeypatch):
+    device = mumu.MuMuEmulatorController.__new__(mumu.MuMuEmulatorController)
+    device.manager_path = Path("MuMuManager.exe")
+    device.instance_index, device.logger = "2", Logger()
+    monkeypatch.setattr(device, "_info", lambda: {"is_process_started": False})
+    monkeypatch.setattr(mumu, "run_manager", lambda args, **kwargs: subprocess.CompletedProcess(args, 1, "", ""))
+    monkeypatch.setattr(mumu.time, "sleep", lambda _: pytest.fail("Explicit launch failure must stop immediately"))
+    with pytest.raises(EmulatorNotReadyError, match="无法启动"):
+        device.start()
+
+
 def test_adb_uses_argument_vector_with_timeout(monkeypatch):
     calls = []
     monkeypatch.setattr(

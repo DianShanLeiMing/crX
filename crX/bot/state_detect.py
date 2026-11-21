@@ -33,6 +33,7 @@ from crX.bot.coords import (
     ITEM_DISTRIBUTION_COLLECT_ALL_SIZE,
     ITEM_DISTRIBUTION_INTRO_TITLE_REGION,
     ITEM_DISTRIBUTION_TITLE_REGION,
+    LEAGUE_WELCOME_CLOSE_SIZE,
     MAIN_BATTLE_BUTTON_REGION,
     MAIN_BATTLE_TAB_REGION,
     MAIN_BURGER_BUTTON_REGION,
@@ -86,6 +87,14 @@ def is_bright_red_close_button(image, coord: tuple[int, int]) -> bool:
     pixels = image[y : y + height, x : x + width].astype(numpy.int16)
     blue, green, red = pixels[..., 0], pixels[..., 1], pixels[..., 2]
     return bool(numpy.mean((red > 150) & (red > green + 45) & (red > blue + 35)) > 0.25)
+
+
+def is_bright_blue_league_close(image, coord: tuple[int, int]) -> bool:
+    x, y = coord
+    width, height = LEAGUE_WELCOME_CLOSE_SIZE
+    pixels = image[y : y + height, x : x + width].astype(numpy.int16)
+    blue, green, red = pixels[..., 0], pixels[..., 1], pixels[..., 2]
+    return bool(numpy.mean((blue > 180) & (green > 100) & (blue > red + 60) & (blue > green + 30)) > 0.25)
 
 
 def check_if_in_battle(emulator):
