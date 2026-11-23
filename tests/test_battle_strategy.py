@@ -2,9 +2,12 @@
 
 from unittest.mock import Mock
 
+import pytest
+
 from crX.bot import fight
 from crX.bot.battle_strategy import BattlePlayState, HandCard, PlayOption, rank_hand_plays
 from crX.bot.card_data import get_card_elixir_cost
+from crX.bot.card_detection import get_card_group
 from crX.bot.coords import (
     DEFENSE_LANE_POINTS,
     DEFENSE_SUPPORT_LANE_POINTS,
@@ -77,7 +80,7 @@ def test_follow_up_support_uses_a_separate_point_on_the_threatened_lane():
     assert all(option.point in DEFENSE_SUPPORT_LANE_POINTS[0] for option in support)
     opposite = rank_hand_plays((wizard,), snapshot, FULL_TOWERS, 4, recent_defender=DEFENSE_LANE_POINTS[1][0])
     later = rank_hand_plays((wizard,), snapshot, FULL_TOWERS, 4, recent_defender=state.recent_defender(12.0))
-    assert opposite[0].point == later[0].point == first.point
+    assert opposite[0].point == later[0].point == DEFENSE_SUPPORT_LANE_POINTS[0][0]
     follow_up = rank_hand_plays((furnace,), snapshot, FULL_TOWERS, 4, recent_defender=support[0].point)
     assert follow_up[0].point != support[0].point
 
@@ -212,3 +215,178 @@ def test_live_spell_recheck_can_change_cards_and_recent_slots_cannot_override_de
     assert fight.play_a_card(emulator, logger, False, fight.BattleStrategy())
     emulator.screenshot.assert_called_once_with()
     assert emulator.click.call_args_list[0].args == fight.HAND_CARDS_COORDS[1]
+
+
+@pytest.mark.parametrize(
+    ("card_id", "starting_elixir", "required_elixir"),
+    [("ronin", 7, 8), ("witch", 7, 8), ("giant_skeleton", 7, 9), ("pekka", 7, 9), ("golem", 8, 10)],
+)
+def test_held_troops_can_save_for_a_push_without_spending_the_reserve(card_id, starting_elixir, required_elixir):
+    held = HandCard(0, card_id, get_card_group(card_id), get_card_elixir_cost(card_id), (198, 672))
+    state = BattlePlayState()
+    state.observe_hand((held, HOG))
+    state.record_play(PlayOption(HOG, (132, 568), "advance"), 7, 1.0)
+    snapshot = EnemyUnitSnapshot(10.0, ())
+
+    assert rank_hand_plays((held, HOG), snapshot, FULL_TOWERS, starting_elixir, play_state=state) == []
+    assert state.advance_elixir() == required_elixir
+    # Polling the same hand neither ages cards nor lets the cheaper play steal the budget.
+    assert rank_hand_plays((held, HOG), snapshot, FULL_TOWERS, starting_elixir, play_state=state) == []
+    options = rank_hand_plays((held, HOG), snapshot, FULL_TOWERS, required_elixir, play_state=state)
+    assert [option.card for option in options] == [held]
+    assert required_elixir - held.cost >= 2
+
+
+def test_hand_preferences_survive_unaffordable_frames_and_reset_on_replacement():
+    held = HandCard(0, "witch", "king_lane", 5, (120, 936))
+    replacement = HandCard(0, "knight", "bridge_line", 3, (198, 672))
+    state = BattlePlayState()
+    state.observe_hand((held, HOG))
+    for _ in range(5):
+        state.record_play(PlayOption(HOG, (132, 568), "advance"), 7, 1.0)
+        state.observe_hand((HOG,))
+    assert 0 < state.waiting_bonus(held) <= 3
+    snapshot = EnemyUnitSnapshot(10.0, ())
+    assert rank_hand_plays((held, HOG), snapshot, FULL_TOWERS, 7, play_state=state) == []
+    options = rank_hand_plays((replacement, HOG), snapshot, FULL_TOWERS, 7, play_state=state)
+    assert options and state.advance_target is None
+    assert state.waiting_bonus(replacement) == 0
+    assert len(state.hand_waits) == 2
+
+
+def test_new_threat_cancels_saving_and_allows_low_elixir_defense():
+    held = HandCard(0, "witch", "king_lane", 5, (120, 936))
+    knight = HandCard(1, "knight", "bridge_line", 3, (198, 672))
+    state = BattlePlayState()
+    state.observe_hand((held, knight))
+    state.record_play(PlayOption(knight, (198, 672), "advance"), 7, 1.0)
+    assert rank_hand_plays((held, knight), EnemyUnitSnapshot(10.0, ()), FULL_TOWERS, 7, play_state=state) == []
+    crossed = EnemyUnitLocation((180, 700), "left", "friendly_half")
+    options = rank_hand_plays((held, knight), EnemyUnitSnapshot(10.2, (crossed,)), FULL_TOWERS, 3, play_state=state)
+    assert options[0].card == knight and options[0].purpose == "defend"
+    assert state.advance_target is None
+
+
+@pytest.mark.parametrize("card_id", ["ronin", "witch", "giant_skeleton", "pekka"])
+def test_four_card_hand_does_not_keep_starving_the_costliest_troop(card_id):
+    ids = (card_id, "knight", "bandit", "hog")
+    hand = [
+        HandCard(i, card, get_card_group(card), get_card_elixir_cost(card), (198, 672)) for i, card in enumerate(ids)
+    ]
+    state = BattlePlayState()
+    for turn in range(4):
+        snapshot = EnemyUnitSnapshot(10 + turn, ())
+        elixir = 7
+        options = rank_hand_plays(hand, snapshot, FULL_TOWERS, elixir, play_state=state)
+        if not options:
+            elixir = state.advance_elixir()
+            options = rank_hand_plays(hand, snapshot, FULL_TOWERS, elixir, play_state=state)
+        chosen = max(options, key=lambda play: play.priority)
+        if chosen.card.card_id == card_id:
+            return
+        state.record_play(chosen, elixir, 10 + turn)
+    pytest.fail("The three cheaper slots kept the held troop out of every safe push")
+
+
+@pytest.mark.parametrize("card_id", ["musketeer", "archers", "witch", "evo_archers", "hero_ice_wizard", "furnace"])
+def test_support_placement_uses_the_shared_role_without_a_recent_defender(card_id):
+    support = HandCard(0, card_id, get_card_group(card_id), get_card_elixir_cost(card_id), (118, 894))
+    threat = EnemyUnitLocation((540, 620), "right", "friendly_half")
+    play = rank_hand_plays((support,), EnemyUnitSnapshot(10, (threat,)), FULL_TOWERS, 10)[0]
+    assert play.point in DEFENSE_SUPPORT_LANE_POINTS[1]
+    assert play.point[1] > threat.position[1]
+
+
+def test_defense_prefers_interception_then_complementary_support():
+    knight = HandCard(0, "knight", "bridge_line", 3, (198, 672))
+    support = HandCard(1, "archers", "back_support", 3, (118, 894))
+    threat = EnemyUnitLocation((180, 620), "left", "friendly_half")
+    options = rank_hand_plays((support, knight), EnemyUnitSnapshot(10, (threat,)), FULL_TOWERS, 7)
+    first = max(options, key=lambda option: option.priority)
+    assert first.card == knight
+    state = BattlePlayState()
+    state.record_play(first, 7, 10)
+    follow_up = rank_hand_plays((knight, support), EnemyUnitSnapshot(10.7, (threat,)), FULL_TOWERS, 4, play_state=state)
+    assert max(follow_up, key=lambda option: option.priority).card == support
+
+
+@pytest.mark.parametrize(
+    "units",
+    [
+        (EnemyUnitLocation((180, 680), "left", "friendly_half"),),
+        (EnemyUnitLocation((180, 850), "left", "friendly_half"),),
+        (EnemyUnitLocation((540, 620), "right", "friendly_half"),),
+        (
+            EnemyUnitLocation((180, 620), "left", "friendly_half"),
+            EnemyUnitLocation((210, 620), "left", "friendly_half"),
+        ),
+    ],
+)
+def test_defense_observation_yields_to_deeper_more_or_other_lane_threats(units):
+    knight = HandCard(0, "knight", "bridge_line", 3, (198, 672))
+    original = EnemyUnitLocation((180, 620), "left", "friendly_half")
+    first = rank_hand_plays((knight,), EnemyUnitSnapshot(10, (original,)), FULL_TOWERS, 7)[0]
+    state = BattlePlayState()
+    state.record_play(first, 7, 10)
+    assert rank_hand_plays((knight,), EnemyUnitSnapshot(10.3, (original,)), FULL_TOWERS, 4, play_state=state) == []
+    assert rank_hand_plays((knight,), EnemyUnitSnapshot(10.3, units), FULL_TOWERS, 4, play_state=state)
+    assert rank_hand_plays((knight,), EnemyUnitSnapshot(10.7, (original,)), FULL_TOWERS, 4, play_state=state)
+
+
+def test_observing_recent_defense_keeps_the_tower_finisher_available():
+    knight = HandCard(0, "knight", "bridge_line", 3, (198, 672))
+    threat = EnemyUnitLocation((180, 620), "left", "friendly_half")
+    first = rank_hand_plays((knight,), EnemyUnitSnapshot(10, (threat,)), FULL_TOWERS, 7)[0]
+    state = BattlePlayState()
+    state.record_play(first, 7, 10)
+    options = rank_hand_plays(
+        (ARROWS,), EnemyUnitSnapshot(10.3, (threat,)), ((2, True), (79, True)), 3, play_state=state
+    )
+    assert [option.purpose for option in options] == ["finish"]
+
+
+def test_waiting_push_preference_cannot_override_affordable_emergency_defense():
+    heavy = HandCard(0, "pekka", "bridge_line", 7, (198, 672))
+    knight = HandCard(1, "knight", "bridge_line", 3, (198, 672))
+    state = BattlePlayState()
+    state.observe_hand((heavy, knight))
+    for _ in range(3):
+        state.record_play(PlayOption(knight, (198, 672), "advance"), 7, 1.0)
+    threat = EnemyUnitLocation((180, 900), "left", "friendly_half")
+    options = rank_hand_plays((heavy, knight, ZAP), EnemyUnitSnapshot(10, (threat,)), FULL_TOWERS, 10, play_state=state)
+    assert max(options, key=lambda option: option.priority).card == ZAP
+
+
+@pytest.mark.parametrize("random_mode", [False, True])
+def test_both_fight_modes_wait_for_the_planned_budget_before_tapping(monkeypatch, random_mode):
+    frame = battle_frame()
+    mock_decision_hand(monkeypatch, frame, slots=(0, 1), elixir=7)
+    hand = (HandCard(0, "witch", "king_lane", 5, (120, 936)), HandCard(1, "hog", "bridge_rush", 4, (132, 568)))
+    monkeypatch.setattr(
+        fight, "get_play_coords_for_card", lambda _e, _l, slot, _t: (hand[slot].card_id, hand[slot].preset)
+    )
+    monkeypatch.setattr(fight, "create_default_bridge_iar", lambda _: None)
+    monkeypatch.setattr(fight, "stop_fight_capture", lambda: None)
+    now = 0.0
+    available_elixir = 7
+    amounts = []
+
+    def wait(_emulator, _logger, amount, *_args, **kwargs):
+        nonlocal now, available_elixir
+        amounts.append(amount)
+        if len(amounts) == 4:
+            return "no battle"
+        now += 1
+        available_elixir = amount
+        kwargs["on_decision_frame"](frame)
+        return True
+
+    monkeypatch.setattr(fight, "wait_for_elixir", wait)
+    monkeypatch.setattr(fight.time, "monotonic", lambda: now)
+    monkeypatch.setattr(fight, "read_battle_elixir", lambda _: available_elixir)
+    emulator, logger = Mock(), Mock()
+    logger.get_cards_played.return_value = 0
+    assert fight._fight_loop(emulator, logger, False, random_mode=random_mode)
+    assert amounts == [7, 7, 8, 7]
+    selected_slots = [call.args for call in emulator.click.call_args_list[::2]]
+    assert selected_slots == [fight.HAND_CARDS_COORDS[1], fight.HAND_CARDS_COORDS[0]]

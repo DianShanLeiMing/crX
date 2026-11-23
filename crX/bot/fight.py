@@ -473,21 +473,34 @@ def _pick_card_play(
 
     def rank(frame, hand, snapshot, *, stable_positions=None):
         elixir = read_battle_elixir(frame)
-        defender = None
+        previous_target = play_state.advance_target if play_state is not None else None
         if play_state is not None:
             now = time.monotonic()
             limit = play_state.elixir_limit(now)
             if limit is not None:
                 elixir = min(elixir, limit)
-            defender = play_state.recent_defender(now)
-        return rank_hand_plays(
+        options = rank_hand_plays(
             hand,
             snapshot,
             read_enemy_princess_bars(frame),
             elixir,
             stable_positions=stable_positions,
-            recent_defender=defender,
-        ), elixir
+            play_state=play_state,
+        )
+        if (
+            play_state is not None
+            and play_state.advance_target is not None
+            and (
+                previous_target is None
+                or (play_state.advance_target.slot, play_state.advance_target.card_id)
+                != (previous_target.slot, previous_target.card_id)
+            )
+        ):
+            logger.change_status(
+                f"推进存费：等待 {play_state.advance_elixir()} 点圣水后使用"
+                f"{get_card_display_name(play_state.advance_target.card_id)}（当前约 {elixir}）"
+            )
+        return options, elixir
 
     options, elixir = rank(frame, hand, snapshot)
     if not options:
@@ -534,6 +547,8 @@ def _pick_card_play(
         note += f"，实时落点，估算覆盖 {play.covered} 个标记"
     if play.tower_fill is not None:
         note += f"，血条约 {play.tower_fill / ENEMY_PRINCESS_BAR_WIDTH:.1%}"
+    if play.waiting_bonus:
+        note += f"，已等待至少 {play.waiting_bonus} 轮"
     cost = f"{play.card.cost} 费，剩余约 {elixir - play.card.cost}" if play.card.cost is not None else "费用未知"
     logger.change_status(
         f"已计算卡牌 {get_card_display_name(play.card.card_id)} 的出牌位置 {play.point} | {note} | {cost}"
@@ -678,7 +693,7 @@ def _fight_loop(
         wait_output = wait_for_elixir(
             emulator,
             logger,
-            ADVANCE_ELIXIR,
+            play_state.advance_elixir() if play_state.advance_target is not None else ADVANCE_ELIXIR,
             wait_threshold,
             play_threshold,
             recording_flag,

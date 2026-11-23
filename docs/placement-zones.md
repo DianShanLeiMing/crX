@@ -1,6 +1,22 @@
 # Card placement zones
 
-The bot picks a **play group** for each detected card, then taps a random point from that group’s left or right lane (`PLAY_COORDS` in `crX/bot/card_data.py`).
+The battle planner ranks recognized, affordable cards against visible enemy markers and tower bars.
+Routine pushes use the selected lane's `PLAY_COORDS` profile (a known lane uses its first point;
+otherwise the legacy activity-based preset is retained). Defensive melee units use lane interception
+points; ranged/spawning support uses the shared inboard support points.
+
+## 2026-11-23 通用战斗策略调整
+
+- 已识别手牌按槽位和卡牌身份记录被跳过的出牌轮次，换牌或出牌时重置；补偿最多三轮，
+  只参与常规推进评分，不提高法术或紧急防守的优先级，也不对某张卡单独加权。
+- 推进目标所需费用包含原有的 2/3 点防守预留；目标预算不足时先存费，最高只等到 10 费。
+  河道/己方半场出现已确认威胁时取消存费；出牌前仍要求同帧确认卡牌和费用。
+- `RANGED_SUPPORT_CARDS` 是通用站位属性，觉醒/精英变体继承本体；不代表识别了敌军兵种。
+  熔炉按移动支援单位处理。近战先拦截，近期已有同路拦截投入时优先考虑支援；
+  支援使用现有 `DEFENSE_SUPPORT_LANE_POINTS`，并尽量与上次部署错位。
+- 近战/支援落牌后，对压力未增加的同路威胁最多观察 0.6 秒；敌军进入深处危险区、同路总体压力增加或另一条路受压时
+  立即重新决策。近期部署记录不是单位仍然存活的证据；观察期间仍保留残血塔补刀候选。
+- 基线来自 22 局日志及 8 组原生前后帧；本次新规则的站位和胜率收益尚待实机验证。
 
 ## Reference map
 

@@ -325,8 +325,30 @@ def get_card_elixir_cost(card_id: str) -> int | None:
     return CARD_ELIXIR_COSTS.get(card_id) or CARD_ELIXIR_COSTS.get(card_id.removeprefix("evo_"))
 
 
-# These support cards can deploy inboard behind a recent defender.
-DEFENSE_FOLLOW_UP_CARDS = frozenset({"electro_wizard", "hero_electro_wizard", "furnace"})
+# Ranged/spawning support uses inboard defensive points rather than melee taps.
+# Evolution/Hero variants inherit the base card's placement role.
+RANGED_SUPPORT_CARDS = frozenset(
+    {
+        "archers",
+        "baby_dragon",
+        "bomber",
+        "bowler",
+        "dart_goblin",
+        "electro_dragon",
+        "electro_wizard",
+        "executioner",
+        "fire_cracker",
+        "flying_machine",
+        "furnace",
+        "ice_wizard",
+        "magic_archer",
+        "musketeer",
+        "princess",
+        "skeleton_dragons",
+        "witch",
+        "wizard",
+    }
+)
 
 
 # Placement profiles: where on screen to tap (left/right), not card role in battle.
@@ -654,7 +676,7 @@ CARD_ATTRIBUTES: dict[str, dict[str, str]] = {
     "elixir_collector": {"type": "Building", "subtype": "Economy / support"},  # 圣水收集器
     "barb_hut": {"type": "Building", "subtype": "Spawner defense"},  # 野蛮人小屋
     "goblin_hut": {"type": "Building", "subtype": "Spawner / pressure"},  # 哥布林小屋
-    "furnace": {"type": "Building", "subtype": "Chip pressure"},  # 烈焰熔炉
+    "furnace": {"type": "Troop", "subtype": "Ranged spawning support"},  # 烈焰熔炉
     "goblin_cage": {"type": "Building", "subtype": "Tank-lure defense"},  # 哥布林牢笼
     "knight": {"type": "Troop", "subtype": "Mini-tank / defense"},  # 骑士
     "barbarians": {"type": "Troop", "subtype": "Ground defense"},  # 野蛮人
