@@ -19,7 +19,12 @@ from crX.bot.coords import (
     POST_BATTLE_REWARD_TOP_REGION,
     START_FIGHT_BUTTON_COORD,
 )
-from crX.bot.find import find_collect_all_button, find_popup_close, is_startup_loading_screen
+from crX.bot.find import (
+    find_collect_all_button,
+    find_league_welcome_close,
+    find_popup_close,
+    is_startup_loading_screen,
+)
 from crX.bot.state_detect import (
     detect_post_battle_reward,
     is_clash_main_loading_image,
@@ -95,6 +100,8 @@ class RewardSequence:
             assert (x, y) == POST_BATTLE_REWARD_CONTINUE_COORD
         elif find_popup_close(self.last_frame) is not None:
             assert (x, y) == find_popup_close(self.last_frame)
+        elif find_league_welcome_close(self.last_frame) is not None:
+            assert (x, y) == find_league_welcome_close(self.last_frame)
         else:
             assert 274 < x < 602 and 1072 < y < 1254
         _, delay = self.scenes[self.index]
@@ -112,6 +119,58 @@ def test_recovery_dismisses_captured_native_result(clock):
     assert len(emulator.clicks) == 1
     _, x, y = emulator.clicks[0]
     assert 282 < x < 438 and 1090 < y < 1156
+
+
+@pytest.mark.parametrize("entry", ("startup", "post_battle", "before_match"))
+def test_captured_league_welcome_closes_without_starting_or_counting_a_match(clock, entry):
+    frame = image("failure-league-welcome-native-20261114.png")
+    assert find_league_welcome_close(frame) == (250, 1091)
+    screen = RewardSequence(clock, [(frame, None), (image("failure-main-recovered.png"), None)])
+    logger = Logger()
+    if entry == "startup":
+        result = nav.wait_for_clash_main_menu(screen, logger, timeout=10)
+    elif entry == "before_match":
+        result = nav.finish_pending_battle_rewards(screen, logger)
+    else:
+        result = nav.get_to_main_after_fight(screen, logger, timeout=10)
+    assert result
+    assert screen.clicks == [(0, 250, 1091)]
+    assert clock[0] - screen.entered >= nav.POST_BATTLE_MAIN_STABLE_S
+    assert logger.stats["completed_fights"] == logger.stats["wins"] == logger.stats["losses"] == 0
+
+
+def test_league_welcome_close_requires_title_label_and_bright_blue_fill():
+    original = image("failure-league-welcome-native-20261114.png")
+    missing_title, missing_close, yellow_close = (original.copy() for _ in range(3))
+    missing_title[560:740, 190:550] = 0
+    missing_close[1020:1150, 140:354] = 0
+    yellow_close[1020:1150, 140:354] = original[1020:1150, 140:354, ::-1]
+    for frame in (
+        None,
+        original[:700],
+        original[::2, ::2],
+        (original * 0.35).astype(np.uint8),
+        missing_title,
+        missing_close,
+        yellow_close,
+    ):
+        assert find_league_welcome_close(frame) is None
+    for path in FIXTURES.glob("*.png"):
+        if path.name != "failure-league-welcome-native-20261114.png":
+            assert find_league_welcome_close(image(path.name)) is None, path.name
+
+
+def test_league_welcome_close_waits_for_confirmation_and_stops_at_limit(clock):
+    frame = image("failure-league-welcome-native-20261114.png")
+    transient = RewardSequence(clock, [(frame, 0.5), (image("failure-main-recovered.png"), None)])
+    assert nav.get_to_main_after_fight(transient, Logger(), timeout=10)
+    assert not transient.clicks
+    stuck = RewardSequence(clock, [(frame, None)])
+    logger = Logger()
+    assert not nav.get_to_main_after_fight(stuck, logger, timeout=30)
+    assert stuck.clicks == [(0, 250, 1091)] * nav.POPUP_CLOSE_MAX_ACTIONS
+    assert logger.failure_frame is not None
+    assert logger.failure_frame["details"]["reason"] == "弹窗关闭操作达到上限"
 
 
 @pytest.mark.parametrize("stage", ["start", "restart"])

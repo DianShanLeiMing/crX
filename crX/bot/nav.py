@@ -36,6 +36,7 @@ from crX.bot.find import (
     find_collect_all_button,
     find_daily_shop_heading,
     find_fight_mode_icon,
+    find_league_welcome_close,
     find_popup_close,
     find_post_battle_button_in_image,
     find_shop_recommendations,
@@ -224,6 +225,7 @@ def wait_for_clash_main_menu(emulator, logger: Logger, deadspace_click=True, tim
             or detect_post_battle_reward(image) is not None
             or is_generic_post_battle_reward(image)
             or find_popup_close(image) is not None
+            or find_league_welcome_close(image) is not None
             or is_item_distribution_image(image)
         ):
             return get_to_main_after_fight(
@@ -645,7 +647,8 @@ def get_to_main_after_fight(
                 last_stage = "result"
                 time.sleep(1)
                 continue
-        close_coord = find_popup_close(image)
+        league_close = find_league_welcome_close(image)
+        close_coord = league_close or find_popup_close(image)
         if close_coord is not None:
             generic_since = None
             last_stage = "popup_close"
@@ -656,7 +659,8 @@ def get_to_main_after_fight(
                 time.sleep(0.5)
                 continue
             close_actions += 1
-            logger.change_status(f"正在关闭弹窗 X {close_coord}（{close_actions}/{POPUP_CLOSE_MAX_ACTIONS}）")
+            label = "联赛欢迎页" if league_close is not None else "弹窗 X"
+            logger.change_status(f"正在关闭{label} {close_coord}（{close_actions}/{POPUP_CLOSE_MAX_ACTIONS}）")
             emulator.click(*close_coord)
             actions += 1
             close_coord = None
@@ -731,6 +735,7 @@ def finish_pending_battle_rewards(emulator, logger) -> bool:
             or is_trophy_reward_image(image)
             or is_reward_choice_image(image)
             or find_popup_close(image) is not None
+            or find_league_welcome_close(image) is not None
         ):
             logger.change_status("开战前发现加载或残留奖励，先等待加载并完成领取")
             return get_to_main_after_fight(

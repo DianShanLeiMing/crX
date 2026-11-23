@@ -17,6 +17,9 @@ from crX.bot.coords import (
     GAME_SCREEN_SIZE,
     ITEM_DISTRIBUTION_COLLECT_ALL_REGION,
     ITEM_DISTRIBUTION_COLLECT_ALL_SIZE,
+    LEAGUE_WELCOME_CLOSE_REGION,
+    LEAGUE_WELCOME_CLOSE_SIZE,
+    LEAGUE_WELCOME_TITLE_REGION,
     OPPONENT_WINNER_LABEL_REGION,
     PLAYER_WINNER_LABEL_REGION,
     POPUP_CLOSE_BUTTON_SIZE,
@@ -34,7 +37,12 @@ from crX.bot.coords import (
     STARTUP_LOADING_LOGO_REGION,
     WECHAT_LOGIN_REGION,
 )
-from crX.bot.state_detect import is_bright_collect_all_button, is_bright_red_close_button, is_item_distribution_image
+from crX.bot.state_detect import (
+    is_bright_blue_league_close,
+    is_bright_collect_all_button,
+    is_bright_red_close_button,
+    is_item_distribution_image,
+)
 from crX.detection.image_rec import find_image, pixel_is_equal
 
 
@@ -316,6 +324,19 @@ def find_popup_close(image) -> tuple[int, int] | None:
     if coord is None or not is_bright_red_close_button(image, coord):
         return None
     width, height = POPUP_CLOSE_BUTTON_SIZE
+    return coord[0] + width // 2, coord[1] + height // 2
+
+
+def find_league_welcome_close(image) -> tuple[int, int] | None:
+    """Dismiss the captured league welcome page without tapping its battle button."""
+    if not _shop_image_is_valid(image):
+        return None
+    if find_image(image, "league_welcome_title", tolerance=0.94, subcrop=LEAGUE_WELCOME_TITLE_REGION) is None:
+        return None
+    coord = find_image(image, "league_welcome_close", tolerance=0.94, subcrop=LEAGUE_WELCOME_CLOSE_REGION)
+    if coord is None or not is_bright_blue_league_close(image, coord):
+        return None
+    width, height = LEAGUE_WELCOME_CLOSE_SIZE
     return coord[0] + width // 2, coord[1] + height // 2
 
 

@@ -185,11 +185,23 @@ class MuMuEmulatorController(AdbController):
 
     def start(self):
         info = self._info()
-        if not info.get("is_process_started"):
-            result = run_manager([str(self.manager_path), "control", "-v", self.instance_index, "launch"], timeout=30)
-            if result.returncode:
-                raise EmulatorNotReadyError("MuMu 无法启动所选实例")
         deadline = time.monotonic() + 120
+        launch_error = None
+        if not info.get("is_process_started"):
+            self.logger.change_status(f"正在启动 MuMu 实例 {self.instance_index}")
+            try:
+                result = run_manager(
+                    [str(self.manager_path), "control", "-v", self.instance_index, "launch"], timeout=30
+                )
+            except subprocess.TimeoutExpired as error:
+                # The manager may have launched Android before its CLI timed out.
+                # Observe the selected instance within the same boot deadline;
+                # never replay the launch command.
+                launch_error = error
+                self.logger.change_status("MuMu 启动命令超时，正在确认所选实例是否已启动")
+            else:
+                if result.returncode:
+                    raise EmulatorNotReadyError("MuMu 无法启动所选实例")
         connection_error = None
         while time.monotonic() < deadline:
             info = self._info()
@@ -210,4 +222,6 @@ class MuMuEmulatorController(AdbController):
             time.sleep(1)
         if connection_error is not None:
             raise EmulatorNotReadyError(f"MuMu 的 ADB 连接就绪超时（120 秒）：{connection_error}") from connection_error
+        if launch_error is not None:
+            raise EmulatorNotReadyError("MuMu 启动命令超时后，Android 系统仍未就绪（120 秒）") from launch_error
         raise EmulatorNotReadyError("MuMu 的 Android 系统启动超时（120 秒）")
