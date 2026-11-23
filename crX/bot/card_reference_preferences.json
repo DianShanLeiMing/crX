@@ -33,9 +33,9 @@
       },
       "order": [
         "e53c3427b48c04e6",
+        "294841031ae383de",
         "1a7b2c8980c5be3e",
-        "7c6124cc05659c7d",
-        "294841031ae383de"
+        "7c6124cc05659c7d"
       ]
     },
     "baby_dragon": {
@@ -65,16 +65,18 @@
         "576cbf087ee504f6": 3,
         "d3839b6f04e06d4c": 4,
         "b215ae25000fbed6": 5,
-        "bc21727ba7bc7f13": 6
+        "bc21727ba7bc7f13": 6,
+        "50dd278d6be1f5b7": 7
       },
       "order": [
         "9c5e1cd9e363ae4b",
-        "a13a956b60a66864",
-        "1f8940c382f2332b",
         "576cbf087ee504f6",
+        "1f8940c382f2332b",
+        "a13a956b60a66864",
         "d3839b6f04e06d4c",
         "b215ae25000fbed6",
-        "bc21727ba7bc7f13"
+        "bc21727ba7bc7f13",
+        "50dd278d6be1f5b7"
       ]
     },
     "barb_barrel": {
@@ -133,14 +135,16 @@
         "8c99ef347da29627": 1,
         "9959232d841fbca5": 2,
         "24603b0c59e5dbb9": 3,
-        "e143ff54ee46621e": 4
+        "e143ff54ee46621e": 4,
+        "06e7fe940b635eb5": 5
       },
       "order": [
         "2b10359500a76aab",
         "8c99ef347da29627",
         "9959232d841fbca5",
         "24603b0c59e5dbb9",
-        "e143ff54ee46621e"
+        "e143ff54ee46621e",
+        "06e7fe940b635eb5"
       ]
     },
     "berserker": {
@@ -277,13 +281,19 @@
         "8b34db4127cd7ca7": 0,
         "0465f6754505a067": 1,
         "c69b705014257a5c": 2,
-        "27f485eee1b5bbc6": 3
+        "27f485eee1b5bbc6": 3,
+        "fe4d8f14f8734690": 4,
+        "3362f0ecd7e5bb8e": 5,
+        "38ed02994f42a782": 6
       },
       "order": [
         "8b34db4127cd7ca7",
         "0465f6754505a067",
         "c69b705014257a5c",
-        "27f485eee1b5bbc6"
+        "27f485eee1b5bbc6",
+        "fe4d8f14f8734690",
+        "3362f0ecd7e5bb8e",
+        "38ed02994f42a782"
       ]
     },
     "elite_barbarians": {
@@ -354,12 +364,14 @@
       "numbers": {
         "6c693e72cbd5682f": 0,
         "316af643ab660c38": 1,
-        "0a5110e6cf1e5cc4": 2
+        "0a5110e6cf1e5cc4": 2,
+        "8afdb51aa78e60e8": 3
       },
       "order": [
         "6c693e72cbd5682f",
         "316af643ab660c38",
-        "0a5110e6cf1e5cc4"
+        "0a5110e6cf1e5cc4",
+        "8afdb51aa78e60e8"
       ]
     },
     "evo_bomber": {
@@ -555,11 +567,15 @@
       "preferred": "05d24b4229b31750",
       "numbers": {
         "05d24b4229b31750": 0,
-        "fc3b1875c2768888": 1
+        "fc3b1875c2768888": 1,
+        "b528dc7dbc5e3529": 2,
+        "ac834304fb3258d8": 3
       },
       "order": [
         "05d24b4229b31750",
-        "fc3b1875c2768888"
+        "fc3b1875c2768888",
+        "b528dc7dbc5e3529",
+        "ac834304fb3258d8"
       ]
     },
     "fisherman": {
@@ -598,16 +614,20 @@
         "527c6b66950bb5a2": 3,
         "9c29de18ba78d4ca": 4,
         "7add0bbda7727239": 5,
-        "f6ecdf1211d92ad7": 6
+        "f6ecdf1211d92ad7": 6,
+        "7c2e2f4073b5ba09": 7,
+        "3b928725038da79d": 8
       },
       "order": [
         "be0074d81ab6610f",
         "6f814f868453ecd1",
+        "527c6b66950bb5a2",
         "7add0bbda7727239",
         "00d8d21914c44c61",
-        "527c6b66950bb5a2",
         "9c29de18ba78d4ca",
-        "f6ecdf1211d92ad7"
+        "f6ecdf1211d92ad7",
+        "7c2e2f4073b5ba09",
+        "3b928725038da79d"
       ]
     },
     "giant": {
@@ -735,7 +755,15 @@
         "f70a5ee1dca4e152": 2,
         "790bfa9a4ad1d3d6": 3,
         "2fdeb4cf3d888cd2": 4,
-        "6f3f72d375f2ddf7": 5
+        "6f3f72d375f2ddf7": 5,
+        "db003151a7ba9fbf": 6,
+        "c90c1387593b3bf0": 7,
+        "2fd5a63eae1ec9e2": 8,
+        "7c9d381ee313d49e": 9,
+        "adcf8bcbad4fd127": 10,
+        "0c339cab03ba21d6": 11,
+        "7ecf6e571c537e90": 12,
+        "32a8e577228a6ee5": 13
       },
       "order": [
         "c8c82a5f98641eda",
@@ -743,7 +771,15 @@
         "f70a5ee1dca4e152",
         "790bfa9a4ad1d3d6",
         "2fdeb4cf3d888cd2",
-        "6f3f72d375f2ddf7"
+        "6f3f72d375f2ddf7",
+        "db003151a7ba9fbf",
+        "c90c1387593b3bf0",
+        "2fd5a63eae1ec9e2",
+        "7c9d381ee313d49e",
+        "adcf8bcbad4fd127",
+        "0c339cab03ba21d6",
+        "7ecf6e571c537e90",
+        "32a8e577228a6ee5"
       ]
     },
     "golem": {
@@ -807,10 +843,12 @@
     "hero_goblins": {
       "preferred": "4eeedbfce67a8167",
       "numbers": {
-        "4eeedbfce67a8167": 0
+        "4eeedbfce67a8167": 0,
+        "86fc08ce03b006ea": 1
       },
       "order": [
-        "4eeedbfce67a8167"
+        "4eeedbfce67a8167",
+        "86fc08ce03b006ea"
       ]
     },
     "hero_ice_golem": {
@@ -1065,11 +1103,13 @@
       "preferred": "5782803900226f49",
       "numbers": {
         "5782803900226f49": 0,
-        "4568c56e24e2a7a0": 1
+        "4568c56e24e2a7a0": 1,
+        "16e8c0aca95d1753": 2
       },
       "order": [
         "5782803900226f49",
-        "4568c56e24e2a7a0"
+        "4568c56e24e2a7a0",
+        "16e8c0aca95d1753"
       ]
     },
     "minion_giant": {
@@ -1178,11 +1218,7 @@
       },
       "order": [
         "e83fbb1d94114063",
-        "755ce3d9c6b433a5",
-        "6b2508cc44a2bb24",
-        "0908bb7d9106e14c",
-        "4b2dbc77bac62003",
-        "0ef2e8e7a7d3d616"
+        "755ce3d9c6b433a5"
       ]
     },
     "princess": {
@@ -1238,13 +1274,15 @@
         "9dae1af417a10230": 1,
         "dfe671841d03af1e": 2,
         "48118f5edc2799a6": 3,
-        "e47112a1a3c1602a": 4
+        "e47112a1a3c1602a": 4,
+        "5b57d5eb2a54b66e": 5
       },
       "order": [
         "9dae1af417a10230",
         "dfe671841d03af1e",
         "48118f5edc2799a6",
-        "e47112a1a3c1602a"
+        "e47112a1a3c1602a",
+        "5b57d5eb2a54b66e"
       ]
     },
     "royal_delivery": {
@@ -1264,15 +1302,19 @@
         "f30222a1442e1631": 2,
         "32e29f04815bb7b7": 3,
         "d61ca1e048744698": 4,
-        "497268f8d911ae23": 5
+        "497268f8d911ae23": 5,
+        "562920ea4c53f8e3": 6,
+        "8e399b201a204061": 7
       },
       "order": [
         "00534efabdef5e8b",
+        "32e29f04815bb7b7",
         "497150d0eda073b0",
         "f30222a1442e1631",
-        "32e29f04815bb7b7",
         "d61ca1e048744698",
-        "497268f8d911ae23"
+        "497268f8d911ae23",
+        "562920ea4c53f8e3",
+        "8e399b201a204061"
       ]
     },
     "royal_giant": {
@@ -1291,8 +1333,7 @@
         "92f1bd6a117461ac": 1
       },
       "order": [
-        "453f6a0687328e42",
-        "92f1bd6a117461ac"
+        "453f6a0687328e42"
       ]
     },
     "royal_recruits": {
