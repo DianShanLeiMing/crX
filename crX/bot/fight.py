@@ -1,6 +1,7 @@
 """random module for randomizing fight plays"""
 
 import collections
+import logging
 import random
 import time
 from collections.abc import Callable
@@ -62,6 +63,28 @@ ELIXIR_WAIT_TIMEOUT = 40  # too high but someone got errors with that so idk
 ABILITY_TRIGGER_DELAY_S = 3
 BATTLE_OUTCOME_WAIT_S = 3
 BATTLE_DETECTION_LOSS_S = 12
+BATTLE_PLAY_STALL_REPORT_S = 10
+
+
+def _report_battle_play_wait(logger, image, watch):
+    """Keep one full-elixir diagnostic per stalled episode, without forcing recovery."""
+    if image is None or not image_is_in_battle(image) or read_battle_elixir(image) < 10:
+        watch.pop("since", None)
+        return
+    now = time.monotonic()
+    elapsed = now - watch.setdefault("since", now)
+    handler = getattr(logger, "battle_play_stall_handler", None)
+    if watch.get("reported") or elapsed < BATTLE_PLAY_STALL_REPORT_S or not callable(handler):
+        return
+    watch["reported"] = True
+    try:
+        hand = []
+        for slot in range(len(HAND_CARDS_COORDS)):
+            card_id = read_hand_slot_for_settlement(image, slot)
+            hand.append({"slot": slot, "card_id": card_id, "cost": get_card_elixir_cost(card_id) if card_id else None})
+        handler(image, wait_s=round(elapsed, 2), elixir=10, hand=hand)
+    except Exception:
+        logging.warning("出牌停滞留证失败，继续原流程", exc_info=True)
 
 
 def _maybe_start_fight_recording(
@@ -686,6 +709,7 @@ def _fight_loop(
     tower_monitor = TowerHealthMonitor(logger) if is_1v1 else None
     enemy_monitor = EnemyUnitMonitor(logger)
     play_state = BattlePlayState()
+    play_wait_watch = {}
 
     decision_frame = None
 
@@ -749,8 +773,11 @@ def _fight_loop(
                 decision_frame=decision_frame,
                 play_state=play_state,
             )
-        if not played:
+        if played:
+            play_wait_watch.clear()
+        else:
             logger.change_status("暂缓出牌，继续观察战场……")
+            _report_battle_play_wait(logger, decision_frame, play_wait_watch)
             snapshot = enemy_monitor.snapshot
             if snapshot is None or all(unit.zone == "enemy_half" for unit in snapshot.units):
                 time.sleep(0.2)

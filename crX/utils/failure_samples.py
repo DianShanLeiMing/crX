@@ -51,12 +51,39 @@ def remember_failure_frame(logger, image, **details):
 
 def record_navigation_stall(logger, image, *, stage, wait_s, session_log_path=None):
     """Flush one same-frame wait diagnostic before a timeout or manual stop."""
+    _record_wait_stall(
+        logger,
+        image,
+        state="navigation_wait",
+        reason="页面持续等待，提前留证",
+        session_log_path=session_log_path,
+        stage=stage,
+        wait_s=wait_s,
+    )
+
+
+def record_battle_play_stall(logger, image, *, wait_s, elixir, hand, session_log_path=None):
+    """Persist a stalled battle even when it ends normally instead of recovering."""
+    _record_wait_stall(
+        logger,
+        image,
+        state="fight",
+        reason="持续满费但未能出牌",
+        session_log_path=session_log_path,
+        stage="battle_play_stall",
+        wait_s=wait_s,
+        elixir=elixir,
+        hand=hand,
+    )
+
+
+def _record_wait_stall(logger, image, *, state, reason, session_log_path, **details):
     recorder = None
     try:
         evidence = SimpleNamespace(current_status=logger.current_status, log=logger.log)
-        remember_failure_frame(evidence, image, reason="页面持续等待，提前留证", stage=stage, wait_s=wait_s)
+        remember_failure_frame(evidence, image, reason=reason, **details)
         recorder = FailureSampleRecorder()
-        recorder.offer(None, evidence, state="navigation_wait", attempt=0, session_log_path=session_log_path)
+        recorder.offer(None, evidence, state=state, attempt=0, session_log_path=session_log_path)
     except Exception:
         LOG.warning("等待页面留证失败，继续原流程", exc_info=True)
     finally:

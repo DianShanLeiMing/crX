@@ -99,6 +99,7 @@ class Logger:
         self.errored = False
         self.failure_frame: dict | None = None
         self.navigation_stall_handler: Callable | None = None
+        self.battle_play_stall_handler: Callable | None = None
         self.stats = dict.fromkeys(
             (
                 "wins",
