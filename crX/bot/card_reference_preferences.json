@@ -4,10 +4,12 @@
     "archer_queen": {
       "preferred": "98e8d13111454839",
       "numbers": {
-        "98e8d13111454839": 0
+        "98e8d13111454839": 0,
+        "b65cfed90a7fb4bb": 1
       },
       "order": [
-        "98e8d13111454839"
+        "98e8d13111454839",
+        "b65cfed90a7fb4bb"
       ]
     },
     "archers": {
@@ -284,7 +286,8 @@
         "27f485eee1b5bbc6": 3,
         "fe4d8f14f8734690": 4,
         "3362f0ecd7e5bb8e": 5,
-        "38ed02994f42a782": 6
+        "38ed02994f42a782": 6,
+        "2964c6113e2872b8": 7
       },
       "order": [
         "8b34db4127cd7ca7",
@@ -293,7 +296,8 @@
         "27f485eee1b5bbc6",
         "fe4d8f14f8734690",
         "3362f0ecd7e5bb8e",
-        "38ed02994f42a782"
+        "38ed02994f42a782",
+        "2964c6113e2872b8"
       ]
     },
     "elite_barbarians": {
@@ -317,10 +321,12 @@
     "elixir_golem": {
       "preferred": "e95df1d9a5a197af",
       "numbers": {
-        "e95df1d9a5a197af": 0
+        "e95df1d9a5a197af": 0,
+        "97c0f52627e27935": 1
       },
       "order": [
-        "e95df1d9a5a197af"
+        "e95df1d9a5a197af",
+        "97c0f52627e27935"
       ]
     },
     "evo_archers": {
@@ -360,16 +366,16 @@
       ]
     },
     "evo_battle_ram": {
-      "preferred": "6c693e72cbd5682f",
+      "preferred": "316af643ab660c38",
       "numbers": {
-        "6c693e72cbd5682f": 0,
-        "316af643ab660c38": 1,
+        "6c693e72cbd5682f": 1,
+        "316af643ab660c38": 0,
         "0a5110e6cf1e5cc4": 2,
         "8afdb51aa78e60e8": 3
       },
       "order": [
-        "6c693e72cbd5682f",
         "316af643ab660c38",
+        "6c693e72cbd5682f",
         "0a5110e6cf1e5cc4",
         "8afdb51aa78e60e8"
       ]
@@ -494,10 +500,12 @@
     "evo_royal_ghost": {
       "preferred": null,
       "numbers": {
-        "d44ca6c0369cea69": 1
+        "d44ca6c0369cea69": 1,
+        "3131f1ed3982a938": 2
       },
       "order": [
-        "d44ca6c0369cea69"
+        "d44ca6c0369cea69",
+        "3131f1ed3982a938"
       ]
     },
     "evo_royal_giant": {
@@ -616,7 +624,8 @@
         "7add0bbda7727239": 5,
         "f6ecdf1211d92ad7": 6,
         "7c2e2f4073b5ba09": 7,
-        "3b928725038da79d": 8
+        "3b928725038da79d": 8,
+        "e4fcd25cc21e8208": 9
       },
       "order": [
         "be0074d81ab6610f",
@@ -627,7 +636,8 @@
         "9c29de18ba78d4ca",
         "f6ecdf1211d92ad7",
         "7c2e2f4073b5ba09",
-        "3b928725038da79d"
+        "3b928725038da79d",
+        "e4fcd25cc21e8208"
       ]
     },
     "giant": {
@@ -705,10 +715,12 @@
     "goblin_giant": {
       "preferred": "79fe82febed0e22b",
       "numbers": {
-        "79fe82febed0e22b": 0
+        "79fe82febed0e22b": 0,
+        "785cff8b8896c7bd": 1
       },
       "order": [
-        "79fe82febed0e22b"
+        "79fe82febed0e22b",
+        "785cff8b8896c7bd"
       ]
     },
     "goblin_hut": {
@@ -763,7 +775,11 @@
         "adcf8bcbad4fd127": 10,
         "0c339cab03ba21d6": 11,
         "7ecf6e571c537e90": 12,
-        "32a8e577228a6ee5": 13
+        "32a8e577228a6ee5": 13,
+        "00406e9df610e279": 14,
+        "04d9aeaca063be62": 15,
+        "8043a00265585da2": 16,
+        "952a3be090dd9af3": 17
       },
       "order": [
         "c8c82a5f98641eda",
@@ -779,16 +795,22 @@
         "adcf8bcbad4fd127",
         "0c339cab03ba21d6",
         "7ecf6e571c537e90",
-        "32a8e577228a6ee5"
+        "32a8e577228a6ee5",
+        "00406e9df610e279",
+        "04d9aeaca063be62",
+        "8043a00265585da2",
+        "952a3be090dd9af3"
       ]
     },
     "golem": {
       "preferred": "10f285305dfcb758",
       "numbers": {
-        "10f285305dfcb758": 0
+        "10f285305dfcb758": 0,
+        "b5acf547a4ddb824": 1
       },
       "order": [
-        "10f285305dfcb758"
+        "10f285305dfcb758",
+        "b5acf547a4ddb824"
       ]
     },
     "graveyard": {
@@ -992,10 +1014,12 @@
     "lava_hound": {
       "preferred": "8c4255e32edb7360",
       "numbers": {
-        "8c4255e32edb7360": 0
+        "8c4255e32edb7360": 0,
+        "1b622bdd554ea590": 1
       },
       "order": [
-        "8c4255e32edb7360"
+        "8c4255e32edb7360",
+        "1b622bdd554ea590"
       ]
     },
     "lightning": {
@@ -1304,7 +1328,11 @@
         "d61ca1e048744698": 4,
         "497268f8d911ae23": 5,
         "562920ea4c53f8e3": 6,
-        "8e399b201a204061": 7
+        "8e399b201a204061": 7,
+        "d2b55e48b31e71ff": 8,
+        "55f06c5344fc3c93": 9,
+        "ebbfd00d5f8214c5": 10,
+        "50a65b267c53daae": 11
       },
       "order": [
         "00534efabdef5e8b",
@@ -1314,7 +1342,11 @@
         "d61ca1e048744698",
         "497268f8d911ae23",
         "562920ea4c53f8e3",
-        "8e399b201a204061"
+        "8e399b201a204061",
+        "d2b55e48b31e71ff",
+        "55f06c5344fc3c93",
+        "ebbfd00d5f8214c5",
+        "50a65b267c53daae"
       ]
     },
     "royal_giant": {
@@ -1617,6 +1649,26 @@
       },
       "order": [
         "a312b58e6d2420c4"
+      ]
+    },
+    "evo_skeleton_army": {
+      "preferred": null,
+      "numbers": {
+        "39c7c57342bfc9fc": 1,
+        "1bdf2e582a9c46c3": 2
+      },
+      "order": [
+        "39c7c57342bfc9fc",
+        "1bdf2e582a9c46c3"
+      ]
+    },
+    "evo_electro_giant": {
+      "preferred": null,
+      "numbers": {
+        "ed21f5a65c99dcb5": 1
+      },
+      "order": [
+        "ed21f5a65c99dcb5"
       ]
     }
   }
