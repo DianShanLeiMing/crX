@@ -208,11 +208,20 @@ def handle_clan_voyage_page(emulator) -> None:
     emulator.click(*CLAN_VOYAGE_CLOSE_BUTTON_COORDS)
 
 
-def wait_for_clash_main_menu(emulator, logger: Logger, deadspace_click=True, timeout: float | None = None) -> bool:
+def wait_for_clash_main_menu(
+    emulator,
+    logger: Logger,
+    deadspace_click=True,
+    timeout: float | None = None,
+    *,
+    reward_timeout: float | None = None,
+) -> bool:
     """Wait on fresh frames; dismiss known results/rewards, never tap loading screens.
 
     Keep the legacy deadspace_click option for callers; it now controls dismissal
     of the known voyage popup rather than random clicks on unknown pages.
+    An explicit reward_timeout gives reward navigation its own bounded phase
+    after login/loading, starting when a known reward or popup is first observed.
     """
     wait_timeout = CLASH_MAIN_WAIT_TIMEOUT if timeout is None else timeout
     started = time.monotonic()
@@ -269,7 +278,10 @@ def wait_for_clash_main_menu(emulator, logger: Logger, deadspace_click=True, tim
             or is_item_distribution_image(image)
         ):
             return get_to_main_after_fight(
-                emulator, logger, timeout=max(0, deadline - time.monotonic()), allow_result_button=True
+                emulator,
+                logger,
+                timeout=reward_timeout if reward_timeout is not None else max(0, deadline - time.monotonic()),
+                allow_result_button=True,
             )
         if deadspace_click and check_if_on_clan_voyage(emulator):
             logger.change_status("正在关闭部落旅途弹窗")

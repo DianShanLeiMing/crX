@@ -18,7 +18,12 @@ def test_restart_checks_stops_and_launches_the_national_client(monkeypatch):
     monkeypatch.setattr(device, "adb", lambda args: calls.append(args))
     monkeypatch.setattr(device, "start_app", lambda package: calls.append(["launch", package]))
     monkeypatch.setattr(device, "verify_screen", lambda: calls.append("verify"))
-    monkeypatch.setattr(nav, "wait_for_clash_main_menu", lambda *args, **kwargs: True)
+
+    def wait_for_main(*args, **kwargs):
+        assert kwargs == {"timeout": 120, "reward_timeout": nav.POST_BATTLE_TIMEOUT_S}
+        return True
+
+    monkeypatch.setattr(nav, "wait_for_clash_main_menu", wait_for_main)
     monkeypatch.setattr("crX.emulators.adb.time.sleep", lambda _: None)
     assert device.restart()
     assert calls == [

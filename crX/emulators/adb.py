@@ -74,7 +74,7 @@ class AdbController(AdbBasedController):
             raise EmulatorNotReadyError("当前生效的屏幕密度必须为 320 DPI")
 
     def restart(self):
-        from crX.bot.nav import wait_for_clash_main_menu
+        from crX.bot.nav import POST_BATTLE_TIMEOUT_S, wait_for_clash_main_menu
 
         try:
             self.start()
@@ -86,7 +86,7 @@ class AdbController(AdbBasedController):
             self.start_app(CLASH_ROYALE_PACKAGE)
             time.sleep(2)
             self.verify_screen()
-            if not wait_for_clash_main_menu(self, self.logger, timeout=120):
+            if not wait_for_clash_main_menu(self, self.logger, timeout=120, reward_timeout=POST_BATTLE_TIMEOUT_S):
                 raise EmulatorNotReadyError("皇室战争未进入主界面，请检查登录状态和游戏语言")
             self.logger.change_status("皇室战争国服已就绪，已进入主界面")
             return True

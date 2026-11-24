@@ -1356,6 +1356,48 @@ def test_login_finishing_during_startup_continues_to_claim_and_main(clock, entry
     assert not reports
 
 
+@pytest.mark.parametrize("reward_timeout", [None, nav.POST_BATTLE_TIMEOUT_S])
+def test_late_login_can_finish_rewards_with_separate_budget(clock, reward_timeout):
+    screen = RewardSequence(
+        clock,
+        [
+            (image("failure-login-native-20261109.png"), 119),
+            (image("item-distribution-coins-720-native.png"), None),
+            (image("failure-main-native-20261120.png"), None),
+        ],
+    )
+    logger = Logger()
+    assert nav.wait_for_clash_main_menu(screen, logger, timeout=120, reward_timeout=reward_timeout) is (
+        reward_timeout is not None
+    )
+    assert screen.clicks == [(1, 360, 1164)]
+    assert clock[0] <= 123
+    if reward_timeout is not None:
+        assert logger.failure_frame is None
+    else:
+        assert logger.failure_frame is not None
+
+
+def test_separate_startup_reward_budget_still_times_out(clock):
+    unknown = np.zeros((1280, 720, 3), dtype=np.uint8)
+    screen = RewardSequence(
+        clock,
+        [
+            (image("failure-login-native-20261109.png"), 119),
+            (image("item-distribution-coins-720-native.png"), None),
+            (unknown, None),
+        ],
+    )
+    logger = Logger()
+    assert not nav.wait_for_clash_main_menu(screen, logger, timeout=120, reward_timeout=5)
+    assert clock[0] == 124
+    assert screen.clicks == [(1, 360, 1164)]
+    evidence = logger.failure_frame
+    assert evidence is not None
+    assert evidence["details"]["timeout_s"] == 5
+    assert np.array_equal(evidence["image"], unknown)
+
+
 def test_early_wait_reporting_failure_does_not_interrupt_navigation(clock):
     def fail(*_args, **_kwargs):
         raise OSError("disk unavailable")
