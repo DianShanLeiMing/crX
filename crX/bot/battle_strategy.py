@@ -363,7 +363,13 @@ def rank_hand_plays(
                 )
             continue
 
-        if urgent is None and elixir >= ADVANCE_ELIXIR and _advance_elixir(card.cost) <= 10:
+        if (
+            elixir >= ADVANCE_ELIXIR
+            and _advance_elixir(card.cost) <= 10
+            and (
+                urgent is None or (not observe_defense and not card.is_spell and pressure_card and can_spend_on_offense)
+            )
+        ):
             point = _placement_for_lane(card, weak_lane)
             if point is not None:
                 advances.append(
@@ -373,9 +379,14 @@ def rank_hand_plays(
                         "advance",
                         advances_weak_lane=weak_lane is not None,
                         pressure_card=pressure_card,
-                        waiting_bonus=waiting_bonus,
+                        waiting_bonus=waiting_bonus if urgent is None else 0,
                     )
                 )
+    if urgent is not None:
+        # A hand of building-targeting troops cannot expose its next defender
+        # without cycling. Keep any defense/finisher, otherwise use an affordable
+        # pressure troop with the normal reserve; cost breaks the tie, not age.
+        return options or advances
     if play_state is not None:
         saved = play_state.advance_target
         target = next(

@@ -120,6 +120,111 @@ def test_defense_checks_the_verified_cost_and_holds_a_card_with_unknown_cost():
     ]
 
 
+@pytest.mark.parametrize(
+    ("card_id", "cost"),
+    [
+        ("elixir_golem", 3),
+        ("skeleton_army", 3),
+        ("skeleton_barrel", 3),
+        ("archer_queen", 5),
+        ("goblin_giant", 6),
+        ("electro_giant", 7),
+    ],
+)
+def test_observed_fixed_cost_cards_have_a_cost_and_still_require_enough_elixir(card_id, cost):
+    assert get_card_elixir_cost(card_id) == cost
+    card = HandCard(0, card_id, get_card_group(card_id), get_card_elixir_cost(card_id), (198, 672))
+    threat = EnemyUnitLocation((180, 640), "left", "friendly_half")
+    assert rank_hand_plays((card,), EnemyUnitSnapshot(10, (threat,)), FULL_TOWERS, cost - 1) == []
+
+
+@pytest.mark.parametrize(
+    "ids",
+    [
+        ("elixir_golem", "skeleton_army", "goblin_giant", "archer_queen"),
+        ("skeleton_army", "skeleton_barrel", "electro_giant", "archer_queen"),
+    ],
+)
+def test_four_previously_skipped_cards_can_now_advance_and_defend(monkeypatch, ids):
+    hand = [
+        HandCard(i, card_id, get_card_group(card_id), get_card_elixir_cost(card_id), (198, 672))
+        for i, card_id in enumerate(ids)
+    ]
+    calm = rank_hand_plays(hand, EnemyUnitSnapshot(10, ()), FULL_TOWERS, 10)
+    assert calm and max(calm, key=lambda play: play.priority).purpose == "advance"
+    threat = EnemyUnitLocation((180, 640), "left", "friendly_half")
+    defense = rank_hand_plays(hand, EnemyUnitSnapshot(10, (threat,)), FULL_TOWERS, 3)
+    assert defense and all(play.card.card_id == "skeleton_army" for play in defense)
+
+    frame = battle_frame()
+    mock_decision_hand(monkeypatch, frame, slots=(0, 1, 2, 3), elixir=10)
+    monkeypatch.setattr(
+        fight, "get_play_coords_for_card", lambda _e, _l, slot, _t: (hand[slot].card_id, hand[slot].preset)
+    )
+    emulator = Mock()
+    state = BattlePlayState()
+    assert fight.play_a_card(emulator, Mock(), False, fight.BattleStrategy(), decision_frame=frame, play_state=state)
+    assert emulator.click.call_count == 2
+    assert state.elixir_remaining == 7
+
+
+@pytest.mark.parametrize("elixir", [7, 10])
+@pytest.mark.parametrize(
+    "ids",
+    [
+        ("goblin_giant", "golem", "skeleton_barrel", "lava_hound"),
+        ("elixir_golem", "goblin_giant", "lava_hound", "golem"),
+    ],
+)
+def test_pressure_only_hand_cycles_the_cheapest_troop_to_reach_a_defender(ids, elixir):
+    hand = [
+        HandCard(i, card, get_card_group(card), get_card_elixir_cost(card), (198, 672)) for i, card in enumerate(ids)
+    ]
+    threat = EnemyUnitLocation((540, 870), "right", "friendly_half")
+    state = BattlePlayState()
+    state.observe_hand(hand)
+    state.hand_waits[ids.index("lava_hound")] = ("lava_hound", 3)
+    options = rank_hand_plays(hand, EnemyUnitSnapshot(10, (threat,)), FULL_TOWERS, elixir, play_state=state)
+    chosen = max(options, key=lambda play: play.priority)
+    assert chosen.purpose == "advance" and chosen.card.cost == 3
+    assert all(play.card.cost is not None and elixir - play.card.cost >= (2 if elixir == 10 else 3) for play in options)
+    assert state.advance_target is None
+
+
+def test_available_defense_prevents_pressure_only_cycle_and_unknown_spells_stay_held():
+    knight = HandCard(0, "knight", "bridge_line", 3, (198, 672))
+    threat = EnemyUnitLocation((180, 640), "left", "friendly_half")
+    snapshot = EnemyUnitSnapshot(10, (threat,))
+    options = rank_hand_plays((HOG, knight), snapshot, FULL_TOWERS, 10)
+    assert options and all(play.purpose == "defend" for play in options)
+    log = HandCard(0, "log", "lane_spell", 2, (202, 374))
+    unknown = HandCard(1, "goblin_giant", "bridge_line", None, (198, 672))
+    assert rank_hand_plays((log, unknown), snapshot, FULL_TOWERS, 10) == []
+    assert rank_hand_plays((HOG,), snapshot, FULL_TOWERS, 6) == []
+
+
+def test_pressure_cycle_respects_recent_defense_observation():
+    knight = HandCard(0, "knight", "bridge_line", 3, (198, 672))
+    threat = EnemyUnitLocation((180, 620), "left", "friendly_half")
+    first = rank_hand_plays((knight,), EnemyUnitSnapshot(10, (threat,)), FULL_TOWERS, 7)[0]
+    state = BattlePlayState()
+    state.record_play(first, 7, 10)
+    assert rank_hand_plays((HOG,), EnemyUnitSnapshot(10.3, (threat,)), FULL_TOWERS, 10, play_state=state) == []
+
+
+def test_observed_offensive_hand_sends_a_cycle_instead_of_waiting_forever(monkeypatch):
+    ids = ("goblin_giant", "golem", "skeleton_barrel", "lava_hound")
+    frame = battle_frame()
+    draw_badge(frame, 540, 700, bar_color=RED)
+    mock_decision_hand(monkeypatch, frame, slots=(0, 1, 2, 3), elixir=10)
+    monkeypatch.setattr(fight, "get_play_coords_for_card", lambda _e, _l, slot, _t: (ids[slot], (198, 672)))
+    emulator = Mock()
+    state = BattlePlayState()
+    assert fight.play_a_card(emulator, Mock(), False, fight.BattleStrategy(), decision_frame=frame, play_state=state)
+    assert emulator.click.call_args_list[0].args == fight.HAND_CARDS_COORDS[2]
+    assert state.elixir_remaining == 7
+
+
 def test_stale_elixir_or_unconfirmed_replacement_interrupts_settlement():
     state = BattlePlayState()
     state.record_play(PlayOption(HOG, (132, 568), "advance"), 7, 10.0)

@@ -551,6 +551,12 @@ def _pick_card_play(
         play = select(options)
 
     note = PURPOSE_LABELS[play.purpose]
+    if (
+        play.purpose == "advance"
+        and enemy_monitor.snapshot is not None
+        and any(unit.zone != "enemy_half" for unit in enemy_monitor.snapshot.units)
+    ):
+        note += "，无可用防守方案，保留预算过牌"
     if play.card.is_spell and play.covered:
         note += f"，实时落点，估算覆盖 {play.covered} 个标记"
     if play.tower_fill is not None:
