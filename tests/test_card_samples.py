@@ -306,7 +306,7 @@ def test_sampling_lifecycle_for_both_play_modes_on_exception(tmp_path, monkeypat
         return collector
 
     monkeypatch.setattr(samples, "start_card_samples", start)
-    monkeypatch.setattr(fight, "wait_for_battle_start", lambda *_: True)
+    monkeypatch.setattr(fight, "wait_for_battle_start", lambda *_, **__: True)
 
     def fail(*_, **_kwargs):
         assert samples.active_card_samples() is collectors[0]

@@ -34,6 +34,7 @@ from crX.bot.state_detect import (
 )
 from crX.utils.logger import Logger
 from tests.screen_fixtures import native_replay
+from tests.test_enemy_detect import battle_frame
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -1366,3 +1367,77 @@ def test_early_wait_reporting_failure_does_not_interrupt_navigation(clock):
     )
     assert nav.get_to_main_after_fight(screen, logger, timeout=20)
     assert not screen.clicks
+
+
+def test_matchmaking_closes_captured_promo_and_restarts_from_verified_main(clock, monkeypatch):
+    promo = image("failure-promo-native-20261124.png")
+    main = image("failure-main-native-20261120.png")
+    screen = RewardSequence(clock, [(promo, None), (main, None), (battle_frame(), None)])
+    original_click = screen.click
+    starts = []
+
+    def click(x, y):
+        if (x, y) == START_FIGHT_BUTTON_COORD:
+            assert is_clash_main_menu_image(screen.last_frame)
+            assert clock[0] - screen.entered >= nav.POST_BATTLE_MAIN_STABLE_S
+            starts.append(clock[0])
+            screen.index += 1
+            screen.entered = clock[0]
+        else:
+            original_click(x, y)
+
+    monkeypatch.setattr(screen, "click", click)
+    logger = Logger()
+    assert nav.wait_for_battle_start(
+        screen, logger, timeout=10, retry_start=lambda: fight.start_fight(screen, logger, "Classic 1v1")
+    )
+    assert screen.clicks == [(0, 661, 323)]
+    assert len(starts) == 1 and clock[0] < 10
+    assert logger.failure_frame is None
+    assert logger.stats["completed_fights"] == logger.stats["restarts_after_failure"] == 0
+
+
+def test_matchmaking_unknown_wait_has_no_blind_taps_and_keeps_last_frame(clock):
+    frame = np.zeros((1280, 720, 3), dtype=np.uint8)
+    screen, logger = RewardSequence(clock, [(frame, None)]), Logger()
+    assert not nav.wait_for_battle_start(screen, logger, timeout=4)
+    assert not screen.clicks
+    assert logger.failure_frame is not None
+    assert logger.failure_frame["details"]["stage"] == "battle_start_wait"
+    assert logger.failure_frame["details"]["wait_s"] == 4
+    assert np.array_equal(logger.failure_frame["image"], frame)
+
+
+def test_matchmaking_stuck_popup_has_bounded_verified_closes(clock):
+    promo = image("failure-promo-native-20261124.png")
+    screen, logger = RewardSequence(clock, [(promo, None)]), Logger()
+    assert not nav.wait_for_battle_start(screen, logger, timeout=15)
+    assert screen.clicks == [(0, 661, 323)] * nav.POPUP_CLOSE_MAX_ACTIONS
+    assert clock[0] < 15
+    assert logger.failure_frame is not None
+    assert logger.failure_frame["details"]["close_actions"] == nav.POPUP_CLOSE_MAX_ACTIONS
+    assert logger.failure_frame["details"]["reason"] == "开战等待时弹窗关闭操作达到上限"
+    assert np.array_equal(logger.failure_frame["image"], promo)
+
+
+def test_matchmaking_retries_only_once_and_does_not_retry_loading(clock):
+    loading, main = image("startup-loading-native-20261110.png"), image("failure-main-native-20261120.png")
+    screen, logger = RewardSequence(clock, [(loading, 2), (main, None)]), Logger()
+    attempts = []
+
+    def retry():
+        assert is_clash_main_menu_image(screen.last_frame)
+        assert clock[0] - screen.entered >= nav.POST_BATTLE_MAIN_STABLE_S
+        attempts.append(clock[0])
+        return True
+
+    assert not nav.wait_for_battle_start(screen, logger, timeout=10, retry_start=retry)
+    assert not screen.clicks and len(attempts) == 1
+    assert logger.failure_frame is not None
+    assert logger.failure_frame["details"]["retried"]
+
+
+def test_matchmaking_already_in_battle_needs_no_retry_or_click(clock):
+    screen = RewardSequence(clock, [(battle_frame(), None)])
+    assert nav.wait_for_battle_start(screen, Logger(), timeout=5, retry_start=lambda: pytest.fail("Already in battle"))
+    assert not screen.clicks and clock[0] == 0

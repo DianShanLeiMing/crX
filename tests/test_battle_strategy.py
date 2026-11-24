@@ -372,6 +372,91 @@ def test_new_threat_cancels_saving_and_allows_low_elixir_defense():
     assert state.advance_target is None
 
 
+@pytest.mark.parametrize("card_id", ["golem", "pekka", "giant_skeleton"])
+def test_previously_seen_unaffordable_troop_can_plan_saving_without_a_current_match(card_id):
+    held = HandCard(0, card_id, get_card_group(card_id), get_card_elixir_cost(card_id), (198, 672))
+    cheap = HandCard(1, "knight", "bridge_line", 3, (198, 672))
+    state = BattlePlayState()
+    state.observe_hand((held, cheap))
+    assert held.cost is not None
+    state.record_play(PlayOption(cheap, (198, 672), "advance"), 10, 1)
+    assert rank_hand_plays((cheap,), EnemyUnitSnapshot(10, ()), FULL_TOWERS, held.cost - 1, play_state=state) == []
+    # At low elixir no routine push is planned; the remembered slot still ages.
+    assert state.known_hand[0] == held
+    state.hand_waits[0] = (card_id, 3)
+    if held.cost > 7:
+        assert rank_hand_plays((cheap,), EnemyUnitSnapshot(11, ()), FULL_TOWERS, 7, play_state=state) == []
+        assert state.advance_target == held and state.advance_elixir() == 10
+    # A previously seen card alone is never permission to click a current slot.
+    options = rank_hand_plays((cheap,), EnemyUnitSnapshot(12, ()), FULL_TOWERS, 10, play_state=state)
+    assert all(option.card == cheap for option in options)
+    options = rank_hand_plays((held, cheap), EnemyUnitSnapshot(13, ()), FULL_TOWERS, 10, play_state=state)
+    chosen = max(options, key=lambda option: option.priority)
+    assert chosen.card == held
+    state.record_play(chosen, 10, 13)
+    assert 0 not in state.known_hand and state.waiting_bonus(held) == 0
+
+
+def test_cached_heavy_troop_cannot_block_emergency_defense_or_survive_a_replacement():
+    heavy = HandCard(0, "golem", "king_lane", 8, (198, 672))
+    knight = HandCard(1, "knight", "bridge_line", 3, (198, 672))
+    state = BattlePlayState()
+    state.observe_hand((heavy, knight))
+    state.hand_waits[0] = ("golem", 3)
+    assert rank_hand_plays((knight,), EnemyUnitSnapshot(10, ()), FULL_TOWERS, 7, play_state=state) == []
+    assert state.advance_target == heavy
+    threat = EnemyUnitLocation((180, 700), "left", "friendly_half")
+    options = rank_hand_plays((knight,), EnemyUnitSnapshot(11, (threat,)), FULL_TOWERS, 3, play_state=state)
+    assert options and options[0].card == knight and options[0].purpose == "defend"
+    assert state.advance_target is None
+    replacement = HandCard(0, "skeletons", "bridge_line", 1, (198, 672))
+    rank_hand_plays((replacement, knight), EnemyUnitSnapshot(12, ()), FULL_TOWERS, 7, play_state=state)
+    assert state.known_hand[0] == replacement and state.waiting_bonus(replacement) == 0
+
+
+def test_unaffordable_finisher_spells_are_not_promoted_from_hand_memory():
+    lightning = HandCard(0, "lightning", "large_spell", 6, (204, 292))
+    state = BattlePlayState()
+    state.observe_hand((lightning,))
+    assert rank_hand_plays((), EnemyUnitSnapshot(10, ()), ((1, True), (79, True)), 3, play_state=state) == []
+    assert state.advance_target is None
+
+
+@pytest.mark.parametrize("random_mode", [False, True])
+def test_fight_saves_for_remembered_heavy_card_but_requires_current_recognition_to_tap(monkeypatch, random_mode):
+    heavy = HandCard(0, "golem", "king_lane", 8, (198, 672))
+    state = BattlePlayState()
+    state.observe_hand((heavy,))
+    state.hand_waits[0] = ("golem", 3)
+    frame, slots, elixir, now = battle_frame(), [1], [7], [10.0]
+    mock_decision_hand(monkeypatch, frame, slots=slots)
+    monkeypatch.setattr(fight.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(fight, "read_battle_elixir", lambda _: elixir[0])
+    monkeypatch.setattr(
+        fight, "get_play_coords_for_card", lambda _e, _l, slot, _t: (("golem", "knight")[slot], (198, 672))
+    )
+    emulator, logger = Mock(), Mock()
+
+    def play():
+        if random_mode:
+            return fight.play_random_available_card(emulator, logger, False, 0, decision_frame=frame, play_state=state)
+        return fight.play_a_card(
+            emulator, logger, False, fight.BattleStrategy(), decision_frame=frame, play_state=state
+        )
+
+    assert not play() and state.advance_elixir() == 10
+    emulator.click.assert_not_called()
+    elixir[0], now[0] = 10, 11.0
+    assert play()
+    assert emulator.click.call_args_list[0].args == fight.HAND_CARDS_COORDS[1]
+    emulator.reset_mock()
+    slots[:] = [0, 1]
+    now[0] = 12.0
+    assert play()
+    assert emulator.click.call_args_list[0].args == fight.HAND_CARDS_COORDS[0]
+    assert state.elixir_remaining == 2
+
+
 @pytest.mark.parametrize("card_id", ["ronin", "witch", "giant_skeleton", "pekka"])
 def test_four_card_hand_does_not_keep_starving_the_costliest_troop(card_id):
     ids = (card_id, "knight", "bandit", "hog")

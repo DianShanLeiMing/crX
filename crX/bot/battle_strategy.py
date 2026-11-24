@@ -141,6 +141,7 @@ class BattlePlayState:
     defender: PlayOption | None = None
     defender_until: float = 0.0
     hand_waits: dict[int, tuple[str, int]] = field(default_factory=dict)
+    known_hand: dict[int, HandCard] = field(default_factory=dict)
     advance_target: HandCard | None = None
 
     def elixir_limit(self, now: float) -> int | None:
@@ -151,8 +152,9 @@ class BattlePlayState:
 
     def observe_hand(self, hand: Sequence[HandCard]) -> None:
         # Unaffordable slots are absent from this observation. Retain their age
-        # until a replacement is recognized or a play is sent from that slot.
+        # and identity for saving until replacement or deployment, not for taps.
         for card in hand:
+            self.known_hand[card.slot] = card
             previous = self.hand_waits.get(card.slot)
             if previous is None or previous[0] != card.card_id:
                 self.hand_waits[card.slot] = (card.card_id, 0)
@@ -185,6 +187,7 @@ class BattlePlayState:
         self.pending_card = play.card
         self.settlement_reading = None
         self.hand_waits.pop(play.card.slot, None)
+        self.known_hand.pop(play.card.slot, None)
         for slot, (card_id, skipped) in self.hand_waits.items():
             self.hand_waits[slot] = (card_id, min(skipped + 1, MAX_WAITING_BONUS))
         self.advance_target = None
@@ -292,9 +295,18 @@ def rank_hand_plays(
     stability = frozenset(threat_weights) if stable_positions is None else stable_positions
     options = []
     advances = []
+    current_cards = {(card.slot, card.card_id) for card in hand}
+    planning_hand = play_state.known_hand.values() if play_state is not None else hand
 
-    for card in hand:
-        if elixir <= 0 or card.cost is None or card.cost > elixir:
+    for card in planning_hand:
+        if elixir <= 0 or card.cost is None:
+            continue
+        current = (card.slot, card.card_id) in current_cards
+        playable = current and card.cost <= elixir
+        # Unaffordable, previously recognized cards may set a safe saving target.
+        # Once affordable they must be recognized again before any deployment.
+        can_plan_saving = urgent is None and card.cost > elixir and not card.is_spell
+        if not playable and not can_plan_saving:
             continue
         can_spend_on_offense = card.cost <= offensive_budget
         base_id = card.card_id.removeprefix("evo_")
@@ -406,7 +418,11 @@ def rank_hand_plays(
                     [target]
                     if saved is not None
                     else (
-                        play for play in advances if play.card.cost is not None and play.card.cost <= offensive_budget
+                        play
+                        for play in advances
+                        if (play.card.slot, play.card.card_id) in current_cards
+                        and play.card.cost is not None
+                        and play.card.cost <= offensive_budget
                     )
                 )
             else:

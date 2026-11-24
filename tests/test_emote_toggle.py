@@ -33,7 +33,7 @@ def test_old_settings_default_off_and_opt_in_is_persisted(tmp_path, monkeypatch)
 def test_worker_job_reaches_the_selected_fight_loop(monkeypatch, random_mode, enabled):
     received = []
     monkeypatch.setattr(fight, "card_sample_session", lambda *_: nullcontext())
-    monkeypatch.setattr(fight, "wait_for_battle_start", lambda *_: True)
+    monkeypatch.setattr(fight, "wait_for_battle_start", lambda *_, **__: True)
     monkeypatch.setattr(fight.time, "sleep", lambda *_: None)
 
     def run(*args, use_emotes=False):

@@ -14,7 +14,7 @@ from crX.utils.logger import Logger
 @pytest.fixture
 def unknown_battle(monkeypatch):
     monkeypatch.setattr(fight, "card_sample_session", lambda *_: nullcontext())
-    monkeypatch.setattr(fight, "wait_for_battle_start", lambda *_: True)
+    monkeypatch.setattr(fight, "wait_for_battle_start", lambda *_, **__: True)
     monkeypatch.setattr(fight, "create_default_bridge_iar", lambda *_: None)
     monkeypatch.setattr(fight, "_maybe_start_fight_recording", lambda *_: None)
     elapsed = 0.0

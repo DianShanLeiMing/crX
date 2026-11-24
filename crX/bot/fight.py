@@ -111,8 +111,11 @@ def do_fight_state(
     logger.change_status("正在等待对战开始")
 
     # Wait for battle start
-    if wait_for_battle_start(emulator, logger) is False:
-        logger.change_status("等待对战开始超时")
+    if (
+        wait_for_battle_start(emulator, logger, retry_start=lambda: start_fight(emulator, logger, fight_mode_chosen))
+        is False
+    ):
+        logger.change_status("未能进入对战，准备恢复")
         return False
 
     logger.change_status("开始执行对战操作")

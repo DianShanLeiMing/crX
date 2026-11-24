@@ -7,7 +7,6 @@ from crX.bot.coords import (
     BATTLE_LOG_BUTTON,
     BATTLE_MODE_SCROLL_COORDS,
     BATTLE_MODE_SELECTOR_COORD,
-    BATTLE_WAIT_DEADSPACE_COORD,
     BOTTOM_NAV_BATTLE_TAB_COORD,
     BOTTOM_NAV_CARD_TAB_FROM_MAIN_COORD,
     BOTTOM_NAV_MAIN_TAB_FROM_CARD_COORD,
@@ -53,6 +52,7 @@ from crX.bot.state_detect import (
     check_if_on_clash_main_menu,
     check_if_on_shop,
     detect_post_battle_reward,
+    image_is_in_battle,
     is_clash_main_loading_image,
     is_clash_main_menu_image,
     is_generic_post_battle_reward,
@@ -94,31 +94,71 @@ POPUP_CLOSE_MAX_ACTIONS = 5
 PENDING_REWARD_TRANSITION_WAIT_S = 3.0
 
 
-def wait_for_battle_start(emulator, logger, timeout: int = 120) -> bool:
-    """Waits for any battle to start (1v1 or 2v2).
-
-    Args:
-    ----
-        emulator: The emulator controller.
-        logger: The logger object.
-        timeout: Maximum time to wait in seconds
-
-    Returns:
-    -------
-        bool: True if battle started, False if timed out.
-    """
-    start_time = time.time()
+def wait_for_battle_start(
+    emulator, logger, timeout: int = 120, *, retry_start: Callable[[], bool] | None = None
+) -> bool:
+    """Close confirmed overlays and retry once from a settled main menu."""
+    start_time = time.monotonic()
     last_logged_second = -1
-    while time.time() - start_time < timeout:
-        elapsed_second = int(time.time() - start_time)
+    main_since = None
+    close_coord = None
+    close_actions = 0
+    retried = False
+    image = None
+    stage = "battle_start_wait"
+    reason = "等待对战开始超时"
+    watch = {}
+    while time.monotonic() - start_time < timeout:
+        elapsed_second = int(time.monotonic() - start_time)
         if elapsed_second != last_logged_second:
             logger.change_status(status=f"正在等待对战开始，已等待 {elapsed_second} 秒")
             last_logged_second = elapsed_second
-        battle_result = check_if_in_battle(emulator)
-        if battle_result:
+        image = emulator.screenshot()
+        if image_is_in_battle(image):
             logger.change_status("已检测到对战")
             return True
-        emulator.click(x_coord=BATTLE_WAIT_DEADSPACE_COORD[0], y_coord=BATTLE_WAIT_DEADSPACE_COORD[1])
+        previous_close = close_coord
+        close_coord = find_league_welcome_close(image) or find_popup_close(image)
+        if close_coord is not None:
+            main_since = None
+            stage = "battle_start_popup"
+            if close_actions >= POPUP_CLOSE_MAX_ACTIONS:
+                reason = "开战等待时弹窗关闭操作达到上限"
+                break
+            if previous_close is not None and all(
+                abs(a - b) <= 6 for a, b in zip(close_coord, previous_close, strict=True)
+            ):
+                logger.change_status(
+                    f"开战等待时关闭弹窗 {close_coord}（{close_actions + 1}/{POPUP_CLOSE_MAX_ACTIONS}）"
+                )
+                emulator.click(*close_coord)
+                close_actions += 1
+                close_coord = None
+        elif not is_clash_main_loading_image(image) and is_clash_main_menu_image(image):
+            stage = "battle_start_main"
+            if main_since is None:
+                main_since = time.monotonic()
+            if not retried and retry_start is not None and time.monotonic() - main_since >= POST_BATTLE_MAIN_STABLE_S:
+                logger.change_status("开战等待时已确认稳定主界面，重新开始对战")
+                retried = True
+                main_since = None
+                if not retry_start():
+                    return False
+        else:
+            main_since = None
+            stage = "battle_start_wait"
+        _report_navigation_wait(logger, image, stage, watch)
+        time.sleep(0.5)
+    remember_failure_frame(
+        logger,
+        image,
+        reason=reason,
+        stage=stage,
+        wait_s=round(time.monotonic() - start_time, 2),
+        close_actions=close_actions,
+        retried=retried,
+    )
+    logger.change_status(reason)
     return False
 
 
