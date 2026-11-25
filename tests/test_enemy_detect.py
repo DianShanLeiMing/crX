@@ -7,6 +7,7 @@ import pytest
 
 from crX.bot import enemy_detect, fight
 from crX.bot.card_data import CIRCULAR_SPELL_PROFILES, CircularSpellProfile
+from crX.bot.card_detection import HandSlotObservation
 from crX.bot.coords import BATTLE_HAND_BORDER_SAMPLES, GAME_SCREEN_SIZE
 from crX.bot.find import find_enemy_unit_markers
 from crX.bot.spell_targeting import choose_circular_spell_target
@@ -41,6 +42,21 @@ def mock_decision_hand(monkeypatch, initial_frame, slots=(0,), elixir=10):
         return list(slots)
 
     monkeypatch.setattr(fight, "check_which_cards_are_available", available)
+    # The synthetic slots pass the observation gate; each test's coordinate
+    # reader supplies its card identities and placements, without device I/O.
+    monkeypatch.setattr(
+        fight,
+        "observe_hand_slots",
+        lambda _frame, **_kwargs: tuple(
+            HandSlotObservation(
+                slot,
+                "knight" if slot in slots else None,
+                slot in slots,
+                reason="recognized" if slot in slots else "unknown",
+            )
+            for slot in range(4)
+        ),
+    )
     monkeypatch.setattr(fight, "read_battle_elixir", lambda _: elixir)
 
 

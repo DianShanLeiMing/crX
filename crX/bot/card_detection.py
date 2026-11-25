@@ -1,5 +1,6 @@
 import random
 import time
+from dataclasses import dataclass
 
 import numpy
 
@@ -22,7 +23,7 @@ from crX.bot.coords import (
     LEGACY_SCREEN_SIZE,
     REFERENCE_SCREEN_SIZE,
 )
-from crX.bot.state_detect import image_has_elixir, image_has_empty_hand_slot
+from crX.bot.state_detect import image_has_elixir, image_has_empty_hand_slot, image_has_grayscale_hand_slot
 from crX.utils.card_library import runtime_entries
 from crX.utils.formal_library import _signature as reference_signature
 from crX.utils.formal_library import runtime_formal_entries
@@ -304,11 +305,50 @@ def read_hand_slot_for_settlement(image, slot: int) -> str | None:
     """Read a confident card ID or the explicit empty slot placeholder."""
     if image_has_empty_hand_slot(image, slot):
         return "empty"
+    if image_has_grayscale_hand_slot(image, slot):
+        return None
     _, recognition = _recognize_hand_slot(image, slot)
     card = recognition["card_id"]
     if card != "UNKNOWN" and recognition["candidate_margin"] >= DIAGNOSTIC_MIN_MARGIN:
         return card
     return None
+
+
+@dataclass(frozen=True, slots=True)
+class HandSlotObservation:
+    slot: int
+    card_id: str | None
+    available: bool
+    empty: bool = False
+    reason: str = "recognized"
+
+
+def observe_hand_slots(image, *, available_slots=None) -> tuple[HandSlotObservation, ...]:
+    """Read all four positions from one native frame; availability is independent."""
+    if image is None or image.shape != (*GAME_SCREEN_SIZE[::-1], 3):
+        return ()
+    if available_slots is None:
+        available_slots = [slot for slot, count in enumerate(_card_purple_counts(image)) if count >= 104]
+    result = []
+    for slot in range(4):
+        available = slot in available_slots
+        if image_has_empty_hand_slot(image, slot):
+            result.append(HandSlotObservation(slot, None, False, True, "empty"))
+            continue
+        if image_has_grayscale_hand_slot(image, slot):
+            result.append(HandSlotObservation(slot, None, available, reason="grayscale"))
+            continue
+        _, recognition = _recognize_hand_slot(image, slot)
+        card = recognition["card_id"]
+        reason = (
+            "unknown"
+            if card == "UNKNOWN"
+            else "low_margin"
+            if recognition["candidate_margin"] < DIAGNOSTIC_MIN_MARGIN
+            else "recognized"
+        )
+        result.append(HandSlotObservation(slot, card if reason == "recognized" else None, available, reason=reason))
+    return tuple(result)
 
 
 def image_has_hero_champion_ability(iar) -> bool:
@@ -374,6 +414,26 @@ def _observe_hand_diagnostics(image, available, purple_counts):
         fingerprint, recognition = _recognize_hand_slot(image, slot)
         _record_match_sample(
             image, slot, fingerprint, recognition, trigger="hand_observation", purple_counts=purple_counts
+        )
+    observations = observe_hand_slots(image, available_slots=available)
+    if any(not slot.available and not slot.empty and slot.card_id is None for slot in observations):
+        collector.offer(
+            image,
+            None,
+            {
+                "reason": "unavailable_hand",
+                "purple_counts": purple_counts,
+                "hand": [
+                    {
+                        "slot": slot.slot,
+                        "card_id": slot.card_id,
+                        "available": slot.available,
+                        "empty": slot.empty,
+                        "reason": slot.reason,
+                    }
+                    for slot in observations
+                ],
+            },
         )
 
 

@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from crX.bot import fight, worker
+from crX.bot.card_detection import HandSlotObservation
 from crX.utils import failure_samples as failures
 from crX.utils.logger import Logger
 from tests.test_enemy_detect import battle_frame, mock_decision_hand
@@ -25,7 +26,13 @@ def test_normal_battle_end_keeps_one_exact_frame_stall_sample(tmp_path, monkeypa
     slots = () if cause == "no_available_slots" else (0, 1, 2, 3)
     mock_decision_hand(monkeypatch, frame, slots=slots)
     monkeypatch.setattr(fight, "get_play_coords_for_card", lambda _e, _l, slot, _t: (ids[slot], (198, 672)))
-    monkeypatch.setattr(fight, "read_hand_slot_for_settlement", lambda _frame, slot: ids[slot])
+    monkeypatch.setattr(
+        fight,
+        "observe_hand_slots",
+        lambda _frame, **_kwargs: tuple(
+            HandSlotObservation(slot, card, slot in slots) for slot, card in enumerate(ids)
+        ),
+    )
     monkeypatch.setattr(fight, "create_default_bridge_iar", lambda _: None)
     monkeypatch.setattr(fight, "stop_fight_capture", lambda: None)
     monkeypatch.setattr(fight.time, "sleep", lambda _: None)
@@ -44,6 +51,8 @@ def test_normal_battle_end_keeps_one_exact_frame_stall_sample(tmp_path, monkeypa
     monkeypatch.setattr(fight, "wait_for_elixir", wait)
     monkeypatch.setattr(failures, "get_failure_samples_dir", lambda: tmp_path)
     logger = Logger()
+    statuses = Mock(wraps=logger.change_status)
+    monkeypatch.setattr(logger, "change_status", statuses)
     failures.remember_failure_frame(logger, frame, reason="existing final failure")
     previous = logger.failure_frame
     logger.battle_play_stall_handler = partial(
@@ -51,6 +60,9 @@ def test_normal_battle_end_keeps_one_exact_frame_stall_sample(tmp_path, monkeypa
     )
     emulator = Mock()
     assert fight._fight_loop(emulator, logger, False, random_mode=random_mode)
+    messages = [call.args[0] for call in statuses.call_args_list]
+    assert any(message.startswith("暂缓出牌：") for message in messages)
+    assert not any(message.startswith("本次出牌耗时") for message in messages)
     emulator.click.assert_not_called()
     records, errors = failures.scan_failures(tmp_path)
     assert errors == 0 and len(records) == 1
@@ -62,6 +74,8 @@ def test_normal_battle_end_keeps_one_exact_frame_stall_sample(tmp_path, monkeypa
     assert [card["card_id"] for card in data["details"]["hand"]] == list(ids)
     if cause == "unknown_costs":
         assert all(card["cost"] is None for card in data["details"]["hand"])
+        assert data["details"]["decision"]["wait_reason"] == "unknown_cost"
+    assert [card["available"] for card in data["details"]["hand"]] == [slot in slots for slot in range(4)]
     assert data["session_log_path"] == "session.txt" and data["capture_source"] == "failure_frame"
     evidence = cv2.imread(str(records[0]["directory"] / "frame.png"))
     assert evidence.shape == (1280, 720, 3)

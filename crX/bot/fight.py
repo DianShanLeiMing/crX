@@ -10,6 +10,7 @@ from typing import Literal
 from crX.bot.battle_strategy import (
     ADVANCE_ELIXIR,
     PURPOSE_LABELS,
+    WAIT_REASON_LABELS,
     BattlePlayState,
     HandCard,
     PlayOption,
@@ -22,6 +23,7 @@ from crX.bot.card_detection import (
     get_card_group,
     get_play_coords_for_card,
     image_has_hero_champion_ability,
+    observe_hand_slots,
     read_hand_slot_for_settlement,
     switch_side,
     trigger_hero_champion_ability,
@@ -66,7 +68,7 @@ BATTLE_DETECTION_LOSS_S = 12
 BATTLE_PLAY_STALL_REPORT_S = 10
 
 
-def _report_battle_play_wait(logger, image, watch):
+def _report_battle_play_wait(logger, image, watch, play_state=None):
     """Keep one full-elixir diagnostic per stalled episode, without forcing recovery."""
     if image is None or not image_is_in_battle(image) or read_battle_elixir(image) < 10:
         watch.pop("since", None)
@@ -79,10 +81,29 @@ def _report_battle_play_wait(logger, image, watch):
     watch["reported"] = True
     try:
         hand = []
-        for slot in range(len(HAND_CARDS_COORDS)):
-            card_id = read_hand_slot_for_settlement(image, slot)
-            hand.append({"slot": slot, "card_id": card_id, "cost": get_card_elixir_cost(card_id) if card_id else None})
-        handler(image, wait_s=round(elapsed, 2), elixir=10, hand=hand)
+        for slot in observe_hand_slots(image):
+            hand.append(
+                {
+                    "slot": slot.slot,
+                    "card_id": slot.card_id,
+                    "cost": get_card_elixir_cost(slot.card_id) if slot.card_id else None,
+                    "available": slot.available,
+                    "empty": slot.empty,
+                    "reason": slot.reason,
+                }
+            )
+        decision = None
+        if play_state is not None:
+            decision = {
+                "wait_reason": play_state.wait_reason,
+                "saving_target": play_state.advance_target.card_id if play_state.advance_target else None,
+                "known_hand": [
+                    {"slot": card.slot, "card_id": card.card_id, "cost": card.cost}
+                    for card in play_state.known_hand.values()
+                ],
+                "awaiting_replacement": sorted(play_state.awaiting_replacement),
+            }
+        handler(image, wait_s=round(elapsed, 2), elixir=10, hand=hand, decision=decision)
     except Exception:
         logging.warning("出牌停滞留证失败，继续原流程", exc_info=True)
 
@@ -476,6 +497,8 @@ def _pick_card_play(
 ) -> tuple[PlayOption, int] | None:
     if enemy_monitor is None:
         enemy_monitor = EnemyUnitMonitor(logger)
+    if play_state is not None:
+        play_state.wait_reason = None
 
     def inspect_hand(frame=None):
         captured_frame = None
@@ -486,13 +509,29 @@ def _pick_card_play(
 
         slots = check_which_cards_are_available(emulator, check_side=True, observe_frame=remember, frame=frame)
         # Gate the frame before relying on hand highlights or enemy markers.
-        if not slots or not image_is_in_battle(captured_frame):
+        if not image_is_in_battle(captured_frame):
+            if play_state is not None:
+                play_state.wait_reason = "battle_unconfirmed"
             return None
+        observations = observe_hand_slots(captured_frame, available_slots=slots)
+        if play_state is not None:
+            play_state.observe_slots(observations, now=time.monotonic())
         hand = []
-        for slot in slots:
-            card_id, preset = get_play_coords_for_card(emulator, logger, slot, elapsed_s)
+        for slot in observations:
+            if slot.card_id is None or (play_state is not None and slot.slot in play_state.awaiting_replacement):
+                continue
+            card_id, preset = get_play_coords_for_card(emulator, logger, slot.slot, elapsed_s)
             if card_id and card_id != "UNKNOWN":
-                hand.append(HandCard(slot, card_id, get_card_group(card_id), get_card_elixir_cost(card_id), preset))
+                hand.append(
+                    HandCard(
+                        slot.slot,
+                        card_id,
+                        get_card_group(card_id),
+                        get_card_elixir_cost(card_id),
+                        preset,
+                        available=slot.available,
+                    )
+                )
         return captured_frame, hand
 
     observation = inspect_hand(decision_frame)
@@ -778,16 +817,14 @@ def _fight_loop(
             )
         if played:
             play_wait_watch.clear()
+            logger.change_status(f"本次出牌耗时 {str(time.time() - play_start_time)[:4]} 秒")
         else:
-            logger.change_status("暂缓出牌，继续观察战场……")
-            _report_battle_play_wait(logger, decision_frame, play_wait_watch)
+            reason = WAIT_REASON_LABELS.get(play_state.wait_reason or "no_suitable_play", "当前没有合适的出牌方案")
+            logger.change_status(f"暂缓出牌：{reason}，继续观察战场……")
+            _report_battle_play_wait(logger, decision_frame, play_wait_watch, play_state)
             snapshot = enemy_monitor.snapshot
             if snapshot is None or all(unit.zone == "enemy_half" for unit in snapshot.units):
                 time.sleep(0.2)
-        # play_time_taken = str(time.time() - play_start_time)[:4]
-        logger.change_status(
-            f"本次出牌耗时 {str(time.time() - play_start_time)[:4]} 秒",
-        )
 
     # Fight over: freeze capture so the pack excludes post-fight nav (manifest/outcome written later).
     stop_fight_capture()

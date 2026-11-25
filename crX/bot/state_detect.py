@@ -28,6 +28,7 @@ from crX.bot.coords import (
     ENEMY_PRINCESS_BAR_WIDTH,
     ENEMY_PRINCESS_RUINS_REGIONS_LTRB,
     GAME_SCREEN_SIZE,
+    HAND_CARD_SIZE,
     HAND_CARD_TOP_LEFTS,
     HAND_EMPTY_SLOT_SAMPLES,
     ITEM_DISTRIBUTION_COLLECT_ALL_SIZE,
@@ -340,6 +341,17 @@ def image_has_empty_hand_slot(image, slot: int) -> bool:
         return False
     left, top = HAND_CARD_TOP_LEFTS[slot]
     return all(pixel_is_equal(image[top + dy, left + dx], color, tol=10) for dx, dy, color in HAND_EMPTY_SLOT_SAMPLES)
+
+
+def image_has_grayscale_hand_slot(image, slot: int) -> bool:
+    """Color fingerprints cannot identify the desaturated, unavailable artwork."""
+    if image is None or image.shape != (*GAME_SCREEN_SIZE[::-1], 3) or not 0 <= slot < 4:
+        return False
+    left, top = HAND_CARD_TOP_LEFTS[slot]
+    width, height = HAND_CARD_SIZE
+    card = image[top : top + height, left : left + width].astype(numpy.int16)
+    colored = card.max(axis=2) - card.min(axis=2) > 20
+    return numpy.count_nonzero(colored) < colored.size * 0.05
 
 
 def check_pixels_for_win_in_battle_log(emulator) -> bool:

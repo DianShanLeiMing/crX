@@ -36,6 +36,7 @@ REASON_LABELS = {
     "unknown_card": "未知卡牌",
     "low_margin": "候选接近",
     "no_available_cards_high_elixir": "手牌可用性异常",
+    "unavailable_hand": "不可用手牌观察",
     "trial_match": "试用指纹命中",
     "builtin_disagreement": "正式库与本地识别不一致",
 }

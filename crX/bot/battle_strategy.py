@@ -1,4 +1,4 @@
-"""Rank the playable hand against one native battle observation."""
+"""Plan from confirmed hand identities and rank currently executable plays."""
 
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ from crX.bot.spell_targeting import find_circular_spell_target, low_princess_tow
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from crX.bot.card_detection import HandSlotObservation
     from crX.bot.enemy_detect import EnemyUnitLocation, EnemyUnitSnapshot
 
 type Point = tuple[int, int]
@@ -76,6 +77,16 @@ PURPOSE_LABELS: dict[PlayPurpose, str] = {
     "advance": "推进",
 }
 PURPOSE_PRIORITY: dict[PlayPurpose, int] = {"defend": 4, "finish": 3, "clear": 2, "advance": 1}
+WAIT_REASON_LABELS = {
+    "saving": "按推进目标存费",
+    "defense_observation": "观察刚投入的防守",
+    "uncertain_hand": "等待确认手牌身份",
+    "insufficient_elixir": "等待足够圣水或手牌就绪",
+    "unknown_cost": "等待确认卡牌费用",
+    "no_suitable_play": "当前没有合适的出牌方案",
+    "battle_unconfirmed": "等待确认战斗画面",
+    "hand_transition": "等待换牌动画结束",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +96,7 @@ class HandCard:
     group: str
     cost: int | None
     preset: Point | None
+    available: bool = True
 
     @property
     def is_spell(self) -> bool:
@@ -143,6 +155,25 @@ class BattlePlayState:
     hand_waits: dict[int, tuple[str, int]] = field(default_factory=dict)
     known_hand: dict[int, HandCard] = field(default_factory=dict)
     advance_target: HandCard | None = None
+    hand_observations: tuple[HandSlotObservation, ...] = ()
+    wait_reason: str | None = None
+    awaiting_replacement: dict[int, tuple[str, float]] = field(default_factory=dict)
+
+    def observe_slots(self, observations: tuple[HandSlotObservation, ...], *, now: float | None = None) -> None:
+        self.hand_observations = observations
+        for slot in observations:
+            previous = self.awaiting_replacement.get(slot.slot)
+            if previous is not None and (
+                slot.empty
+                or (slot.card_id is not None and slot.card_id != previous[0])
+                or (now is not None and now >= previous[1])
+            ):
+                self.awaiting_replacement.pop(slot.slot, None)
+            if slot.empty:
+                self.known_hand.pop(slot.slot, None)
+                self.hand_waits.pop(slot.slot, None)
+                if self.advance_target is not None and self.advance_target.slot == slot.slot:
+                    self.advance_target = None
 
     def elixir_limit(self, now: float) -> int | None:
         return self.elixir_remaining if now < self.elixir_settles_at else None
@@ -151,8 +182,8 @@ class BattlePlayState:
         return self.defender.point if self.defender is not None and now < self.defender_until else None
 
     def observe_hand(self, hand: Sequence[HandCard]) -> None:
-        # Unaffordable slots are absent from this observation. Retain their age
-        # and identity for saving until replacement or deployment, not for taps.
+        # Keep confirmed identity and age across unknown gray observations.
+        # Memory supports saving; deployment still requires a current ready slot.
         for card in hand:
             self.known_hand[card.slot] = card
             previous = self.hand_waits.get(card.slot)
@@ -188,9 +219,11 @@ class BattlePlayState:
         self.settlement_reading = None
         self.hand_waits.pop(play.card.slot, None)
         self.known_hand.pop(play.card.slot, None)
+        self.awaiting_replacement[play.card.slot] = (play.card.card_id, self.elixir_settles_at)
         for slot, (card_id, skipped) in self.hand_waits.items():
             self.hand_waits[slot] = (card_id, min(skipped + 1, MAX_WAITING_BONUS))
         self.advance_target = None
+        self.wait_reason = None
         if play.purpose == "defend" and not play.card.is_spell:
             self.defender = play
             self.defender_until = now + DEFENSE_FOLLOW_UP_S
@@ -295,7 +328,7 @@ def rank_hand_plays(
     stability = frozenset(threat_weights) if stable_positions is None else stable_positions
     options = []
     advances = []
-    current_cards = {(card.slot, card.card_id) for card in hand}
+    current_cards = {(card.slot, card.card_id) for card in hand if card.available}
     planning_hand = play_state.known_hand.values() if play_state is not None else hand
 
     for card in planning_hand:
@@ -305,7 +338,7 @@ def rank_hand_plays(
         playable = current and card.cost <= elixir
         # Unaffordable, previously recognized cards may set a safe saving target.
         # Once affordable they must be recognized again before any deployment.
-        can_plan_saving = urgent is None and card.cost > elixir and not card.is_spell
+        can_plan_saving = urgent is None and card.cost > offensive_budget and not card.is_spell
         if not playable and not can_plan_saving:
             continue
         can_spend_on_offense = card.cost <= offensive_budget
@@ -398,7 +431,7 @@ def rank_hand_plays(
         # A hand of building-targeting troops cannot expose its next defender
         # without cycling. Keep any defense/finisher, otherwise use an affordable
         # pressure troop with the normal reserve; cost breaks the tie, not age.
-        return options or advances
+        return _record_wait_reason(play_state, options or advances, hand, elixir, observe_defense)
     if play_state is not None:
         saved = play_state.advance_target
         target = next(
@@ -429,4 +462,27 @@ def rank_hand_plays(
                 play_state.advance_target = target.card
     else:
         options.extend(play for play in advances if play.card.cost is not None and play.card.cost <= offensive_budget)
+    return _record_wait_reason(play_state, options, hand, elixir, observe_defense)
+
+
+def _record_wait_reason(state, options, hand, elixir, observe_defense):
+    if state is not None:
+        if options:
+            state.wait_reason = None
+        elif state.advance_target is not None:
+            state.wait_reason = "saving"
+        elif observe_defense:
+            state.wait_reason = "defense_observation"
+        elif state.hand_observations and state.awaiting_replacement:
+            state.wait_reason = "hand_transition"
+        elif any(slot.available and slot.card_id is None for slot in state.hand_observations) or (
+            not hand and not state.hand_observations
+        ):
+            state.wait_reason = "uncertain_hand"
+        elif any(card.cost is None for card in hand):
+            state.wait_reason = "unknown_cost"
+        elif not any(card.available and card.cost is not None and card.cost <= elixir for card in hand):
+            state.wait_reason = "insufficient_elixir"
+        else:
+            state.wait_reason = "no_suitable_play"
     return options

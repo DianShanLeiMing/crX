@@ -62,7 +62,7 @@ def record_navigation_stall(logger, image, *, stage, wait_s, session_log_path=No
     )
 
 
-def record_battle_play_stall(logger, image, *, wait_s, elixir, hand, session_log_path=None):
+def record_battle_play_stall(logger, image, *, wait_s, elixir, hand, session_log_path=None, decision=None):
     """Persist a stalled battle even when it ends normally instead of recovering."""
     _record_wait_stall(
         logger,
@@ -74,6 +74,7 @@ def record_battle_play_stall(logger, image, *, wait_s, elixir, hand, session_log
         wait_s=wait_s,
         elixir=elixir,
         hand=hand,
+        decision=decision or {},
     )
 
 
