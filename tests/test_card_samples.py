@@ -231,18 +231,13 @@ def test_real_observation_uses_one_frame_and_leaves_decision_unchanged(tmp_path,
     assert '"reason": "unknown"' in records
 
 
-def test_empty_hand_sampling_requires_repeated_high_elixir(tmp_path, monkeypatch):
+def test_no_available_hand_does_not_enter_card_identity_review(tmp_path, monkeypatch):
     collector = samples.start_card_samples("Classic 2v2", tmp_path)
     monkeypatch.setattr(collector, "observation_due", lambda: True)
-    monkeypatch.setattr(cd, "image_has_elixir", lambda *_: False)
     try:
         for _ in range(4):
             cd._observe_hand_diagnostics(hand(), [], [0] * 4)
         assert collector.stats["queued"] == 0
-        monkeypatch.setattr(cd, "image_has_elixir", lambda *_: True)
-        for _ in range(3):
-            cd._observe_hand_diagnostics(hand(), [], [0] * 4)
-        assert collector.stats["queued"] == 1
     finally:
         samples.finish_card_samples()
 

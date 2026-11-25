@@ -23,7 +23,7 @@ from crX.bot.coords import (
     LEGACY_SCREEN_SIZE,
     REFERENCE_SCREEN_SIZE,
 )
-from crX.bot.state_detect import image_has_elixir, image_has_empty_hand_slot, image_has_grayscale_hand_slot
+from crX.bot.state_detect import image_has_empty_hand_slot, image_has_grayscale_hand_slot
 from crX.utils.card_library import runtime_entries
 from crX.utils.formal_library import _signature as reference_signature
 from crX.utils.formal_library import runtime_formal_entries
@@ -336,7 +336,7 @@ def observe_hand_slots(image, *, available_slots=None) -> tuple[HandSlotObservat
             result.append(HandSlotObservation(slot, None, False, True, "empty"))
             continue
         if image_has_grayscale_hand_slot(image, slot):
-            result.append(HandSlotObservation(slot, None, available, reason="grayscale"))
+            result.append(HandSlotObservation(slot, None, False, reason="grayscale"))
             continue
         _, recognition = _recognize_hand_slot(image, slot)
         card = recognition["card_id"]
@@ -383,7 +383,11 @@ def check_which_cards_are_available(emulator, check_side=False, *, observe_frame
 
     purple_counts = _card_purple_counts(battle_iar)
     for i, count in enumerate(purple_counts):
-        if count >= 104:
+        if (
+            count >= 104
+            and not image_has_grayscale_hand_slot(battle_iar, i)
+            and not image_has_empty_hand_slot(battle_iar, i)
+        ):
             card_exists_list.append(i)
 
     _observe_hand_diagnostics(battle_iar, card_exists_list, purple_counts)
@@ -404,42 +408,18 @@ def _observe_hand_diagnostics(image, available, purple_counts):
     collector = active_card_samples()
     if collector is None or not collector.observation_due():
         return
-    if available or not image_has_elixir(image, 5):
-        collector.empty_observations = 0
-    else:
-        collector.empty_observations += 1
-        if collector.empty_observations >= 3:
-            collector.offer(image, None, {"reason": "no_available_cards_high_elixir", "purple_counts": purple_counts})
     for slot in available:
         fingerprint, recognition = _recognize_hand_slot(image, slot)
         _record_match_sample(
             image, slot, fingerprint, recognition, trigger="hand_observation", purple_counts=purple_counts
-        )
-    observations = observe_hand_slots(image, available_slots=available)
-    if any(not slot.available and not slot.empty and slot.card_id is None for slot in observations):
-        collector.offer(
-            image,
-            None,
-            {
-                "reason": "unavailable_hand",
-                "purple_counts": purple_counts,
-                "hand": [
-                    {
-                        "slot": slot.slot,
-                        "card_id": slot.card_id,
-                        "available": slot.available,
-                        "empty": slot.empty,
-                        "reason": slot.reason,
-                    }
-                    for slot in observations
-                ],
-            },
         )
 
 
 def _record_match_sample(image, slot, fingerprint, recognition, *, trigger, purple_counts=None):
     collector = active_card_samples()
     if collector is None:
+        return
+    if image_has_grayscale_hand_slot(image, slot) or image_has_empty_hand_slot(image, slot):
         return
     collector.observe_library_match(recognition, slot)
     if recognition["card_id"] == "UNKNOWN":
@@ -476,6 +456,8 @@ def trigger_hero_champion_ability(emulator, logger) -> None:
 
 
 def identify_hand_cards(emulator, card_index):
+    if image_has_grayscale_hand_slot(battle_iar, card_index) or image_has_empty_hand_slot(battle_iar, card_index):
+        return "UNKNOWN"
     fingerprint, recognition = _recognize_hand_slot(battle_iar, card_index)
     # A selected-card failure must not be lost to the periodic observation gate.
     _record_match_sample(battle_iar, card_index, fingerprint, recognition, trigger="selected_card")

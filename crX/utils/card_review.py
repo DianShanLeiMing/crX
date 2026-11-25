@@ -8,6 +8,7 @@ import re
 import tempfile
 import time
 from dataclasses import dataclass, replace
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -124,6 +125,40 @@ def ignored_reason(sample: ReviewSample) -> str:
         return "正式库已有相同或近似参考"
     if sample.status == "included" and sample.review.get("library_merged_into"):
         return "已合并到同卡近似参考"
+    return ""
+
+
+def unavailable_sample_reason(sample: ReviewSample) -> str:
+    """Explain non-actionable review sources without changing their raw evidence."""
+    if sample.record.get("reason") in {"unavailable_hand", "no_available_cards_high_elixir"}:
+        return "不可用手牌诊断，无需确认卡名"
+    slot = sample.record.get("slot")
+    if type(slot) is not int or not 0 <= slot < 4:
+        return ""
+    if sample.record.get("available") is False:
+        return "手牌不可使用，无需确认卡名"
+    try:
+        path = sample.file("frame")
+        stat = path.stat()
+        if stat.st_size > 4 * 1024 * 1024:
+            return ""
+        stamp = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+        return _unavailable_frame_reason(path, stamp, slot)
+    except (OSError, ValueError, KeyError):
+        return ""
+
+
+@lru_cache(maxsize=256)
+def _unavailable_frame_reason(path: Path, stamp: tuple[int, ...], slot: int) -> str:
+    import cv2
+
+    from crX.bot.state_detect import image_has_empty_hand_slot, image_has_grayscale_hand_slot
+
+    frame = cv2.imread(str(path))
+    if image_has_grayscale_hand_slot(frame, slot):
+        return "灰态手牌不可使用，无需确认卡名"
+    if image_has_empty_hand_slot(frame, slot):
+        return "换牌空槽，无需确认卡名"
     return ""
 
 

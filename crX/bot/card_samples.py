@@ -1,4 +1,4 @@
-"""Bounded, asynchronous diagnostics from the exact frame used for recognition."""
+"""Bounded, asynchronous review samples of usable single-card artwork."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ import numpy as np
 from PIL import Image
 
 from crX.bot.coords import GAME_SCREEN_SIZE, HAND_CARD_SIZE, HAND_CARD_TOP_LEFTS, HAND_DIAGNOSTIC_REGION
+from crX.bot.state_detect import image_has_empty_hand_slot, image_has_grayscale_hand_slot
 from crX.utils.platform import get_app_data_dir
 
 LOG = logging.getLogger(__name__)
@@ -61,7 +62,6 @@ class CardSampleCollector:
         self.max_bytes = max_bytes
         self.started = time.monotonic()
         self.last_observation = float("-inf")
-        self.empty_observations = 0
         self.stats = dict.fromkeys(("queued", "saved", "duplicates", "dropped", "errors"), 0)
         self._queue: queue.Queue = queue.Queue(maxsize=8)
         self._stop = threading.Event()
@@ -177,17 +177,20 @@ class CardSampleCollector:
     def offer(self, frame, slot: int | None, metadata: dict) -> bool:
         if self._stop.is_set() or frame is None or frame.shape != (*GAME_SCREEN_SIZE[::-1], 3):
             return False
-        if slot is None:
-            left, top, right, bottom = HAND_DIAGNOSTIC_REGION
-        elif 0 <= slot < len(HAND_CARD_TOP_LEFTS):
-            left, top = HAND_CARD_TOP_LEFTS[slot]
-            width, height = HAND_CARD_SIZE
-            right, bottom = left + width, top + height
-        else:
+        # Pending card review is only for usable single-card artwork. Whole-hand
+        # waits belong to failure diagnostics, not the card-identity approval queue.
+        if type(slot) is not int or not 0 <= slot < len(HAND_CARD_TOP_LEFTS):
             return False
-        if slot is not None and metadata.get("available") is False:
+        if (
+            metadata.get("available") is False
+            or image_has_grayscale_hand_slot(frame, slot)
+            or image_has_empty_hand_slot(frame, slot)
+        ):
             self.stats["dropped"] += 1
             return False
+        left, top = HAND_CARD_TOP_LEFTS[slot]
+        width, height = HAND_CARD_SIZE
+        right, bottom = left + width, top + height
         crop = frame[top:bottom, left:right]
         reason = str(metadata["reason"])
         fingerprint = _perceptual_hash(crop)

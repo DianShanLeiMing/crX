@@ -20,6 +20,7 @@ from crX.utils.card_review import (
     load_card_thumbnail,
     sample_file,
     scan_samples,
+    unavailable_sample_reason,
 )
 
 REVIEW_TABS = {
@@ -223,7 +224,12 @@ def _recognized_reference(fingerprint, references, card_id):
 def _evidence(samples, excluded):
     result = []
     for sample in samples:
-        if sample.key in excluded or not sample.card_id or sample.status == "ignored":
+        if (
+            sample.key in excluded
+            or not sample.card_id
+            or sample.status == "ignored"
+            or unavailable_sample_reason(sample)
+        ):
             continue
         try:
             result.append((sample.card_id, local.sample_fingerprint(sample).tolist(), sample.key))
@@ -345,6 +351,9 @@ def scan_review(root, *, refresh_library=False, reassess_history=True, cleanup_p
             - published.keys()
         )
         for sample in samples:
+            if sample.status == "pending" and (reason := unavailable_sample_reason(sample)):
+                _remember(updates, sample, _result("ignored", sample.card_id, reason))
+                continue
             if sample.review.get("work_result") in {"pending", "included", "covered", "ignored"}:
                 identifier = sample.review.get("formal_id")
                 if (
@@ -439,6 +448,10 @@ def _plan(root, samples, card_id, entries, *, excluded=(), snapshot=None):
     additions, updates = [], []
     counts = Counter()
     for sample in samples:
+        if reason := unavailable_sample_reason(sample):
+            updates.append((sample, _result("ignored", card_id, reason)))
+            counts["ignored"] += 1
+            continue
         try:
             if load_card_thumbnail(sample, size=(64, 80)) is None:
                 raise ValueError("卡牌裁图缺失或损坏")
@@ -501,7 +514,13 @@ def confirm_samples(root, selected, card_id, note=""):
                 )
             raise
         local.sync_library(root)
-        labels = {"included": "已入库", "covered": "已被覆盖", "conflict": "需复核", "failed": "检查失败"}
+        labels = {
+            "included": "已入库",
+            "covered": "已被覆盖",
+            "conflict": "需复核",
+            "failed": "检查失败",
+            "ignored": "不可使用",
+        }
         return "；".join(f"{labels[key]} {counts[key]} 张" for key in labels if counts[key])
 
 

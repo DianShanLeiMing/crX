@@ -1,6 +1,5 @@
 """Native four-slot perception, planning-only memory and current-frame execution."""
 
-import json
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -15,7 +14,6 @@ from crX.bot.card_detection import HandSlotObservation
 from crX.bot.coords import HAND_CARD_TOP_LEFTS, HAND_EMPTY_SLOT_SAMPLES
 from crX.bot.enemy_detect import EnemyUnitLocation, EnemyUnitSnapshot
 from crX.bot.state_detect import image_has_grayscale_hand_slot
-from crX.utils.card_review import export_candidate, save_review, scan_samples
 from crX.utils.logger import Logger
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -72,25 +70,22 @@ def test_wrong_geometry_cannot_create_hand_observations(frame):
     assert detection.observe_hand_slots(frame) == ()
 
 
-def test_unavailable_observation_is_saved_as_diagnostic_not_an_activatable_reference(tmp_path, monkeypatch):
+def test_unavailable_observation_is_not_queued_for_card_identity_review(tmp_path, monkeypatch):
     collector = card_samples.start_card_samples("Classic 1v1", tmp_path)
     monkeypatch.setattr(collector, "_flush_match_stats", lambda **_: None)
     frame = native_hand(gray=True)
     try:
+        # A stale purple HUD probe cannot make desaturated artwork usable.
+        monkeypatch.setattr(detection, "_card_purple_counts", lambda _: [104] * 4)
         assert detection.check_which_cards_are_available(None, frame=frame) == []
-        assert collector.stats["queued"] == 1
+        assert detection.identify_hand_cards(None, 0) == "UNKNOWN"
+        assert collector.stats["queued"] == 0
+        assert all(not slot.available for slot in detection.observe_hand_slots(frame, available_slots=(0, 1, 2, 3)))
+        assert not collector.offer(frame, 0, {"reason": "unknown", "available": True})
+        assert not collector.offer(frame, None, {"reason": "unavailable_hand"})
     finally:
         card_samples.finish_card_samples()
-    record = json.loads((collector.directory / "samples.jsonl").read_text(encoding="utf-8"))
-    assert record["reason"] == "unavailable_hand" and record["slot"] is None
-    assert len(record["hand"]) == 4
-    assert all(slot["reason"] == "grayscale" for slot in record["hand"])
-    samples, errors = scan_samples(tmp_path)
-    assert not errors and len(samples) == 1
-    save_review(samples[0], "confirmed", "golem")
-    with pytest.raises(ValueError, match="单张手牌"):
-        export_candidate(scan_samples(tmp_path)[0][0])
-    np.testing.assert_array_equal(cv2.imread(str(collector.directory / record["files"]["frame"])), frame)
+    assert collector.stats["saved"] == 0 and not collector.directory.exists()
 
 
 @pytest.mark.parametrize("random_mode", [False, True])

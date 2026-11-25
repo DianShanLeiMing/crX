@@ -76,8 +76,8 @@ def test_diagnostic_and_play_reuse_recognition_only_on_the_same_frame(monkeypatc
     for current in (frame, frame.copy()):
         assert cd.check_which_cards_are_available(None, frame=current) == [0]
         assert cd.identify_hand_cards(None, 0) == EXPECTED[0]
-    # All four positions are observed once per frame; selection reuses the cache.
-    assert extract.call_count == 8
+    # Card sampling only matches usable positions; selection reuses the cache.
+    assert extract.call_count == 2
 
 
 def test_golden_knight_live_fingerprint_does_not_match_prince():
