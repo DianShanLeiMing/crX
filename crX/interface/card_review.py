@@ -10,6 +10,7 @@ from queue import Empty, Queue
 from tkinter import messagebox
 from tkinter.font import Font
 from tkinter.scrolledtext import ScrolledText
+from typing import cast
 
 import ttkbootstrap as ttk
 from PIL import ImageTk
@@ -44,7 +45,7 @@ from crX.utils.open_folder import open_folder
 MODE_LABELS = {"practice": "练习", "1v1": "1v1", "2v2": "2v2"}
 STAGE_ACTIONS = {
     "待确认": ("confirm",),
-    "待更新": ("rename", "remove"),
+    "待共享参考": ("rename", "remove"),
 }
 COLUMN_SPECS = {
     "group": ("相似分组", 100),
@@ -54,7 +55,7 @@ COLUMN_SPECS = {
 }
 FILTER_COLUMNS = {
     "待确认": ("group", "card", "status"),
-    "待更新": ("card", "references", "status"),
+    "待共享参考": ("card", "references", "status"),
 }
 THUMBNAIL_CACHE_SIZE = 128
 REVIEW_THUMBNAIL_SIZE = (24, 30)
@@ -302,13 +303,14 @@ class CardReviewTab(ttk.Frame):
             selection_tools, text="取消选择", command=self._clear_selection, state="disabled"
         )
         self.clear_selection_button.pack(side="left", padx=(0, 8))
-        self.upload_button = ttk.Button(selection_tools, text="上传", command=self._upload, state="disabled")
-        self.upload_button.pack(side="left")
+        self.open_library_button = ttk.Button(
+            selection_tools, text="到样本库上传", command=self._open_library_for_selected, state="disabled"
+        )
+        self.open_library_button.pack(side="left")
         self.clear_button = ttk.Button(
             selection_tools, text="删除样本", bootstyle="danger", command=self._clear_samples, state="disabled"
         )
         self.clear_button.pack(side="left", padx=(24, 0))
-        self.review_upload = _UploadFooter(self, row=3)
         self._active_upload: _UploadFooter | None = None
         self.body_panes = tk.PanedWindow(
             self,
@@ -817,7 +819,7 @@ class CardReviewTab(ttk.Frame):
             self.review_panes.paneconfigure(
                 self.details,
                 height=self._details_height,
-                stretch="always" if self.filter_var.get() == "待更新" else "never",
+                stretch="always" if self.filter_var.get() == "待共享参考" else "never",
             )
             self.review_panes.add(
                 self.sample_table, before=self.details, minsize=80, height=self._table_height, stretch="always"
@@ -944,8 +946,8 @@ class CardReviewTab(ttk.Frame):
             self._select()
         return "break"
 
-    def _upload_samples(self):
-        if self.filter_var.get() != "待更新":
+    def _sharing_samples(self):
+        if self.filter_var.get() != "待共享参考":
             return []
         return [sample for key in self.tree.selection() for sample in self.row_samples.get(key, [])]
 
@@ -1040,14 +1042,17 @@ class CardReviewTab(ttk.Frame):
         root = self.root
         self._start_action(lambda: reorder_references(root, card, ordered, expected), kind="reorder")
 
-    def _upload(self):
+    def _open_library_for_selected(self):
         if self._running or self._action_busy:
             return
-        samples = self._upload_samples()
+        samples = self._sharing_samples()
         if not samples:
-            self.message_var.set("请在待更新列表选择要上传的卡牌。")
+            self.message_var.set("请在待共享参考列表选择要带到样本库的卡牌。")
             return
-        self._start_upload(self.review_upload, samples)
+        cards = tuple(dict.fromkeys(sample.card_id for sample in samples))
+        self.library_view.locate_card(cards[0])
+        cast(ttk.Notebook, self.master).select(self.library_tab)
+        self.message_var.set(f"已定位{CARD_NAMES_ZH[cards[0]]}，如需上传，请勾选卡牌后点击「上传所选修改」。")
 
     def _start_upload(self, footer: _UploadFooter, samples, **options):
         results, root = self._results, self.root
@@ -1110,7 +1115,7 @@ class CardReviewTab(ttk.Frame):
                         for label, result in REVIEW_TABS.items()
                     )
                     for label, page in self.stage_pages.items():
-                        count = included_cards if label == "待更新" else counts[REVIEW_TABS[label]]
+                        count = included_cards if label == "待共享参考" else counts[REVIEW_TABS[label]]
                         self.stage_tabs.tab(page, text=f"{label}（{count}）")
                     if self.count_callback:
                         self.count_callback(counts["pending"])
@@ -1327,7 +1332,7 @@ class CardReviewTab(ttk.Frame):
             self._images.clear()
             self._frame_preview = None
             self.detail_var.set("发现未知牌后会自动出现在这里；可切换筛选查看已处理样本。")
-            self.description_var.set("暂无此类样本。运行对战可自动采集；已确认的卡牌可在「待更新」中查看。")
+            self.description_var.set("暂无此类样本。运行对战可自动采集；已确认的卡牌可在「待共享参考」中查看。")
             self.card_var.set("")
             self.note_var.set("")
             self.reference_image.configure(image="", text="暂无参考对照")
@@ -1338,7 +1343,7 @@ class CardReviewTab(ttk.Frame):
     def _select(self, _event=None):
         self._sync_thumbnail_selection()
         selection = self.tree.selection()
-        if self.filter_var.get() == "待更新":
+        if self.filter_var.get() == "待共享参考":
             self._render_references(selection)
             return
         self._show_samples(selection)
@@ -1381,7 +1386,7 @@ class CardReviewTab(ttk.Frame):
             self._show_samples(())
 
     def _select_reference(self, _event=None):
-        if self.filter_var.get() == "待更新" and len(self.tree.selection()) == 1:
+        if self.filter_var.get() == "待共享参考" and len(self.tree.selection()) == 1:
             self._show_samples(self.reference_tree.selection())
 
     def _show_samples(self, selection):
@@ -1390,7 +1395,7 @@ class CardReviewTab(ttk.Frame):
             self.selected = None
             self._selection_version += 1
             self.description_var.set("选择样本可查看完整说明。")
-            if self.filter_var.get() == "待更新":
+            if self.filter_var.get() == "待共享参考":
                 self._images.clear()
                 self._frame_preview = None
                 for widget in (self.card_image, self.hand_image, self.frame_image, self.reference_image):
@@ -1400,7 +1405,7 @@ class CardReviewTab(ttk.Frame):
             self._set_action_state()
             return
         self._selection_cleared = False
-        focus = self.reference_tree.focus() if self.filter_var.get() == "待更新" else self.tree.focus()
+        focus = self.reference_tree.focus() if self.filter_var.get() == "待共享参考" else self.tree.focus()
         key = focus if focus in selection else selection[0]
         if key not in self.samples:
             return
@@ -1446,7 +1451,7 @@ class CardReviewTab(ttk.Frame):
     def _request_preview(self):
         if self.selected is None:
             return
-        if self.filter_var.get() == "待更新" and self.details.select() == str(self.reference_panel):
+        if self.filter_var.get() == "待共享参考" and self.details.select() == str(self.reference_panel):
             return
         key = (self.selected.key, self._selection_version)
         if key != self._preview_key:
@@ -1463,7 +1468,7 @@ class CardReviewTab(ttk.Frame):
         return result
 
     def _configure_detail_mode(self):
-        show_references = self.filter_var.get() == "待更新"
+        show_references = self.filter_var.get() == "待共享参考"
         if show_references:
             self.description_bar.grid_remove()
         else:
@@ -1480,7 +1485,7 @@ class CardReviewTab(ttk.Frame):
                 self.details.hide(self.reference_panel)
                 if not self._details_expanded:
                     self.review_panes.paneconfigure(self.details, height=self._normal_details_height, stretch="never")
-        editable = self.filter_var.get() in ("待确认", "待更新")
+        editable = self.filter_var.get() in ("待确认", "待共享参考")
         if editable:
             self.edit_panel.grid()
         else:
@@ -1663,7 +1668,7 @@ class CardReviewTab(ttk.Frame):
         enabled = bool(count) and not self._running and not self._action_busy
         self.selection_var.set(
             f"已选 {len(self.tree.selection())} 种卡牌；请在下方选择具体参考进行操作。"
-            if stage == "待更新"
+            if stage == "待共享参考"
             else f"已选 {count} 张；卡名、版本及备注应用于全部选中样本。Ctrl / Shift 多选。"
         )
         visible = STAGE_ACTIONS[stage]
@@ -1676,8 +1681,8 @@ class CardReviewTab(ttk.Frame):
             allowed = enabled and (key not in ("rename", "remove") or owned and same_reference)
             button.configure(state="normal" if allowed else "disabled")
         self.clear_button.configure(state="normal" if enabled else "disabled")
-        self.upload_button.configure(
-            state="normal" if self._upload_samples() and not self._running and not self._action_busy else "disabled"
+        self.open_library_button.configure(
+            state="normal" if self._sharing_samples() and not self._running and not self._action_busy else "disabled"
         )
         self.select_all_button.configure(
             state="normal" if self.tree.get_children() and not self._action_busy else "disabled"
@@ -1691,12 +1696,12 @@ class CardReviewTab(ttk.Frame):
         self.stage_help.set(
             {
                 "待确认": "核对卡名与版本后确认并入库；无需保留的样本可选中后删除。正式库已覆盖时清理来源样本，冲突保留待确认。任务停止后可操作。",
-                "待更新": "在下方选择具体参考更正或移出；上传共享上方选中卡牌的全部正式参考。上传成功后清理本机来源截图、记录和标注。",
+                "待共享参考": "新增参考已在本机生效，可在下方核对、更正或移出。选中卡牌后点击「到样本库上传」，在样本库统一提交修改。上传成功后清理对应来源截图、记录和标注。",
             }[stage]
         )
 
     def _action_samples(self):
-        if self.filter_var.get() == "待更新":
+        if self.filter_var.get() == "待共享参考":
             if len(self.tree.selection()) != 1:
                 return []
             visible = {sample.key for sample in self.row_samples.get(self.tree.selection()[0], [])}

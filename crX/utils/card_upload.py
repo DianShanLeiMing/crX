@@ -472,7 +472,7 @@ def _commit_on_upstream(repo, base, payloads, directory, details):
 
 def _check_pending_metadata(repo, directory, upstream, head, cards, identifiers):
     if _git(repo, "diff", "--quiet", upstream, head, "--", LIBRARY_FILE, check=False).returncode:
-        raise ValueError("有尚未推送的参考样本，请先在待更新中完成上传")
+        raise ValueError("有尚未推送的参考样本，请在样本库勾选对应卡牌后完成上传")
     before = _base_document(repo, directory, PREFERENCES_FILE, preferences.read_document, upstream)["cards"]
     after = _base_document(repo, directory, PREFERENCES_FILE, preferences.read_document, head)["cards"]
     outside = any(before.get(card) != after.get(card) for card in before.keys() | after.keys() if card not in cards)

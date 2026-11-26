@@ -194,7 +194,7 @@ def sample_progress(sample: ReviewSample) -> tuple[str, str, str]:
     if sample.review.get("work_result"):
         label = {
             "pending": "待确认",
-            "included": "已上传" if sample.uploaded else "待更新",
+            "included": "已上传" if sample.uploaded else "待共享参考",
             "covered": "已被覆盖",
             "ignored": "已忽略",
         }[sample.status]

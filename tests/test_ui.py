@@ -1160,7 +1160,7 @@ def test_review_details_expand_scroll_and_restore_without_resizing_window(deskto
         window.geometry("760x820")
         ui.update()
         assert tab.sample_table.winfo_height() > table_height + 100
-        for stage in ("待确认", "待更新"):
+        for stage in ("待确认", "待共享参考"):
             tab.filter_var.set(stage)
             tab._render_list()
             ui.update()
@@ -1325,7 +1325,7 @@ def test_thumbnail_results_follow_current_tab_without_resetting_edits(desktop_ui
     tab.pack(fill="both", expand=True)
     try:
         _wait_ui(ui, lambda: not tab._scan_busy and entered.is_set())
-        switch(ui, tab, "待更新")
+        switch(ui, tab, "待共享参考")
         assert not tab.tree.get_children()
         release.set()
         _wait_ui(ui, lambda: not tab._thumbnail_busy)
@@ -1410,7 +1410,7 @@ def test_review_content_keeps_arrow_when_parent_sash_cursor_is_active(review_ui,
 
 
 @pytest.mark.parametrize("missing_image", [False, True])
-@pytest.mark.parametrize("stage", ["待确认", "待更新"])
+@pytest.mark.parametrize("stage", ["待确认", "待共享参考"])
 def test_loaded_thumbnails_stop_redrawing_while_idle(review_ui, monkeypatch, missing_image, stage):
     from unittest.mock import Mock
 
@@ -1418,7 +1418,7 @@ def test_loaded_thumbnails_stop_redrawing_while_idle(review_ui, monkeypatch, mis
     if missing_image:
         monkeypatch.setattr("crX.interface.card_review.load_card_thumbnail", lambda _sample: None)
     sample = add("idle-thumbnail")
-    if stage == "待更新":
+    if stage == "待共享参考":
         select(tab, sample)
         tab.card_var.set("knight")
         tab.stage_buttons["confirm"].invoke()
@@ -1426,7 +1426,7 @@ def test_loaded_thumbnails_stop_redrawing_while_idle(review_ui, monkeypatch, mis
         switch(ui, tab, stage)
     _wait_ui(ui, lambda: sample.key in tab._thumbnail_images and not tab._thumbnail_busy)
     ui.update()
-    tree = tab.reference_tree if stage == "待更新" else tab.thumbnail_tree
+    tree = tab.reference_tree if stage == "待共享参考" else tab.thumbnail_tree
     updates = Mock(wraps=tree.item)
     monkeypatch.setattr(tree, "item", updates)
     heartbeat = []
@@ -1449,7 +1449,7 @@ def finish(ui, tab):
 def test_two_tabs_single_approval_routes_and_keeps_owned_status(review_ui):
     ui, tab, add, destination = review_ui
     first, duplicate, conflict = add("first"), add("duplicate", shift=5), add("conflict", channel=15)
-    assert tuple(tab.stage_pages) == ("待确认", "待更新") and not hasattr(tab, "filter_combo")
+    assert tuple(tab.stage_pages) == ("待确认", "待共享参考") and not hasattr(tab, "filter_combo")
     assert not {"ignore", "restore"}.intersection(tab.stage_buttons)
     legacy = add("legacy", channel=4)
     save_review(legacy, "ignored", note="历史忽略记录")
@@ -1484,11 +1484,11 @@ def test_two_tabs_single_approval_routes_and_keeps_owned_status(review_ui):
     assert tab.tree.set(conflict.key, "status") == "需复核"
     assert "巨人" in tab.description_var.get()
     assert len(formal._read_entries(destination)) == 1
-    for label, sample in (("待更新", first), ("待确认", conflict)):
+    for label, sample in (("待共享参考", first), ("待确认", conflict)):
         switch(ui, tab, label)
         assert tab.tree.get_children() == (sample.key,)
         assert tab.stage_tabs.tab(tab.stage_pages[label], "text") == f"{label}（1）"
-    switch(ui, tab, "待更新")
+    switch(ui, tab, "待共享参考")
     tab.refresh()
     _wait_ui(ui, lambda: not tab._scan_busy)
     assert tab.samples[first.key].status == "included"
@@ -1522,7 +1522,7 @@ def test_pending_list_shows_all_groups_and_updates_after_processing(review_ui, m
     assert duplicate.key not in tab.samples and not duplicate.directory.exists()
     assert not tab.tree.get_children()
     # The newly added reference remains available for upload.
-    switch(ui, tab, "待更新")
+    switch(ui, tab, "待共享参考")
     assert tab.tree.get_children() == (first.key,)
     switch(ui, tab, "待确认")
     assert not tab.tree.get_children()
@@ -1592,10 +1592,10 @@ def test_batch_approval_uses_visible_selection_and_preserves_edits(review_ui):
     assert len(formal._read_entries(destination)) == 1
 
 
-@pytest.mark.parametrize("stage", ["待确认", "待更新"])
+@pytest.mark.parametrize("stage", ["待确认", "待共享参考"])
 def test_manual_pane_sizes_survive_content_changes_and_refresh(review_ui, stage):
     ui, tab, add, _destination = review_ui
-    if stage == "待更新":
+    if stage == "待共享参考":
         sample = add("resize")
         select(tab, sample)
         tab.card_var.set("knight")
@@ -1913,9 +1913,9 @@ def test_included_cards_merge_and_reference_selection_scopes_edits(review_ui, mo
         tab.card_var.set(card_id)
         tab.stage_buttons["confirm"].invoke()
         finish(ui, tab)
-    switch(ui, tab, "待更新")
+    switch(ui, tab, "待共享参考")
     assert len(tab.tree.get_children()) == 2
-    assert tab.stage_tabs.tab(tab.stage_pages["待更新"], "text") == "待更新（2）"
+    assert tab.stage_tabs.tab(tab.stage_pages["待共享参考"], "text") == "待共享参考（2）"
     knight_row = next(key for key in tab.tree.get_children() if tab.tree.set(key, "card") == "骑士")
     tab.tree.selection_set(knight_row)
     tab.tree.focus(knight_row)
@@ -2068,79 +2068,90 @@ def test_delete_and_running_guards_recheck_after_dialog(review_ui, monkeypatch):
     tab.set_running(False)
 
 
-def test_upload_publishes_all_references_of_selected_cards_and_blocks_while_running(review_ui, monkeypatch):
+def test_pending_references_locate_cards_without_changing_library_checks(review_ui, monkeypatch):
     import threading
 
     ui, tab, add, _destination = review_ui
     first, supplement, other = add("first"), add("supplement", channel=4), add("other", channel=8)
-    assert str(tab.upload_button.cget("state")) == "disabled"
-    assert not hasattr(tab, "hits_check") and not hasattr(tab, "update_hits")
+    assert str(tab.open_library_button.cget("state")) == "disabled"
     for sample, card_id in ((first, "knight"), (supplement, "knight"), (other, "archers")):
         select(tab, sample)
         tab.card_var.set(card_id)
         tab.stage_buttons["confirm"].invoke()
         finish(ui, tab)
-    switch(ui, tab, "待更新")
+    switch(ui, tab, "待共享参考")
     row = next(key for key, sources in tab.row_samples.items() if any(item.key == first.key for item in sources))
     tab.tree.selection_set(row)
     tab.tree.focus(row)
     tab._select()
+    view = tab.library_view
+    view.query.set("archers")
+    view._checked_cards.add("archers")
     calls = []
     release = threading.Event()
 
-    def publish(root, samples, *, progress):
-        calls.append((root, {sample.key for sample in samples}))
+    def publish(root, samples, *, progress, sync_cards, update_hits):
+        calls.append((root, samples, set(sync_cards), update_hits))
         progress("正在提交选中的正式参考……")
         assert release.wait(timeout=5)
-        return "新增骑士参考样本\n更新骑士参考顺序"
+        return "新增骑士参考样本（参考1、参考2）"
 
     monkeypatch.setattr("crX.interface.card_review.upload_references", publish)
-    assert str(tab.upload_button.cget("state")) == "normal"
-    tab.upload_button.invoke()
-    assert tab.formalizing and str(tab.upload_button.cget("state")) == "disabled"
-    footer = tab.review_upload
+    assert tab.open_library_button.cget("text") == "到样本库上传"
+    tab.open_library_button.invoke()
+    finish(ui, tab)
+    assert not calls and not tab.formalizing
+    assert tab.master.select() == str(tab.library_tab)
+    assert view.query.get() == ""
+    assert view.selected_cards() == ("archers",)
+    assert view.cards.focus() == "knight"
+    assert len(view.references.get_children()) == 2
+    assert not hasattr(tab, "review_upload")
+    view.select_cards(("knight",))
+    view.upload_button.invoke()
+    footer = tab.library_upload
     try:
         _wait_ui(ui, lambda: footer.status.get() == "正在提交选中的正式参考……")
         assert footer.progress.winfo_ismapped()
-        assert footer.winfo_y() >= tab.body_panes.winfo_y() + tab.body_panes.winfo_height()
-        assert footer.progress.grid_info()["row"] == 1
-        tab.master.select(tab.library_tab)
-        ui.update()
-        assert tab.library_view.cards.winfo_ismapped()
-        assert not tab.library_upload.winfo_ismapped()
+        assert str(view.upload_button.cget("state")) == "disabled"
     finally:
         release.set()
     finish(ui, tab)
-    assert calls == [(tab.root, {first.key, supplement.key})]
-    assert not tab.library_upload.winfo_ismapped()
-    tab.master.select(tab)
-    ui.update()
-    assert tab.body_panes.winfo_ismapped()
-    assert footer.status.get() == "上传完成"
-    assert footer.result == "新增骑士参考样本\n更新骑士参考顺序"
+    assert calls == [(tab.root, [], {"knight"}, True)]
+    assert footer.status.get() == "上传完成 · 已上传 1 种卡牌"
+    assert footer.result == "新增骑士参考样本（参考1、参考2）"
     assert footer.details_button.winfo_ismapped()
     assert not footer.progress.winfo_ismapped()
+    assert not view.selected_cards()
+
+    tab.master.select(tab)
+    ui.update()
     tab.select_all_button.invoke()
-    assert str(tab.upload_button.cget("state")) == "normal"
-    tab.upload_button.invoke()
+    tab.open_library_button.invoke()
     finish(ui, tab)
-    assert calls[-1][1] == {first.key, supplement.key, other.key}
+    assert not view.selected_cards()
     tab.set_running(True)
-    assert str(tab.upload_button.cget("state")) == "disabled"
-    tab._upload()
-    assert len(calls) == 2
+    assert str(tab.open_library_button.cget("state")) == "disabled"
+    tab.master.select(tab)
+    ui.update()
+    tab._open_library_for_selected()
+    assert tab.master.select() == str(tab)
+    assert len(calls) == 1
     tab.set_running(False)
+    tab.open_library_button.invoke()
+    finish(ui, tab)
+    assert not view.selected_cards()
+    view.select_cards(("knight", "archers"))
 
     def failed_upload(*_args, **_kwargs):
         raise ValueError("远端连接失败")
 
     monkeypatch.setattr("crX.interface.card_review.upload_references", failed_upload)
-    tab.upload_button.invoke()
+    view.upload_button.invoke()
     finish(ui, tab)
     assert footer.status.get() == "上传失败"
     assert footer.result == "远端连接失败"
-    assert not footer.progress.winfo_ismapped()
-    assert str(tab.upload_button.cget("state")) == "normal"
+    assert set(view.selected_cards()) == {"knight", "archers"}
 
 
 def test_rename_and_remove_keep_the_source_of_the_unpublished_reference(review_ui, monkeypatch):
@@ -2151,7 +2162,7 @@ def test_rename_and_remove_keep_the_source_of_the_unpublished_reference(review_u
         tab.card_var.set("knight")
         tab.stage_buttons["confirm"].invoke()
         finish(ui, tab)
-    switch(ui, tab, "待更新")
+    switch(ui, tab, "待共享参考")
     tab.card_var.set("cannon")
     tab.stage_buttons["rename"].invoke()
     finish(ui, tab)
@@ -2217,29 +2228,41 @@ def test_catalog_search_and_upload_archive_clean_images(review_ui, monkeypatch):
     view._sort_counts()
     assert view.cards.get_children()[0] == "knight"
     view._sort_counts()
-    assert view.cards.get_children()[-1] == "knight"
+    assert view.cards.get_children()[0] == "knight"  # Pending changes retain priority in either count order.
     before = destination.read_bytes()
     tab.master.select(tab)
     ui.update()
     assert tab.filter_var.get() == "待确认"
     assert tab.review_tools.winfo_ismapped()
-    switch(ui, tab, "待更新")
+    switch(ui, tab, "待共享参考")
     assert tab.tree.get_children() and tab.body_panes.winfo_ismapped()
 
-    def publish(root, samples, *, progress):
+    def publish(root, samples, *, progress, sync_cards, update_hits):
         progress("正在上传……")
         revision = "a" * 40
-        published = {sample.review["formal_id"]: revision for sample in samples}
+        assert not samples and update_hits and set(sync_cards) == {"knight"}
+        published = {
+            sample.review["formal_id"]: revision
+            for sample in tab.samples.values()
+            if sample.status == "included" and sample.card_id in sync_cards
+        }
         monkeypatch.setattr("crX.utils.card_upload.published_reference_ids", lambda: published)
         _archive_published(root, published, revision)
         return "已上传 2 份正式参考"
 
     monkeypatch.setattr("crX.interface.card_review.upload_references", publish)
     tab.select_all_button.invoke()
-    tab.upload_button.invoke()
+    tab.open_library_button.invoke()
+    finish(ui, tab)
+    assert tab.master.select() == str(tab.library_tab)
+    assert not view.selected_cards()
+    assert view.cards.focus() == "knight"
+    assert tab.tree.get_children()
+    view.select_cards(("knight",))
+    view.upload_button.invoke()
     finish(ui, tab)
     assert not tab.tree.get_children()
-    assert tab.stage_tabs.tab(tab.stage_pages["待更新"], "text") == "待更新（0）"
+    assert tab.stage_tabs.tab(tab.stage_pages["待共享参考"], "text") == "待共享参考（0）"
     assert all(sample.key not in tab.samples for sample in (first, second))
     assert destination.read_bytes() == before
     assert all(not sample.directory.exists() for sample in (first, second))
@@ -2270,7 +2293,7 @@ def test_catalog_search_and_upload_archive_clean_images(review_ui, monkeypatch):
     assert tab.master.select() == str(tab.library_tab) and not tab.review_tools.winfo_ismapped()
     tab.master.select(tab)
     ui.update()
-    assert tab.filter_var.get() == "待更新" and tab.body_panes.winfo_ismapped()
+    assert tab.filter_var.get() == "待共享参考" and tab.body_panes.winfo_ismapped()
 
 
 def test_legacy_trial_is_visible_pending_and_can_be_approved(review_ui):
@@ -2399,7 +2422,7 @@ def test_catalog_clear_confirmation_keeps_counts_when_cancelled_or_selection_cha
         tab.set_running(False)
 
 
-def test_catalog_zero_clear_shows_feedback_and_checkboxes_own_highlight(review_ui, monkeypatch):
+def test_catalog_current_card_highlight_is_independent_of_checkboxes(review_ui, monkeypatch):
     from crX.utils import reference_hits as hits
 
     ui, tab, add, _destination = review_ui
@@ -2429,9 +2452,24 @@ def test_catalog_zero_clear_shows_feedback_and_checkboxes_own_highlight(review_u
     view.clear_cards_button.invoke()
     assert len(feedback) == 1 and "均为 0" in feedback[0][1]
     assert not confirmations and hits.snapshot(tab.root) == before
+    view.query.set("")
+    view.cards.see("giant")
+    ui.update()
+    x, y, width, height = view.cards.bbox("giant", "card")
+    view.cards.event_generate("<Button-1>", x=x + width // 2, y=y + height // 2)
+    ui.update()
+    assert view.cards.selection() == ("knight",) and view.selected_cards() == ("knight",)
+    assert view.cards.item("giant", "tags") == ("viewing",)
+    assert not view.cards.item("knight", "tags")
+    assert view.cards.focus() == "giant" and "巨人" in view.title.get()
+    view.cards.see("knight")
+    ui.update()
+    x, y, width, height = view.cards.bbox("knight", "#0")
     view.cards.event_generate("<Button-1>", x=x + width // 2, y=y + height // 2)
     ui.update()
     assert not view.cards.selection() and not view.selected_cards()
+    assert view.cards.item("knight", "tags") == ("viewing",)
+    assert not view.cards.item("giant", "tags")
 
 
 def test_catalog_clear_and_global_metadata_upload(review_ui, monkeypatch):
@@ -2501,10 +2539,10 @@ def test_catalog_clear_and_global_metadata_upload(review_ui, monkeypatch):
     monkeypatch.setattr("crX.interface.card_review.upload_references", upload)
     view.upload_button.invoke()
     finish(ui, tab)
-    assert {"knight", "giant"}.issubset(calls[0][2]["metadata_cards"])
-    assert tab.library_upload.status.get() == "上传完成"
+    assert {"knight", "giant"}.issubset(calls[0][2]["sync_cards"])
+    assert tab.library_upload.status.get().startswith("上传完成 · 已上传 ")
     assert tab.library_upload.result == "已上传顺序与命中次数"
-    assert not tab.review_upload.winfo_manager()
+    assert not hasattr(tab, "review_upload")
     view._check_all_cards()
     view.query.set("no-such-card")
     ui.update()
@@ -2575,7 +2613,7 @@ def test_sample_deletion_preserves_formal_and_only_deletes_selected_rows(review_
     tab.stage_buttons["confirm"].invoke()
     finish(ui, tab)
     before = destination.read_bytes()
-    switch(ui, tab, "待更新")
+    switch(ui, tab, "待共享参考")
     monkeypatch.setattr("crX.interface.card_review.messagebox.askyesno", lambda *args, **kwargs: True)
     tab.clear_button.invoke()
     finish(ui, tab)

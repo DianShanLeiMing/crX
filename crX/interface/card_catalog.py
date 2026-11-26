@@ -186,6 +186,7 @@ class CardCatalogView(ttk.Frame):
         size = max(16, Font(root=self, font="TkDefaultFont").metrics("linespace"))
         style.configure("CatalogCards.CardSamples.Treeview", rowheight=max(34, size + 14))
         self.cards.configure(style="CatalogCards.CardSamples.Treeview")
+        self.cards.tag_configure("viewing", background=style.colors.secondary, foreground=style.colors.selectfg)
         style.layout(
             "CatalogCards.CardSamples.Treeview.Item",
             [
@@ -513,12 +514,26 @@ class CardCatalogView(ttk.Frame):
     def modified_cards(self):
         return tuple(card for card, refs in self.data.items() if any(ref.changed for ref in refs))
 
+    def locate_card(self, card):
+        if card in self.data:
+            self._card = card
+            self.query.set("")
+            self.cards.see(card)
+
+    def select_cards(self, cards):
+        selected = tuple(card for card in cards if card in self.data)
+        self._checked_cards = set(selected)
+        if selected:
+            self._card = selected[0]
+        self.query.set("")
+        self._refresh_checks()
+        if selected:
+            self.cards.see(selected[0])
+
     def check_modified_cards(self):
         cards = self.modified_cards()
         if cards:
-            self.query.set("")
-            self._checked_cards = set(cards)
-            self._refresh_checks()
+            self.select_cards(cards)
         return cards
 
     def selected_card_references(self):
@@ -558,7 +573,9 @@ class CardCatalogView(ttk.Frame):
             has_deleted = any(ref.deleted for ref in self.data[card])
             changed = "both" if has_new and has_deleted else "delete" if has_deleted else has_new
             self.cards.item(
-                card, image=self._card_images[card in self._checked_cards, disabled or not self.data[card], changed]
+                card,
+                image=self._card_images[card in self._checked_cards, disabled or not self.data[card], changed],
+                tags=("viewing",) if card == self._card else (),
             )
         if disabled:
             self._cancel_drag()
