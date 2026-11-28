@@ -86,12 +86,14 @@
       "numbers": {
         "67484c720518531f": 0,
         "74ab686c7256de2b": 1,
-        "bc1fba216c57c893": 2
+        "bc1fba216c57c893": 2,
+        "a15be11fefb2c533": 3
       },
       "order": [
         "67484c720518531f",
         "74ab686c7256de2b",
-        "bc1fba216c57c893"
+        "bc1fba216c57c893",
+        "a15be11fefb2c533"
       ]
     },
     "barb_hut": {
@@ -586,14 +588,16 @@
         "fc3b1875c2768888": 1,
         "b528dc7dbc5e3529": 2,
         "ac834304fb3258d8": 3,
-        "604767fdadfdc97f": 4
+        "604767fdadfdc97f": 4,
+        "6c3494cf066f8f02": 5
       },
       "order": [
         "05d24b4229b31750",
         "fc3b1875c2768888",
         "b528dc7dbc5e3529",
         "ac834304fb3258d8",
-        "604767fdadfdc97f"
+        "604767fdadfdc97f",
+        "6c3494cf066f8f02"
       ]
     },
     "fisherman": {
@@ -1015,10 +1019,12 @@
     "knight": {
       "preferred": "87e2cd11d899becc",
       "numbers": {
-        "87e2cd11d899becc": 0
+        "87e2cd11d899becc": 0,
+        "9561d824cc83af8b": 1
       },
       "order": [
-        "87e2cd11d899becc"
+        "87e2cd11d899becc",
+        "9561d824cc83af8b"
       ]
     },
     "lava_hound": {
